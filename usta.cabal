@@ -1,0 +1,17 @@
+cabal-version: 3.0
+name: usta
+version: 0.1.0.0
+synopsis: A native desktop client for code forges
+license: Apache-2.0
+license-file: LICENSE
+author: Asliddin Abdivasiyev
+maintainer: asliddin.abdivasiyev@gmail.com
+category: Development
+build-type: Simple
+
+executable usta
+  main-is: Main.hs
+  hs-source-dirs: app
+  build-depends: base
+  default-language: GHC2021
+  ghc-options: -Wall

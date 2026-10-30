@@ -14,6 +14,15 @@ Screenshots are in [design/](design/).
 - **Quiet look.** Neutral grays, one accent color, color only where it
   carries meaning (status, diff lines).
 
+## Logo
+
+An anvil with three sparks: usta means master craftsman. The source is
+[design/logo.svg](design/logo.svg) (64 × 64 grid). The tile is always
+`#2F5FD0` with a white anvil and `#F2C25C` sparks, in both themes; the
+wordmark next to it is Inter Bold in the `text` color.
+
+![Logo concepts, B chosen](design/logo-concepts.png)
+
 ## Typography
 
 | Use | Font |
@@ -162,6 +171,35 @@ Dark screens use the same layouts with the dark token values.
     Saved as a draft when offline.
 
     ![New issue](design/new-issue.png)
+
+## Loading states
+
+Cached data always shows first. Loading UI appears only when there is
+nothing local to show yet.
+
+1. Never blank a screen that has cached data; refresh in place.
+2. Show skeletons only after 300 ms, so fast loads never flicker.
+3. Skeletons match the real layout, so nothing jumps when data lands.
+4. Show a percentage when the size is known (git fetch); otherwise a thin
+   moving bar under the header.
+5. With reduced motion, the shimmer and spinners stop moving.
+
+The sync status in the header has four states: synced, syncing (spinner
+with progress), offline (showing cached data) and sync failed (with
+Retry).
+
+![Loading patterns](design/loading-patterns.png)
+
+**First sync.** The inbox fills in as notifications arrive; each forge
+shows its own sync state in the sidebar.
+
+![Inbox, first sync](design/inbox-first-sync.png)
+
+**Large diffs.** The file list comes from the forge API first, while the
+branch is fetched into the local mirror with a progress bar. Files render
+as soon as they are available, and the ones in view render first.
+
+![Large diff loading](design/large-diff-loading.png)
 
 ## Keyboard shortcuts
 

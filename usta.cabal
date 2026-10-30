@@ -15,6 +15,8 @@ executable usta
   build-depends:
     base,
     gi-gtk4,
+    gi-glib,
+    haskell-gi-base
 
   default-language: GHC2021
   ghc-options: -Wall

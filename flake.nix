@@ -21,7 +21,7 @@
           src = pkgs.lib.cleanSource ./.;
           isLibrary = false;
           isExecutable = true;
-          executableHaskellDepends = with hsPkgs; [ base ];
+          executableHaskellDepends = with hsPkgs; [ base gi-gtk4 ];
           license = pkgs.lib.licenses.asl20;
           mainProgram = "usta";
         };

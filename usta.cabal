@@ -19,7 +19,10 @@ executable usta
     Usta.UI.Components.Avatar
     Usta.UI.Components.Badge
     Usta.UI.Components.Button
+    Usta.UI.Components.Card
     Usta.UI.Components.Icon
+    Usta.UI.Components.NavItem
+    Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcut
     Usta.UI.Style
 

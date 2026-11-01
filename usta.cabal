@@ -11,7 +11,15 @@ build-type: Simple
 
 executable usta
   main-is: Main.hs
-  hs-source-dirs: app
+  hs-source-dirs:
+    app
+    src
+
+  other-modules:
+    Usta.UI.Components.Badge
+    Usta.UI.Components.Button
+    Usta.UI.Style
+
   build-depends:
     base,
     gi-glib,

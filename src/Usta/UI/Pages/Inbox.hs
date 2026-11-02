@@ -1,0 +1,326 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedLabels #-}
+
+-- | The inbox: notifications from every forge on the left, the selected
+-- one previewed on the right.
+module Usta.UI.Pages.Inbox
+  ( Kind (..)
+  , Reason (..)
+  , Change (..)
+  , Notification (..)
+  , sample
+  , new
+  , css
+  ) where
+
+import Control.Monad (forM, forM_, void, when)
+import qualified Data.GI.Base as GI
+import Data.GI.Base (AttrOp ((:=)))
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Maybe (isJust)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
+
+import qualified Usta.UI.Components.Badge as Badge
+import qualified Usta.UI.Components.Button as Button
+import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.Forge as Forge
+import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.Segmented as Segmented
+import Usta.UI.Style (Tone (..))
+
+data Kind = PullRequest | MergedPullRequest | Issue
+  deriving (Eq, Show)
+
+-- | Why a notification is in the inbox. Add a constructor and its label
+-- and tone to introduce a new one.
+data Reason = ReviewRequested | ChecksFailed | Mentioned | Assigned | WasMerged
+  deriving (Eq, Show, Enum, Bounded)
+
+reasonBadge :: Reason -> (Tone, Text)
+reasonBadge reason = case reason of
+  ReviewRequested -> (Warning, "Review requested")
+  ChecksFailed -> (Danger, "Checks failed")
+  Mentioned -> (Accent, "Mentioned")
+  Assigned -> (Neutral, "Assigned")
+  WasMerged -> (Merged, "Merged")
+
+-- | A changed file: path, lines added, lines removed.
+data Change = Change Text Int Int
+
+data Notification = Notification
+  { kind :: Kind
+  , forge :: Forge.Kind
+  , repo :: Text
+  , number :: Int
+  , title :: Text
+  , reason :: Reason
+  , unread :: Bool
+  , age :: Text
+  , branch :: Maybe (Text, Text)
+    -- ^ Source and target branch, for pull requests.
+  , opened :: Text
+  , checks :: Maybe (Tone, Text)
+  , review :: Maybe (Tone, Text)
+  , changes :: [Change]
+  }
+
+data Filter = All | Unread | Participating
+  deriving (Eq, Enum, Bounded)
+
+keeps :: Filter -> Notification -> Bool
+keeps f n = case f of
+  All -> True
+  Unread -> unread n
+  Participating -> reason n `elem` [ReviewRequested, Mentioned, Assigned]
+
+new :: [Notification] -> IO Gtk.Box
+new notifications = do
+  page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
+
+  previewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
+
+  list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeSingle
+                             , #cssClasses := ["u-inbox-list"]
+                             ]
+  rows <- forM notifications $ \n -> do
+    row <- GI.new Gtk.ListBoxRow [#child GI.:=> notificationRow n]
+    #append list row
+    pure (row, n)
+
+  void $ GI.on list #rowSelected $ \selected ->
+    forM_ selected $ \row -> do
+      index <- Gtk.listBoxRowGetIndex row
+      when (index >= 0 && fromIntegral index < length notifications) $ do
+        content <- preview (notifications !! fromIntegral index)
+        GI.set previewScroll [#child := content]
+
+  (filters, buttons) <- Segmented.new ["All", "Unread", "Participating"] 0
+  countLabel <- GI.new Gtk.Label [ #cssClasses := ["muted", "count"]
+                                 , #hexpand := True
+                                 , #halign := Gtk.AlignEnd
+                                 ]
+  current <- newIORef All
+  let apply f = do
+        writeIORef current f
+        Gtk.listBoxInvalidateFilter list
+        let shown = length (filter (keeps f) notifications)
+        GI.set countLabel [#label := T.pack (show shown) <> " items"]
+  Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
+    f <- readIORef current
+    index <- Gtk.listBoxRowGetIndex row
+    pure (keeps f (notifications !! fromIntegral index))
+  forM_ (zip [minBound ..] buttons) $ \(f, button) ->
+    void $ GI.on button #toggled $ do
+      active <- GI.get button #active
+      when active (apply f)
+  apply All
+
+  filterBar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                              , #cssClasses := ["u-filter-bar"]
+                              ]
+  #append filterBar filters
+  #append filterBar countLabel
+
+  listScroll <- GI.new Gtk.ScrolledWindow [ #child := list
+                                          , #vexpand := True
+                                          , #hscrollbarPolicy := Gtk.PolicyTypeNever
+                                          ]
+  listPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                             , #widthRequest := 460
+                             , #hexpand := False
+                             , #cssClasses := ["u-inbox-pane"]
+                             ]
+  #append listPane filterBar
+  #append listPane listScroll
+
+  #append page listPane
+  #append page previewScroll
+
+  case rows of
+    (first, _) : _ -> Gtk.listBoxSelectRow list (Just first)
+    [] -> pure ()
+  pure page
+
+notificationRow :: Notification -> IO Gtk.Box
+notificationRow n = do
+  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
+
+  icon <- case kind n of
+    PullRequest -> Icon.toned 16 Success Icon.PullRequest
+    MergedPullRequest -> Icon.toned 16 Merged Icon.PullRequest
+    Issue -> Icon.toned 16 Neutral Icon.Issue
+  GI.set icon [#valign := Gtk.AlignStart, #marginTop := 2]
+  #append row icon
+
+  body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #spacing := 4
+                         , #hexpand := True
+                         ]
+  meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+  Forge.smallDot (forge n) >>= #append meta
+  label (repo n) ["meta", "mono"] >>= #append meta
+  label ("#" <> T.pack (show (number n))) ["meta"] >>= #append meta
+  ageLabel <- label (age n) ["meta"]
+  GI.set ageLabel [#hexpand := True, #halign := Gtk.AlignEnd]
+  #append meta ageLabel
+  #append body meta
+
+  titleLabel <- label (title n) (["title"] <> ["unread" | unread n])
+  GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
+  #append body titleLabel
+
+  badges <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  let (tone, text) = reasonBadge (reason n)
+  Badge.new tone text >>= #append badges
+  when (unread n) $ Badge.dot Accent >>= #append badges
+  #append body badges
+
+  #append row body
+  pure row
+
+preview :: Notification -> IO Gtk.Box
+preview n = do
+  pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #spacing := 20
+                         , #cssClasses := ["u-preview"]
+                         ]
+
+  header <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+  meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  label (repo n) ["muted", "mono"] >>= #append meta
+  label ("#" <> T.pack (show (number n))) ["muted"] >>= #append meta
+  stateBadge >>= #append meta
+  #append header meta
+  titleLabel <- label (title n) ["preview-title"]
+  GI.set titleLabel [#wrap := True]
+  #append header titleLabel
+  forM_ (branch n) $ \(from, into) -> do
+    line <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+    label from ["chip", "mono"] >>= #append line
+    label "into" ["muted"] >>= #append line
+    label into ["chip", "mono"] >>= #append line
+    label ("· " <> opened n) ["muted"] >>= #append line
+    #append header line
+  when (branch n == Nothing) $ label (opened n) ["muted"] >>= #append header
+  #append pane header
+
+  when (isJust (checks n) || isJust (review n) || not (null (changes n))) $ do
+    stats <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                            , #spacing := 12
+                            , #homogeneous := True
+                            ]
+    forM_ (checks n) $ \(tone, text) -> Card.stat tone "Checks" text >>= #append stats
+    when (not (null (changes n))) $ changesCard (changes n) >>= #append stats
+    forM_ (review n) $ \(tone, text) -> Card.stat tone "Your review" text >>= #append stats
+    #append pane stats
+
+  when (not (null (changes n))) $ do
+    files <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+    Card.sectionTitle "Files" >>= #append files
+    card <- Card.new
+    forM_ (changes n) $ \(Change path added removed) -> do
+      fileRow <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                                , #spacing := 6
+                                , #cssClasses := ["file-row"]
+                                ]
+      pathLabel <- label path ["mono"]
+      GI.set pathLabel [#hexpand := True]
+      #append fileRow pathLabel
+      label ("+" <> T.pack (show added)) ["mono", "added"] >>= #append fileRow
+      label ("−" <> T.pack (show removed)) ["mono", "removed"] >>= #append fileRow
+      #append card fileRow
+    #append files card
+    #append pane files
+
+  actions <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  let primary = if kind n == Issue then "Open issue" else "Open review"
+  Button.new Button.defaults { Button.label = Just primary, Button.variant = Button.Primary }
+    >>= #append actions
+  Button.new Button.defaults { Button.label = Just "Mark as done" } >>= #append actions
+  Button.new Button.defaults { Button.label = Just "Open in browser" } >>= #append actions
+  #append pane actions
+
+  pure pane
+  where
+    stateBadge = case kind n of
+      PullRequest -> Badge.new Success "Open"
+      MergedPullRequest -> Badge.new Merged "Merged"
+      Issue -> Badge.new Success "Open"
+
+changesCard :: [Change] -> IO Gtk.Box
+changesCard cs = do
+  card <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #spacing := 4
+                         , #cssClasses := ["u-card", "u-stat"]
+                         ]
+  label "Changes" ["caption"] >>= #append card
+  value <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4]
+  let added = sum [a | Change _ a _ <- cs]
+      removed = sum [r | Change _ _ r <- cs]
+      count = length cs
+      noun = if count == 1 then " file" else " files"
+  label ("+" <> T.pack (show added)) ["value", "added"] >>= #append value
+  label ("−" <> T.pack (show removed)) ["value", "removed"] >>= #append value
+  label ("in " <> T.pack (show count) <> noun) ["value"] >>= #append value
+  #append card value
+  pure card
+
+label :: Text -> [Text] -> IO Gtk.Label
+label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
+
+sample :: [Notification]
+sample =
+  [ pr Forge.GitHub "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" ReviewRequested True "5m"
+      ("feat/gtk4-dep", "master") "opened 5 min ago"
+      (Just (Success, "1 of 1 passed")) (Just (Warning, "Requested"))
+      [Change "usta.cabal" 3 1, Change "flake.nix" 1 1]
+  , pr Forge.Forgejo "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" ChecksFailed True "22m"
+      ("cache-priorities", "master") "opened 22 min ago"
+      (Just (Danger, "1 of 2 failed")) (Just (Warning, "Requested"))
+      [Change "modules/cache.nix" 12 4]
+  , issue Forge.GitHub "abdivasiyev/usta" 3 "Diff view: keep scroll position when switching files" Mentioned True "1h"
+  , merged Forge.GitHub "abdivasiyev/usta" 1 "feat: scaffold Nix flake and Hello world app" "3h"
+  , issue Forge.Forgejo "abdivasiyev/nix" 12 "Restart nix-daemon after substituter changes" Assigned False "Yesterday"
+  , pr Forge.Forgejo "abdivasiyev/homelab" 47 "feat: add binary cache health check" ReviewRequested False "Yesterday"
+      ("cache-health", "master") "opened yesterday"
+      (Just (Warning, "Running")) (Just (Warning, "Requested"))
+      [Change "modules/cache-health.nix" 40 0, Change "hosts/homelab.nix" 2 0]
+  , issue Forge.GitHub "abdivasiyev/usta" 4 "Support GitLab merge request discussions" Assigned False "Mon"
+  ]
+  where
+    pr f r num t why new' ago br op ch rv cs =
+      Notification PullRequest f r num t why new' ago (Just br) op ch rv cs
+    merged f r num t ago =
+      Notification MergedPullRequest f r num t WasMerged False ago Nothing ("merged " <> ago <> " ago") Nothing Nothing []
+    issue f r num t why new' ago =
+      Notification Issue f r num t why new' ago Nothing ("opened " <> ago <> " ago") Nothing Nothing []
+
+css :: Text
+css = mconcat
+  [ "box.u-inbox-pane { background: var(--surface); border-right: 1px solid var(--border); }"
+  , "box.u-filter-bar { padding: 10px 12px; border-bottom: 1px solid var(--border); }"
+  , "box.u-filter-bar label.count { font-size: 12px; }"
+  , "list.u-inbox-list { background: var(--surface); }"
+  , "list.u-inbox-list row {"
+  , "  padding: 12px 16px; border-bottom: 1px solid var(--border-subtle);"
+  , "  background: var(--surface); color: var(--text);"
+  , "}"
+  , "list.u-inbox-list row:hover { background: var(--window); }"
+  , "list.u-inbox-list row:selected {"
+  , "  background: var(--selected); color: var(--text); box-shadow: inset 3px 0 0 var(--accent);"
+  , "}"
+  , "list.u-inbox-list label.meta { font-size: 12px; color: var(--text-muted); }"
+  , "list.u-inbox-list label.title.unread { font-weight: 600; }"
+  , "box.u-preview { padding: 24px 32px; }"
+  , "box.u-preview label.preview-title { font-size: 22px; font-weight: 600; }"
+  , "box.u-preview label.chip {"
+  , "  background: var(--neutral-bg); color: var(--text); padding: 1px 6px; border-radius: 4px;"
+  , "}"
+  , "box.u-preview box.file-row { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }"
+  , "box.u-preview box.file-row:last-child { border-bottom: none; }"
+  , "label.added { color: var(--success); }"
+  , "label.removed { color: var(--danger); }"
+  ]

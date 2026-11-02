@@ -21,7 +21,9 @@ import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.SearchField as SearchField
+import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
+import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Style (Tone (..))
@@ -33,9 +35,12 @@ build app = do
 
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
-    -- Each page gets its own screen next; until then a placeholder.
-    placeholder <- GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
-    void $ Gtk.stackAddNamed pages placeholder (Just (Sidebar.pageName page))
+    content <- case page of
+      Sidebar.Inbox -> Inbox.new Inbox.sample >>= Gtk.toWidget
+      -- The other pages get their screens next; until then a placeholder.
+      _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
+             >>= Gtk.toWidget
+    void $ Gtk.stackAddNamed pages content (Just (Sidebar.pageName page))
 
   sidebar <- Sidebar.new Sidebar.sample Sidebar.Inbox $ \page ->
     Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
@@ -117,7 +122,7 @@ headerBar platform = do
 styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
-  , SearchField.css, Shortcut.css, Sidebar.css
+  , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css
   , windowCss
   ]
 

@@ -7,16 +7,19 @@ module Usta.UI.Window
   ( build
   ) where
 
-import Control.Monad (forM_, void)
+import Control.Monad (forM_, join, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.CommandPalette as CommandPalette
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.NavItem as NavItem
@@ -60,10 +63,13 @@ build app = do
           >>= Gtk.toWidget >>= showDetail
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
       openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
+      openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
       -- Adding an account needs the sign-in flow, which comes later.
       openSettings = Settings.new backToMain (pure ()) (Settings.sample shortcuts) >>= showDetail
 
-  header <- headerBar Platform.current openSettings
+  -- The palette wraps the whole window, so it exists only further down.
+  paletteOpener <- newIORef (pure ())
+  header <- headerBar Platform.current openSettings (join (readIORef paletteOpener))
 
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
@@ -77,13 +83,12 @@ build app = do
         PullRequests.new openNewPullRequest (openPullRequest "Pull requests" . summaryOf)
           PullRequests.sample
           >>= Gtk.toWidget
-      Sidebar.Issues -> do
-        let openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
+      Sidebar.Issues ->
         Issues.new openNewIssue (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget
       -- The forms open with sample fields until they take the repository.
-      Sidebar.Repositories -> do
-        let openNewIssue _ = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
-        Repositories.new openNewIssue (const openNewPullRequest) Repositories.sample >>= Gtk.toWidget
+      Sidebar.Repositories ->
+        Repositories.new (const openNewIssue) (const openNewPullRequest) Repositories.sample
+          >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -109,12 +114,41 @@ build app = do
   -- stops GTK from adding its own.
   noTitlebar <- GI.new Gtk.Box [#visible := False]
 
+  let showPage page = backToMain >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
+      paletteModel = do
+        settings <- Gtk.settingsGetDefault
+        scheme <- maybe (pure Gtk.InterfaceColorSchemeDefault) (`GI.get` #gtkInterfaceColorScheme) settings
+        let (themeTitle, nextScheme)
+              | scheme == Gtk.InterfaceColorSchemeDark = ("Switch to light theme", Gtk.InterfaceColorSchemeLight)
+              | otherwise = ("Switch to dark theme", Gtk.InterfaceColorSchemeDark)
+            keys = Platform.shortcut Platform.current
+            command title detail action = CommandPalette.Item CommandPalette.Command title detail action
+            commands =
+              [ command "Sync now" (keys "R") (pure ())
+              , command "New pull request" (keys "Shift P") openNewPullRequest
+              , command "New issue" (keys "Shift I") openNewIssue
+              , command "Add forge account" "" (pure ())
+              , command "Open settings" (keys ",") openSettings
+              , command themeTitle "" $
+                  forM_ settings $ \s -> GI.set s [#gtkInterfaceColorScheme := nextScheme]
+              ]
+            pullRequests = map (paletteItem openPullRequest) PullRequests.sample
+            issues = map (issueItem openIssue) Issues.sample
+            repositories = map (repositoryItem (showPage Sidebar.Repositories)) Repositories.sample
+        pure CommandPalette.Model
+          { CommandPalette.recent = take 1 pullRequests <> take 1 issues <> take 1 (drop 1 repositories)
+          , CommandPalette.items = pullRequests <> issues <> repositories <> commands
+          }
+  rootWidget <- Gtk.toWidget root
+  (withPalette, openPalette) <- CommandPalette.new rootWidget paletteModel
+  writeIORef paletteOpener openPalette
+
   window <- GI.new Gtk.ApplicationWindow [ #application := app
                                          , #title := "usta"
                                          , #defaultWidth := 1280
                                          , #defaultHeight := 800
                                          , #titlebar := noTitlebar
-                                         , #child := root
+                                         , #child := withPalette
                                          , #cssClasses := ["usta"]
                                          ]
   Gtk.toWidget window >>= \w -> Style.install w styles
@@ -204,6 +238,22 @@ issueDetail i = Issue.Model
   , Issue.linkedPullRequests = ["#6 feat: render main window with GTK4"]
   }
 
+-- | "usta #2" from "abdivasiyev/usta" and 2.
+shortRef :: Text -> Int -> Text
+shortRef repo number = T.drop 1 (T.dropWhile (/= '/') repo) <> " #" <> T.pack (show number)
+
+paletteItem :: (Text -> PullRequest.Summary -> IO ()) -> PullRequests.PullRequest -> CommandPalette.Item
+paletteItem open pr = CommandPalette.Item CommandPalette.PullRequest (PullRequests.title pr)
+  (shortRef (PullRequests.repo pr) (PullRequests.number pr)) (open "Back" (summaryOf pr))
+
+issueItem :: (Text -> Issue.Model -> IO ()) -> Issues.Issue -> CommandPalette.Item
+issueItem open i = CommandPalette.Item CommandPalette.Issue (Issues.title i)
+  (shortRef (Issues.repo i) (Issues.number i)) (open "Back" (issueDetail i))
+
+repositoryItem :: IO () -> Repositories.Repository -> CommandPalette.Item
+repositoryItem open r = CommandPalette.Item CommandPalette.Repository (Repositories.name r)
+  (Repositories.host r) open
+
 summaryOf :: PullRequests.PullRequest -> PullRequest.Summary
 summaryOf pr = PullRequest.Summary
   { PullRequest.forge = PullRequests.forge pr
@@ -227,8 +277,8 @@ shortcuts :: [(Text, Text)]
 shortcuts =
   [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
 
-headerBar :: Platform.Platform -> IO () -> IO Gtk.HeaderBar
-headerBar platform onSettings = do
+headerBar :: Platform.Platform -> IO () -> IO () -> IO Gtk.HeaderBar
+headerBar platform onSettings onSearch = do
   header <- GI.new Gtk.HeaderBar [#cssClasses := ["u-header"]]
   Platform.configureHeaderBar platform header
 
@@ -241,8 +291,14 @@ headerBar platform onSettings = do
   GI.new Gtk.Label [#label := "usta", #cssClasses := ["brand"]] >>= #append brand
   #packStart header brand
 
-  (search, _) <- SearchField.new SearchField.defaults
+  (search, entry) <- SearchField.new SearchField.defaults
     { SearchField.shortcut = Just (Platform.shortcut platform "K") }
+  -- The field only opens the palette, where the searching happens.
+  GI.set entry [#canFocus := False]
+  void $ GI.on entry #activate onSearch
+  click <- GI.new Gtk.GestureClick []
+  void $ GI.on click #pressed $ \_ _ _ -> onSearch
+  Gtk.widgetAddController search click
   #packStart header search
 
   sync <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
@@ -275,7 +331,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css, Repositories.css, Settings.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css
   , windowCss
   ]
 

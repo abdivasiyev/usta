@@ -7,6 +7,7 @@ module Usta.UI.Window
   ( build
   ) where
 
+import Control.Monad (forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
@@ -15,10 +16,13 @@ import qualified GI.Gtk as Gtk
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
+import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Platform as Platform
+import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Style as Style
 
@@ -26,8 +30,18 @@ build :: Gtk.Application -> IO Gtk.ApplicationWindow
 build app = do
   header <- headerBar Platform.current
 
-  -- Pages are added here next.
-  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
+  pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
+  forM_ [minBound .. maxBound] $ \page -> do
+    -- Each page gets its own screen next; until then a placeholder.
+    placeholder <- GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
+    void $ Gtk.stackAddNamed pages placeholder (Just (Sidebar.pageName page))
+
+  sidebar <- Sidebar.new Sidebar.sample Sidebar.Inbox $ \page ->
+    Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
+
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True]
+  #append body sidebar
+  #append body pages
 
   footer <- Shortcut.bar
     [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
@@ -101,7 +115,8 @@ headerBar platform = do
 
 styles :: [Text]
 styles =
-  [ Avatar.css, Badge.css, Button.css, Icon.css, SearchField.css, Shortcut.css
+  [ Avatar.css, Badge.css, Button.css, Card.css, Icon.css, NavItem.css
+  , SearchField.css, Shortcut.css, Sidebar.css
   , windowCss
   ]
 

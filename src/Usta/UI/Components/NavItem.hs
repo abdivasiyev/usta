@@ -23,7 +23,9 @@ data Config = Config
   { label :: Text
   , count :: Maybe Int
   , dot :: Maybe Tone
-    -- ^ A leading colored dot, e.g. for forges.
+    -- ^ A leading dot colored by a tone.
+  , leading :: Maybe Gtk.Widget
+    -- ^ Any leading widget, e.g. a forge's own colored dot or an icon.
   , active :: Bool
   , mono :: Bool
     -- ^ Monospace, for repository names.
@@ -36,6 +38,7 @@ defaults = Config
   { label = ""
   , count = Nothing
   , dot = Nothing
+  , leading = Nothing
   , active = False
   , mono = False
   , link = False
@@ -45,7 +48,8 @@ new :: Config -> IO Gtk.Button
 new cfg = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   forM_ (dot cfg) $ \tone -> Badge.dot tone >>= #append row
-  text <- GI.new Gtk.Label [#label := label cfg, #xalign := 0, #hexpand := True]
+  forM_ (leading cfg) $ #append row
+  text <-GI.new Gtk.Label [#label := label cfg, #xalign := 0, #hexpand := True]
   when (mono cfg) $ Gtk.widgetAddCssClass text "mono"
   #append row text
   forM_ (count cfg) $ \n -> do

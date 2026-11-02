@@ -152,26 +152,58 @@ summaryText run = case status run of
     isFailure _ = False
 
 -- | A dark, numbered log. Steps are highlighted, error lines marked.
+--
+-- Each step is a section that opens and closes from its header. Steps
+-- that failed start open, the rest closed. Line numbers count every line,
+-- so they stay the same whichever steps are open.
 logView :: [LogLine] -> IO Gtk.ScrolledWindow
 logView ls = do
   lines' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-log"]]
-  forM_ (zip [1 :: Int ..] ls) $ \(n, l) -> do
-    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["log-line", kind l]]
-    number <- GI.new Gtk.Label [ #label := T.pack (show n)
-                               , #xalign := 1
-                               , #widthRequest := 48
-                               , #cssClasses := ["log-number"]
-                               ]
-    #append row number
-    text <- label (body l) ["log-text"]
-    GI.set text [#selectable := True, #hexpand := True]
-    #append row text
-    #append lines' row
+  let (before, steps) = sections (zip [1 :: Int ..] ls)
+  forM_ before $ \(n, l) -> logLine n l >>= #append lines'
+  forM_ steps $ \((n, title), stepLines) -> do
+    let failed = any (isFailure . snd) stepLines
+    content <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                              , #visible := failed
+                              ]
+    forM_ stepLines $ \(m, l) -> logLine m l >>= #append content
+
+    arrow <- label (if failed then "▾" else "▸") ["log-arrow"]
+    header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+    number n >>= #append header
+    #append header arrow
+    stepTitle <- label title ["log-text"]
+    GI.set stepTitle [#hexpand := True]
+    #append header stepTitle
+    button <- GI.new Gtk.Button [ #child := header
+                                , #hasFrame := False
+                                , #cssClasses := ["log-step"] <> ["failed" | failed]
+                                ]
+    void $ GI.on button #clicked $ do
+      open <- GI.get content #visible
+      GI.set content [#visible := not open]
+      GI.set arrow [#label := if open then "▸" else "▾"]
+    #append lines' button
+    #append lines' content
   GI.new Gtk.ScrolledWindow [ #child := lines'
                             , #vexpand := True
                             , #cssClasses := ["log-scroll"]
                             ]
   where
+    logLine n l = do
+      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["log-line", kind l]]
+      number n >>= #append row
+      text <- label (body l) ["log-text"]
+      GI.set text [#selectable := True, #hexpand := True]
+      #append row text
+      pure row
+    number n = GI.new Gtk.Label [ #label := T.pack (show n)
+                                , #xalign := 1
+                                , #widthRequest := 48
+                                , #cssClasses := ["log-number"]
+                                ]
+    isFailure (Failure _) = True
+    isFailure _ = False
     kind l = case l of
       Step _ -> "step"
       Output _ -> "out"
@@ -183,6 +215,19 @@ logView ls = do
       Failure t -> t
       Note t -> t
 
+-- | Lines before the first step, then each step's numbered title with the
+-- lines that belong to it.
+sections :: [(Int, LogLine)] -> ([(Int, LogLine)], [((Int, Text), [(Int, LogLine)])])
+sections numbered = (before, go rest)
+  where
+    (before, rest) = break (isStep . snd) numbered
+    go ((n, Step title) : more) =
+      let (body, next) = break (isStep . snd) more
+      in ((n, title), body) : go next
+    go _ = []
+    isStep (Step _) = True
+    isStep _ = False
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
@@ -190,11 +235,11 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 passing :: Model
 passing = Model "Forgejo Actions"
   [ Run "nix build" Passed "3m 24s"
-      [ Step "▸ Checkout"
+      [ Step "Checkout"
       , Output "  Fetched feat/gtk4-dep at e1c90fa"
-      , Step "▸ Install Nix"
+      , Step "Install Nix"
       , Output "  nix (Nix) 2.31.2"
-      , Step "▸ nix build"
+      , Step "nix build"
       , Output "  building '/nix/store/…-usta-0.1.0.0.drv'..."
       , Output "  usta> [1 of 2] Compiling Main"
       , Output "  usta> [2 of 2] Linking dist/build/usta/usta"
@@ -206,11 +251,11 @@ passing = Model "Forgejo Actions"
 failing :: Model
 failing = Model "Forgejo Actions"
   [ Run "nix flake check" Failed "48s"
-      [ Step "▸ Checkout"
+      [ Step "Checkout"
       , Output "  Fetched cache-priorities at 3f2a9d1"
-      , Step "▸ Install Nix"
+      , Step "Install Nix"
       , Output "  nix (Nix) 2.31.2"
-      , Step "▸ nix flake check"
+      , Step "nix flake check"
       , Output "  evaluating flake..."
       , Output "  checking NixOS configuration 'homelab'..."
       , Failure "  error:"
@@ -219,11 +264,11 @@ failing = Model "Forgejo Actions"
       , Failure "         is not of type `list of string'."
       , Failure "         Definition value: \"https://cache.nixos.org?priority=1\""
       , Failure "         defined in `modules/cache.nix', line 7"
-      , Step "▸ Upload results"
+      , Step "Upload results"
       , Note "  Process exited with code 1"
       ]
   , Run "nixfmt" Passed "6s"
-      [ Step "▸ nixfmt --check ."
+      [ Step "nixfmt --check ."
       , Output "  All files are formatted."
       , Note "  Process exited with code 0"
       ]
@@ -258,4 +303,12 @@ css = mconcat
   , "box.u-log box.log-line.step { color: #8AB4F8; }"
   , "box.u-log box.log-line.failure { background: #3A1D1D; color: #F6B4AC; }"
   , "box.u-log box.log-line.note { color: #9AA0A9; }"
+  , "box.u-log button.log-step {"
+  , "  min-height: 0; padding: 0; border: none; border-radius: 0; box-shadow: none;"
+  , "  background: transparent; background-image: none;"
+  , "  font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 400; color: #8AB4F8;"
+  , "}"
+  , "box.u-log button.log-step:hover { background: #22252B; }"
+  , "box.u-log button.log-step.failed { color: #F6B4AC; }"
+  , "box.u-log label.log-arrow { min-width: 16px; }"
   ]

@@ -8,12 +8,13 @@ module Usta.UI.Sidebar
   , pageName
   , pageTitle
   , Model (..)
+  , ForgeSync (..)
   , sample
   , new
   , css
   ) where
 
-import Control.Monad (forM, forM_, void)
+import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
@@ -55,8 +56,12 @@ pageTitle page = case page of
 data Model = Model
   { counts :: Page -> Maybe Int
   , forges :: [(Forge.Kind, Text)]
+  , forgeSync :: Text -> Maybe ForgeSync
+    -- ^ Per host, while the first sync runs.
   , pinned :: [Text]
   }
+
+data ForgeSync = ForgeSyncing | ForgeDone
 
 sample :: Model
 sample = Model
@@ -67,6 +72,7 @@ sample = Model
       Mentions -> Just 1
       _ -> Nothing
   , forges = [(Forge.GitHub, "github.com"), (Forge.Forgejo, "git.azizovich.uz")]
+  , forgeSync = const Nothing
   , pinned = ["abdivasiyev/usta", "abdivasiyev/homelab", "abdivasiyev/nix"]
   }
 
@@ -101,19 +107,31 @@ new model selected onSelect = do
   forgeGroup <- vbox 2
   Card.sectionTitle "Forges" >>= #append forgeGroup
   forM_ (forges model) $ \(kind, host) -> do
-    dot <- Forge.dot kind
-    NavItem.new NavItem.defaults { NavItem.label = host, NavItem.leading = Just dot }
-      >>= #append forgeGroup
+    let state = forgeSync model host
+    leading <- case state of
+      Just ForgeSyncing -> GI.new Gtk.Spinner [#spinning := True, #cssClasses := ["sync-spinner"]]
+                             >>= Gtk.toWidget
+      _ -> Forge.dot kind
+    item <- NavItem.new NavItem.defaults { NavItem.label = host, NavItem.leading = Just leading }
+    -- The state goes at the row's end, where counts sit on other entries.
+    forM_ state $ \s -> do
+      row <- Gtk.buttonGetChild item >>= maybe (pure Nothing) (GI.castTo Gtk.Box)
+      let (text, cls) = case s of
+            ForgeSyncing -> ("Syncing", "syncing")
+            ForgeDone -> ("Done", "done")
+      forM_ row $ \r -> GI.new Gtk.Label [#label := text, #cssClasses := ["sync-state", cls]] >>= #append r
+    #append forgeGroup item
   NavItem.new NavItem.defaults { NavItem.label = "+ Add forge", NavItem.link = True }
     >>= #append forgeGroup
   #append sidebar forgeGroup
 
-  pinnedGroup <- vbox 2
-  Card.sectionTitle "Pinned repositories" >>= #append pinnedGroup
-  forM_ (pinned model) $ \repo ->
-    NavItem.new NavItem.defaults { NavItem.label = repo, NavItem.mono = True }
-      >>= #append pinnedGroup
-  #append sidebar pinnedGroup
+  when (not (null (pinned model))) $ do
+    pinnedGroup <- vbox 2
+    Card.sectionTitle "Pinned repositories" >>= #append pinnedGroup
+    forM_ (pinned model) $ \repo ->
+      NavItem.new NavItem.defaults { NavItem.label = repo, NavItem.mono = True }
+        >>= #append pinnedGroup
+    #append sidebar pinnedGroup
 
   pure sidebar
 
@@ -122,7 +140,11 @@ vbox gap = GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 
 
 css :: Text
 css = mconcat
-  [ "box.u-sidebar {"
+  [ "box.u-sidebar label.sync-state { font-size: 13px; }"
+  , "box.u-sidebar label.sync-state.syncing { color: var(--text-muted); }"
+  , "box.u-sidebar label.sync-state.done { color: var(--success); }"
+  , "box.u-sidebar spinner.sync-spinner { min-width: 12px; min-height: 12px; color: var(--accent); }"
+  , "box.u-sidebar {"
   , "  background: var(--sidebar); border-right: 1px solid var(--border); padding: 16px 12px;"
   , "}"
   , "box.u-sidebar label.u-section-title { margin: 0 10px 6px; }"

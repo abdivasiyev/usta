@@ -4,8 +4,9 @@
 -- | The main window: header bar on top, pages in the middle, the shortcut
 -- strip at the bottom.
 module Usta.UI.Window
-  ( build
-  , buildFirstRun
+  ( Start (..)
+  , build
+  , buildAt
   ) where
 
 import Control.Monad (forM_, join, void, when)
@@ -27,6 +28,7 @@ import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Components.SyncStatus as SyncStatus
 import qualified Usta.UI.Pages.AddAccount as AddAccount
 import qualified Usta.UI.Pages.Inbox as Inbox
@@ -50,15 +52,22 @@ import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Style as Style
 
+-- | Where the app starts. Until accounts and the cache exist, the first-run
+-- states are chosen on the command line to preview them.
+data Start
+  = Ready
+    -- ^ Accounts connected and the cache filled.
+  | FirstRun
+    -- ^ No account yet: the welcome screen.
+  | FirstSync
+    -- ^ Accounts connected, the cache still empty.
+  deriving (Eq)
+
 build :: Gtk.Application -> IO Gtk.ApplicationWindow
-build = buildWith False
+build = buildAt Ready
 
--- | Starts on the welcome screen, as before any account is connected.
-buildFirstRun :: Gtk.Application -> IO Gtk.ApplicationWindow
-buildFirstRun = buildWith True
-
-buildWith :: Bool -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildWith firstRun app = do
+buildAt :: Start -> Gtk.Application -> IO Gtk.ApplicationWindow
+buildAt start app = do
   -- Two screens: "main" (sidebar and pages) and "detail" (a full-width
   -- screen such as one pull request or the new pull request form).
   screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
@@ -80,11 +89,17 @@ buildWith firstRun app = do
 
   -- The palette wraps the whole window, so it exists only further down.
   paletteOpener <- newIORef (pure ())
-  header <- headerBar Platform.current openSettings (join (readIORef paletteOpener))
+  let syncState
+        | start == FirstSync = SyncStatus.Syncing "github.com"
+        | otherwise = SyncStatus.Synced "1 min ago"
+  header <- headerBar Platform.current syncState openSettings (join (readIORef paletteOpener))
 
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
     content <- case page of
+      Sidebar.Inbox | start == FirstSync ->
+        Inbox.syncing "First sync: fetching notifications from 2 forges. Items appear as they arrive."
+          >>= Gtk.toWidget
       Sidebar.Inbox ->
         let open n
               | Inbox.kind n == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
@@ -105,7 +120,15 @@ buildWith firstRun app = do
              >>= Gtk.toWidget
     void $ Gtk.stackAddNamed pages content (Just (Sidebar.pageName page))
 
-  sidebar <- Sidebar.new Sidebar.sample Sidebar.Inbox $ \page ->
+  let sidebarModel
+        | start == FirstSync = Sidebar.sample
+            { Sidebar.counts = const Nothing
+            , Sidebar.forgeSync = \host -> Just $
+                if host == "github.com" then Sidebar.ForgeSyncing else Sidebar.ForgeDone
+            , Sidebar.pinned = []
+            }
+        | otherwise = Sidebar.sample
+  sidebar <- Sidebar.new sidebarModel Sidebar.Inbox $ \page ->
     Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
 
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True]
@@ -113,7 +136,13 @@ buildWith firstRun app = do
   #append body pages
   void $ Gtk.stackAddNamed screens body (Just "main")
 
-  footer <- Shortcut.bar shortcuts (Just "2 forges · 3 accounts")
+  footer <- if start == FirstSync
+    then do
+      bar <- Shortcut.bar [] (Just "Fetched 128 notifications")
+      note <- GI.new Gtk.Label [#label := "You can keep working: items open as soon as they are cached."]
+      Gtk.boxPrepend bar note
+      pure bar
+    else Shortcut.bar shortcuts (Just "2 forges · 3 accounts")
 
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
@@ -157,7 +186,7 @@ buildWith firstRun app = do
   -- The welcome screen covers the whole window until an account is added.
   top <- GI.new Gtk.Stack [#transitionType := Gtk.StackTransitionTypeCrossfade]
   void $ Gtk.stackAddNamed top withPalette (Just "app")
-  when firstRun $ do
+  when (start == FirstRun) $ do
     let connect kind = Gtk.toWidget top >>= \anchor ->
           AddAccount.open anchor (AddAccount.for kind) (Gtk.stackSetVisibleChildName top "app")
     welcome <- Welcome.new connect
@@ -298,8 +327,8 @@ shortcuts :: [(Text, Text)]
 shortcuts =
   [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
 
-headerBar :: Platform.Platform -> IO () -> IO () -> IO Gtk.HeaderBar
-headerBar platform onSettings onSearch = do
+headerBar :: Platform.Platform -> SyncStatus.State -> IO () -> IO () -> IO Gtk.HeaderBar
+headerBar platform syncState onSettings onSearch = do
   header <- GI.new Gtk.HeaderBar [#cssClasses := ["u-header"]]
   Platform.configureHeaderBar platform header
 
@@ -323,7 +352,7 @@ headerBar platform onSettings onSearch = do
   #packStart header search
 
   -- Retrying needs the sync engine, which comes later.
-  sync <- SyncStatus.new (SyncStatus.Synced "1 min ago") (pure ())
+  sync <- SyncStatus.new syncState (pure ())
 
   refresh <- Button.new Button.defaults
     { Button.icon = Just "view-refresh-symbolic"
@@ -351,7 +380,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css
   , windowCss
   ]
 

@@ -10,6 +10,7 @@ module Usta.UI.Pages.Inbox
   , Notification (..)
   , sample
   , new
+  , syncing
   , css
   ) where
 
@@ -29,6 +30,7 @@ import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
 
 data Kind = PullRequest | MergedPullRequest | Issue
@@ -144,6 +146,41 @@ new onOpen notifications = do
   case rows of
     (first, _) : _ -> Gtk.listBoxSelectRow list (Just first)
     [] -> pure ()
+  pure page
+
+-- | The inbox during the first sync: @note@ on top, skeleton rows and a
+-- skeleton preview until notifications arrive.
+syncing :: Text -> IO Gtk.Box
+syncing note = do
+  page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
+
+  listPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                             , #widthRequest := 460
+                             , #hexpand := False
+                             , #cssClasses := ["u-inbox-pane"]
+                             ]
+  GI.new Gtk.Label [ #label := note
+                   , #xalign := 0
+                   , #wrap := True
+                   , #cssClasses := ["u-sync-note"]
+                   ] >>= #append listPane
+  rows <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  forM_ (take 7 (cycle [330, 280, 360, 250, 310, 290, 260])) $ \w ->
+    Skeleton.listRow w >>= #append rows
+  Gtk.toWidget rows >>= Skeleton.delayed
+  #append listPane rows
+
+  previewPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                                , #spacing := 16
+                                , #hexpand := True
+                                , #cssClasses := ["u-preview"]
+                                ]
+  Skeleton.detail >>= #append previewPane
+  Skeleton.block 88 >>= #append previewPane
+  Gtk.toWidget previewPane >>= Skeleton.delayed
+
+  #append page listPane
+  #append page previewPane
   pure page
 
 notificationRow :: Notification -> IO Gtk.Box
@@ -308,6 +345,10 @@ sample =
 css :: Text
 css = mconcat
   [ "box.u-inbox-pane { background: var(--surface); border-right: 1px solid var(--border); }"
+  , "label.u-sync-note {"
+  , "  padding: 12px 16px; font-size: 14px; color: var(--text-soft);"
+  , "  border-bottom: 1px solid var(--border);"
+  , "}"
   , "box.u-filter-bar { padding: 10px 12px; border-bottom: 1px solid var(--border); }"
   , "box.u-filter-bar label.count { font-size: 12px; }"
   , "list.u-inbox-list { background: var(--surface); }"

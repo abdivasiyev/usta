@@ -24,7 +24,29 @@
         src = pkgs.lib.cleanSource ./.;
         isLibrary = false;
         isExecutable = true;
-        executableHaskellDepends = with hsPkgs; [base gi-gdk4 gi-glib gi-gtk4 gi-pango haskell-gi-base text];
+        executableHaskellDepends = with hsPkgs; [
+          aeson
+          async
+          base
+          bytestring
+          containers
+          directory
+          filepath
+          gi-gdk4
+          gi-glib
+          gi-gtk4
+          gi-pango
+          haskell-gi-base
+          http-client
+          http-client-tls
+          servant
+          servant-client
+          sqlite-simple
+          stm
+          text
+          time
+          typed-process
+        ];
         license = pkgs.lib.licenses.asl20;
         mainProgram = "usta";
       }).overrideAttrs (old: {

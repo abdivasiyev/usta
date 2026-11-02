@@ -20,9 +20,11 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.NavItem as NavItem
+import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Style as Style
 
@@ -30,7 +32,7 @@ import qualified Usta.UI.Style as Style
 styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Icon.css
-  , NavItem.css, SearchField.css, Segmented.css, Shortcut.css
+  , NavItem.css, SearchField.css, Segmented.css, Shortcut.css, Skeleton.css, Progress.css
   , galleryCss
   ]
 
@@ -102,6 +104,25 @@ build app = do
     Card.stat Neutral "Changes" "+4 −2 in 2 files" >>= #append row
     Card.stat Warning "Your review" "Requested" >>= #append row
 
+  section page "Skeletons" $ \row -> do
+    rows <- Card.new
+    GI.set rows [#widthRequest := 560, #valign := Gtk.AlignStart]
+    forM_ [300, 240, 280] $ \w -> Skeleton.listRow w >>= #append rows
+    #append row rows
+    detail <- Card.new
+    GI.set detail [#widthRequest := 360, #valign := Gtk.AlignStart]
+    Gtk.widgetAddCssClass detail "gallery-padded"
+    Skeleton.detail >>= #append detail
+    #append row detail
+
+  section page "Progress" $ \row -> do
+    column <- vbox 16
+    GI.set column [#widthRequest := 360, #hexpand := False]
+    Progress.new [Progress.Plain "Fetching ", Progress.Code "feat/big-refactor"] (Progress.Percent 64)
+      >>= #append column
+    Progress.new [Progress.Plain "Talking to git.azizovich.uz"] Progress.Unknown >>= #append column
+    #append row column
+
   scroller <- GI.new Gtk.ScrolledWindow [#child := page, #vexpand := True]
   footer <- Shortcut.bar [("j k", "move"), ("Enter", "open"), ("e", "done")] (Just "Component gallery")
   root <- vbox 0
@@ -141,4 +162,5 @@ galleryCss = mconcat
   , "box.gallery-sidebar { background: var(--sidebar); padding: 12px; border-radius: 8px; }"
   , "box.gallery-sidebar label.u-section-title { margin: 12px 10px 4px; }"
   , "label.brand { font-weight: 700; font-size: 15px; }"
+  , "box.gallery-padded { padding: 16px; }"
   ]

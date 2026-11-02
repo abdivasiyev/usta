@@ -21,12 +21,11 @@ import Database.Persist (EntityField, Unique)
 import Database.Persist.TH
 
 import Usta.DB.Schema.Account (AccountId)
+import Usta.Types.Count (Count)
 import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
 import Usta.Types.RepoName (RepoName)
 
--- The comment count is Int: persistent has no Natural column. Reading a
--- row turns it back into Natural and rejects a negative one.
 -- 'discoverEntities' passes the entities already in scope (the accounts
 -- table), so the account reference becomes a foreign key.
 share
@@ -38,7 +37,7 @@ Issue sql=issues
     number     Number
     title      Text
     author     Login
-    comments   Int
+    comments   Count
     createdAt  UTCTime
     updatedAt  UTCTime
     closedAt   UTCTime Maybe

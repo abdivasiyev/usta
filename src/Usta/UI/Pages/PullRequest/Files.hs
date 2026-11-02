@@ -8,16 +8,21 @@ module Usta.UI.Pages.PullRequest.Files
   , Model (..)
   , sample
   , new
+  , Fetching (..)
+  , fetchingSample
+  , fetching
   , css
   ) where
 
 import Control.Monad (filterM, forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Int (Int32)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
@@ -26,6 +31,8 @@ import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Diff as Diff
 import Usta.UI.Components.Diff (Line (..))
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.Progress as Progress
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
 
 -- | A review comment attached to a line of a file's diff.
@@ -296,6 +303,135 @@ review m = do
       Card.sectionTitle title >>= #append box
       pure box
 
+-- | A pull request whose branch the local mirror is still fetching. The
+-- file list comes from the forge API; diffs need the mirror.
+data Fetching = Fetching
+  { branchName :: Text
+  , percent :: Double
+  , fileCount :: Int
+  , ready :: [Diff.File]
+    -- ^ Already rendered, e.g. small files the API returned in full.
+  , waiting :: [Text]
+  }
+
+fetchingSample :: Double -> Fetching
+fetchingSample p = Fetching
+  { branchName = "refactor/den-aspects"
+  , percent = p
+  , fileCount = 212
+  , ready =
+      [ Diff.File "flake.nix" False
+          [ Hunk "@@ -1,14 +1,8 @@"
+          , Removed 1 "  imports = [ ./hosts/mini ./hosts/maxi ./hosts/midi ];"
+          , Added 1 "  imports = [ (inputs.import-tree ./modules) ];"
+          ]
+      ]
+  , waiting =
+      [ "modules/dendritic.nix", "modules/hosts/mini.nix", "modules/hosts/maxi.nix"
+      , "modules/hosts/midi/_options.nix", "modules/aspects/developer.nix"
+      ]
+  }
+
+-- | The Files tab while the branch is fetched: progress on top, the files
+-- known so far on the left, ready diffs and placeholders for the rest.
+-- @onCancel@ runs for Cancel.
+fetching :: IO () -> Fetching -> IO Gtk.Widget
+fetching onCancel f = do
+  page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #cssClasses := ["u-files", "fetching"]
+                         ]
+
+  banner <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                           , #spacing := 12
+                           , #cssClasses := ["fetch-banner"]
+                           ]
+  GI.new Gtk.Spinner [#spinning := True] >>= #append banner
+  Progress.caption [Progress.Plain "Fetching ", Progress.Code (branchName f), Progress.Plain " into the local mirror"]
+    >>= #append banner
+  progress <- Progress.bar (Progress.Percent (percent f))
+  GI.set progress [#hexpand := False, #widthRequest := 320, #valign := Gtk.AlignCenter]
+  #append banner progress
+  label (T.pack (show (round (percent f) :: Int)) <> "%") ["mono", "percent"] >>= #append banner
+  spacer <- GI.new Gtk.Box [#hexpand := True]
+  #append banner spacer
+  cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
+  void $ GI.on cancel #clicked onCancel
+  #append banner cancel
+  #append page banner
+
+  columns <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True]
+  side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #spacing := 6
+                         , #widthRequest := 240
+                         , #hexpand := False
+                         , #cssClasses := ["file-list"]
+                         ]
+  label (T.pack (show (fileCount f)) <> " files · list from the forge API") ["small", "muted", "list-note"]
+    >>= #append side
+  let entry path state current = do
+        row <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                              , #spacing := 8
+                              , #cssClasses := ["fetch-row"] <> ["current" | current]
+                              ]
+        name <- label path ["mono", "small"]
+        -- Capped so a long path ellipsizes instead of widening the list.
+        GI.set name [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd, #maxWidthChars := 22]
+        #append row name
+        label state ["small", T.toLower state] >>= #append row
+        #append side row
+  forM_ (zip [0 :: Int ..] (ready f)) $ \(i, file) -> entry (Diff.path file) "Ready" (i == 0)
+  forM_ (waiting f) $ \path -> entry path "Waiting" False
+  forM_ [190, 150, 170, 130, 160] $ \w -> do
+    placeholder <- Skeleton.bar w 10
+    GI.set placeholder [#marginStart := 8, #marginTop := 14]
+    #append side placeholder
+  #append columns side
+
+  diffs <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                          , #spacing := round gap
+                          , #cssClasses := ["diffs"]
+                          ]
+  forM_ (ready f) $ \file -> Diff.plain file >>= #append diffs
+  note <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  GI.new Gtk.Spinner [#spinning := True] >>= #append note
+  label "The rest renders as soon as the fetch finishes. Files you scroll to are rendered first." []
+    >>= #append note
+  #append diffs note
+  forM_ [[610, 470, 690, 345, 570, 435], [540, 650, 395, 510]] $ \widths ->
+    diffPlaceholder widths >>= #append diffs
+  scroll <- GI.new Gtk.ScrolledWindow [ #child := diffs
+                                      , #hexpand := True
+                                      , #hscrollbarPolicy := Gtk.PolicyTypeNever
+                                      ]
+  #append columns scroll
+  #append page columns
+  Gtk.toWidget page
+
+-- | A diff card's shape: header, then lines of the given widths.
+diffPlaceholder :: [Int32] -> IO Gtk.Box
+diffPlaceholder widths = do
+  card <- Card.new
+  header <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                           , #spacing := 10
+                           , #cssClasses := ["placeholder-header"]
+                           ]
+  Skeleton.bar 220 10 >>= #append header
+  Skeleton.bar 48 10 >>= #append header
+  #append card header
+  body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                         , #cssClasses := ["placeholder-body"]
+                         ]
+  gutter <- GI.new Gtk.Box [#widthRequest := 96, #cssClasses := ["placeholder-gutter"]]
+  #append body gutter
+  lines' <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                           , #spacing := 12
+                           , #cssClasses := ["placeholder-lines"]
+                           ]
+  forM_ widths $ \w -> Skeleton.bar w 8 >>= #append lines'
+  #append body lines'
+  #append card body
+  pure card
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
@@ -359,4 +495,21 @@ css = mconcat
   , "}"
   , "box.u-files textview.editor { border: 1px solid var(--input-border); border-radius: 6px; }"
   , "box.u-files textview.editor text { background: var(--surface); color: var(--text); }"
+  , "box.u-files box.fetch-banner {"
+  , "  padding: 12px 16px; background: var(--selected); border-bottom: 1px solid var(--border);"
+  , "}"
+  , "box.u-files box.fetch-banner spinner { color: var(--accent); }"
+  , "box.u-files box.fetch-banner label.percent { color: var(--text-soft); }"
+  , "box.u-files label.list-note { margin: 0 4px 6px; }"
+  , "box.u-files box.fetch-row { padding: 8px; border-radius: 6px; }"
+  , "box.u-files box.fetch-row.current { background: var(--nav-active); }"
+  , "box.u-files box.fetch-row label.ready { color: var(--success); }"
+  , "box.u-files box.fetch-row label.waiting { color: var(--text-muted); }"
+  , "box.u-files.fetching box.diffs spinner { color: var(--accent); }"
+  , "box.u-files box.placeholder-header {"
+  , "  padding: 12px; background: var(--window); border-bottom: 1px solid var(--border-subtle);"
+  , "  border-radius: 8px 8px 0 0;"
+  , "}"
+  , "box.u-files box.placeholder-gutter { background: var(--window); }"
+  , "box.u-files box.placeholder-lines { padding: 12px 20px 16px; }"
   ]

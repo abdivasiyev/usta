@@ -27,6 +27,7 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
+import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Components.SyncStatus as SyncStatus
@@ -78,9 +79,10 @@ buildAt start app = do
         forM_ old $ Gtk.stackRemove screens
         void $ Gtk.stackAddNamed screens widget (Just "detail")
         Gtk.stackSetVisibleChildName screens "detail"
-      openPullRequest backLabel summary =
-        PullRequest.new backLabel backToMain (tabContent summary) summary
+      openPullRequestWith fetch backLabel summary =
+        PullRequest.new backLabel backToMain (tabContent fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
+      openPullRequest = openPullRequestWith Nothing
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
       openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
       openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
@@ -106,7 +108,8 @@ buildAt start app = do
               | otherwise = openPullRequest "Inbox" (notificationSummary n)
         in Inbox.new open Inbox.sample >>= Gtk.toWidget
       Sidebar.PullRequests ->
-        PullRequests.new openNewPullRequest (openPullRequest "Pull requests" . summaryOf)
+        PullRequests.new openNewPullRequest
+          (\pr -> openPullRequestWith (PullRequests.fetching pr) "Pull requests" (summaryOf pr))
           PullRequests.sample
           >>= Gtk.toWidget
       Sidebar.Issues ->
@@ -211,8 +214,11 @@ buildAt start app = do
 -- | The detail header from a list row. File and commit counts are sample
 -- values until the detail is loaded from the forge.
 -- | Each tab of a pull request; sample content until the forge supplies it.
-tabContent :: PullRequest.Summary -> PullRequest.Tab -> IO Gtk.Widget
-tabContent summary tab = case tab of
+-- @fetch@ is how far the local mirror is with the branch, while it is
+-- still fetching; the Files tab waits for it.
+tabContent :: Maybe Double -> PullRequest.Summary -> PullRequest.Tab -> IO Gtk.Widget
+tabContent fetch summary tab = case tab of
+  PullRequest.Files | Just p <- fetch -> Files.fetching (pure ()) (Files.fetchingSample p)
   PullRequest.Conversation -> Conversation.new Conversation.sample
   PullRequest.Files -> Files.new Files.sample
   PullRequest.Commits -> Commits.new Commits.sample
@@ -313,8 +319,8 @@ summaryOf pr = PullRequest.Summary
   , PullRequest.title = PullRequests.title pr
   , PullRequest.state = if PullRequests.draft pr then PullRequest.Draft else PullRequest.Open
   , PullRequest.comments = PullRequests.comments pr
-  , PullRequest.files = 2
-  , PullRequest.commits = 1
+  , PullRequest.files = fst (PullRequests.changes pr)
+  , PullRequest.commits = snd (PullRequests.changes pr)
   , PullRequest.checks = case PullRequests.checks pr of
       PullRequests.ChecksPassed -> Just (Success, "1/1")
       PullRequests.ChecksFailed -> Just (Danger, "1 failed")
@@ -380,7 +386,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]
 

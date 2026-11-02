@@ -14,9 +14,10 @@ executable usta
   hs-source-dirs: app
   build-depends:
     base,
-    gi-gtk4,
     gi-glib,
-    haskell-gi-base
+    gi-gtk4,
+    haskell-gi-base,
+    text
 
   default-language: GHC2021
   ghc-options: -Wall

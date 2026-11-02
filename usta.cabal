@@ -27,6 +27,7 @@ executable usta
     Usta.UI.Components.Shortcut
     Usta.UI.Gallery
     Usta.UI.Platform
+    Usta.UI.Sidebar
     Usta.UI.Style
     Usta.UI.Window
 

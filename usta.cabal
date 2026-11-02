@@ -23,12 +23,14 @@ executable usta
     Usta.UI.Components.Diff
     Usta.UI.Components.Forge
     Usta.UI.Components.Icon
+    Usta.UI.Components.MarkdownEditor
     Usta.UI.Components.NavItem
     Usta.UI.Components.SearchField
     Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcut
     Usta.UI.Gallery
     Usta.UI.Pages.Inbox
+    Usta.UI.Pages.Issue
     Usta.UI.Pages.Issues
     Usta.UI.Pages.NewPullRequest
     Usta.UI.Pages.PullRequest

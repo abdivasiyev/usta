@@ -24,6 +24,8 @@ import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
+import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
+import qualified Usta.UI.Pages.Issue as Issue
 import qualified Usta.UI.Pages.Issues as Issues
 import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
@@ -56,6 +58,7 @@ build app = do
         PullRequest.new backLabel backToMain (tabContent summary) summary
           >>= Gtk.toWidget >>= showDetail
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
+      openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
 
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
@@ -66,8 +69,9 @@ build app = do
         PullRequests.new openNewPullRequest (openPullRequest "Pull requests" . summaryOf)
           PullRequests.sample
           >>= Gtk.toWidget
-      -- Opening and creating issues get their screens next.
-      Sidebar.Issues -> Issues.new (pure ()) (const (pure ())) Issues.sample >>= Gtk.toWidget
+      -- Creating issues gets its screen next.
+      Sidebar.Issues ->
+        Issues.new (pure ()) (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -145,6 +149,31 @@ notificationSummary n = PullRequest.Summary
       Warning -> "running"
       _ -> ""
 
+-- | An issue's detail from its list row. The thread and side details are
+-- sample content until the issue is loaded from the forge.
+issueDetail :: Issues.Issue -> Issue.Model
+issueDetail i = Issue.Model
+  { Issue.forge = Issues.forge i
+  , Issue.host = Issues.host i
+  , Issue.repo = Issues.repo i
+  , Issue.number = Issues.number i
+  , Issue.title = Issues.title i
+  , Issue.closed = Issues.closed i
+  , Issue.comments =
+      [ Issue.Comment (Issues.author i) "AA" ("opened " <> Issues.opened i)
+          "Main.hs still prints Hello world.\nOpen a Gtk.ApplicationWindow on activate, with the header bar from the design."
+      , Issue.Comment "abdivasiyev" "AA" "commented 1 hour ago"
+          "gi-gtk4 is in now (#2). The window needs wrapGAppsHook4 in the flake so it finds the GSettings schemas."
+      ]
+  , Issue.events =
+      [ Issue.LabelAdded tone name | Issues.Label tone name <- Issues.labels i ]
+      <> [Issue.ReferencedBy "#6 feat: render main window with GTK4"]
+  , Issue.assignees = [("AA", "abdivasiyev")]
+  , Issue.labels = [ (tone, name) | Issues.Label tone name <- Issues.labels i ]
+  , Issue.milestone = Just "First window"
+  , Issue.linkedPullRequests = ["#6 feat: render main window with GTK4"]
+  }
+
 summaryOf :: PullRequests.PullRequest -> PullRequest.Summary
 summaryOf pr = PullRequest.Summary
   { PullRequest.forge = PullRequests.forge pr
@@ -209,7 +238,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
   , windowCss
   ]
 

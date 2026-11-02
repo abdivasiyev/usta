@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -36,14 +37,16 @@
 -- * Never use @derivePersistField@. It stores the 'Show' output, so a column
 --   would hold @Host "github.com"@ rather than the host. Deriving through
 --   'Parsed' stores the raw value.
-module Usta.Core.Parse
+module Usta.Types.Parse
   ( Parse (..)
   , Parsed (..)
   , parseM
+  , isPathSegment
   ) where
 
 import Control.Monad ((>=>))
 import Data.Aeson (FromJSON (..), ToJSON (..))
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
@@ -69,6 +72,15 @@ class Parse a where
 -- and for @do@ blocks.
 parseM :: (MonadFail m, Parse a) => Raw a -> m a
 parseM = either (fail . Text.unpack) pure . parse
+
+-- | What forges allow in one path segment: owners, repository names and
+-- logins. Shared by the parsers of those types.
+isPathSegment :: Text -> Bool
+isPathSegment segment =
+  not (Text.null segment)
+    && segment /= "."
+    && segment /= ".."
+    && Text.all (\c -> isAsciiLower c || isAsciiUpper c || isDigit c || c `elem` ("._-" :: String)) segment
 
 -- | Deriving-via carrier: supplies every wire instance from the one 'Parse'
 -- instance. It is representationally equal to @a@, so

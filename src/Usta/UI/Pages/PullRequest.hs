@@ -15,6 +15,7 @@ module Usta.UI.Pages.PullRequest
 import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -25,6 +26,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import Usta.UI.Style (Tone (..), toneClass)
 
+type State :: Type
 data State = Open | Draft | MergedState | Closed
   deriving (Eq, Show, Enum, Bounded)
 
@@ -36,6 +38,7 @@ stateBadge s = case s of
   Closed -> (Danger, "Closed")
 
 -- | What the header and tab bar need; the tabs load their own content.
+type Summary :: Type
 data Summary = Summary
   { forge :: Forge.Kind
   , host :: Text
@@ -50,6 +53,7 @@ data Summary = Summary
     -- ^ Shown next to the Checks tab, e.g. @(Success, "1/1")@.
   }
 
+type Tab :: Type
 data Tab = Conversation | Files | Commits | Checks
   deriving (Eq, Show, Enum, Bounded)
 

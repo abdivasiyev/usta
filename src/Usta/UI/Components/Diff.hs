@@ -16,10 +16,12 @@ import Control.Monad (forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
+type Line :: Type
 data Line
   = Hunk Text
     -- ^ The "@@ -12,6 +12,8 @@" header line.
@@ -28,6 +30,7 @@ data Line
   | Added Int Text
   | Removed Int Text
 
+type File :: Type
 data File = File
   { path :: Text
   , viewed :: Bool

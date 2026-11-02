@@ -12,6 +12,7 @@ module Usta.UI.Pages.NewIssue
 import Control.Monad (forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
@@ -19,6 +20,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import qualified Usta.UI.Platform as Platform
 
+type Model :: Type
 data Model = Model
   { repositories :: [Text]
   , assignee :: Text

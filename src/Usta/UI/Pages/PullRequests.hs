@@ -16,6 +16,7 @@ import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -28,6 +29,7 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
 import Usta.UI.Style (Tone (..))
 
+type Checks :: Type
 data Checks = ChecksPassed | ChecksFailed | ChecksRunning | NoChecks
   deriving (Eq, Show, Enum, Bounded)
 
@@ -38,6 +40,7 @@ checksLabel c = case c of
   ChecksRunning -> (Warning, "Checks running")
   NoChecks -> (Neutral, "No checks")
 
+type Review :: Type
 data Review = ReviewRequested | Approved | ChangesRequested | NoReviewers
   deriving (Eq, Show, Enum, Bounded)
 
@@ -49,9 +52,11 @@ reviewLabel r = case r of
   NoReviewers -> (Neutral, "No reviewers")
 
 -- | How the pull request involves you; decides which tab shows it.
+type Relation :: Type
 data Relation = WaitingForMyReview | CreatedByMe | AssignedToMe
   deriving (Eq, Show, Enum, Bounded)
 
+type PullRequest :: Type
 data PullRequest = PullRequest
   { forge :: Forge.Kind
   , host :: Text
@@ -74,6 +79,7 @@ data PullRequest = PullRequest
     -- ^ Percent done while the local mirror still fetches the branch.
   }
 
+type Tab :: Type
 data Tab = ReviewTab | CreatedTab | AssignedTab | AllTab
   deriving (Eq, Enum, Bounded)
 

@@ -15,9 +15,11 @@ module Usta.UI.Components.Button
 import Control.Monad (forM_)
 import Data.GI.Base (AttrOp ((:=)), set)
 import qualified Data.GI.Base as GI
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
+type Variant :: Type
 data Variant
   = Primary   -- ^ The one main action on a screen.
   | Secondary -- ^ Bordered, for the other actions.
@@ -25,6 +27,7 @@ data Variant
   | Danger    -- ^ Destructive actions.
   deriving (Eq, Show, Enum, Bounded)
 
+type Config :: Type
 data Config = Config
   { label :: Maybe Text
   , icon :: Maybe Text

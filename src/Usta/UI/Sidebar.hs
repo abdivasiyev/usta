@@ -17,6 +17,7 @@ module Usta.UI.Sidebar
 import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -26,6 +27,7 @@ import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.NavItem as NavItem
 
 -- | Every place the sidebar can take you.
+type Page :: Type
 data Page
   = Inbox
   | ReviewRequests
@@ -53,6 +55,7 @@ pageTitle page = case page of
   Repositories -> "Repositories"
 
 -- | What the sidebar shows. Comes from the cache once sync exists.
+type Model :: Type
 data Model = Model
   { counts :: Page -> Maybe Int
   , forges :: [(Forge.Kind, Text)]
@@ -61,6 +64,7 @@ data Model = Model
   , pinned :: [Text]
   }
 
+type ForgeSync :: Type
 data ForgeSync = ForgeSyncing | ForgeDone
 
 sample :: Model

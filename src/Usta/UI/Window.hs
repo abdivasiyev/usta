@@ -13,6 +13,7 @@ import Control.Monad (forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -55,6 +56,7 @@ import qualified Usta.UI.Style as Style
 
 -- | Where the app starts. Until accounts and the cache exist, the first-run
 -- states are chosen on the command line to preview them.
+type Start :: Type
 data Start
   = Ready
     -- ^ Accounts connected and the cache filled.

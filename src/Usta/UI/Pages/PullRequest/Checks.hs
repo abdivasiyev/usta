@@ -17,6 +17,7 @@ module Usta.UI.Pages.PullRequest.Checks
 import Control.Monad (forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.List (findIndex)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -27,10 +28,12 @@ import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
 import Usta.UI.Style (Tone (..))
 
+type Status :: Type
 data Status = Passed | Failed | Skipped
   deriving (Eq, Show, Enum, Bounded)
 
 -- | One line of a run's output.
+type LogLine :: Type
 data LogLine
   = Step Text
     -- ^ The start of a step, e.g. "▸ nix flake check".
@@ -40,6 +43,7 @@ data LogLine
   | Note Text
     -- ^ Quiet output, e.g. the exit code.
 
+type Run :: Type
 data Run = Run
   { name :: Text
   , status :: Status
@@ -47,6 +51,7 @@ data Run = Run
   , output :: [LogLine]
   }
 
+type Model :: Type
 data Model = Model
   { provider :: Text
     -- ^ Where the runs come from, e.g. "Forgejo Actions".

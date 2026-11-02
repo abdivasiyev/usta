@@ -14,6 +14,7 @@ module Usta.UI.Pages.Issue
 import Control.Monad (forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -28,6 +29,7 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import Usta.UI.Style (Tone (..))
 
+type Comment :: Type
 data Comment = Comment
   { author :: Text
   , initials :: Text
@@ -37,11 +39,13 @@ data Comment = Comment
   }
 
 -- | Something that happened on the issue besides comments.
+type Event :: Type
 data Event
   = LabelAdded Tone Text
   | ReferencedBy Text
     -- ^ A pull request that mentions the issue, e.g. "#6 feat: ...".
 
+type Model :: Type
 data Model = Model
   { forge :: Forge.Kind
   , host :: Text

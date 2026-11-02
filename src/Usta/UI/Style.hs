@@ -14,11 +14,13 @@ module Usta.UI.Style
 
 import Control.Monad (void)
 import Data.GI.Base (AttrOp ((:=)), SignalProxy (PropertyNotify), get, new, on, set)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
 -- | The meaning a colored element carries. Add a constructor here and a
 -- matching @.tone-*@ rule in the component CSS to introduce a new one.
+type Tone :: Type
 data Tone
   = Neutral
   | Accent

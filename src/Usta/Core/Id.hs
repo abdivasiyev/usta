@@ -19,6 +19,7 @@ module Usta.Core.Id
 
 import Data.Aeson (FromJSON)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isSpace)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Database.Persist (PersistField)
@@ -29,6 +30,7 @@ import Web.HttpApiData (ToHttpApiData)
 import Usta.Core.Parse (Parse (..), Parsed (..))
 
 -- | Which forge software a server runs; decides how usta talks to it.
+type Kind :: Type
 data Kind = GitHub | GitLab | Forgejo
   deriving stock (Eq, Show, Enum, Bounded)
   deriving (FromJSON, PersistField, PersistFieldSql) via Parsed Kind
@@ -47,6 +49,7 @@ instance Parse Kind where
 
 -- | A server's host name, lowercase, with a port when it has one:
 -- @github.com@, @git.example.com:3000@. No scheme and no path.
+type Host :: Type
 newtype Host = Host Text
   deriving stock (Eq, Ord, Show)
   deriving (FromJSON, PersistField, PersistFieldSql) via Parsed Host
@@ -78,6 +81,7 @@ validHost text = case Text.splitOn ":" text of
       Text.all isDigit port && maybe False (\p -> p >= 1 && p <= (65535 :: Int)) (readMaybe (Text.unpack port))
 
 -- | A repository's full name, @owner/name@, as the forge spells it.
+type RepoName :: Type
 data RepoName = RepoName Text Text
   deriving stock (Eq, Ord, Show)
   deriving (FromJSON, PersistField, PersistFieldSql) via Parsed RepoName
@@ -98,6 +102,7 @@ shortName :: RepoName -> Text
 shortName (RepoName _ n) = n
 
 -- | A user's name on a forge.
+type Login :: Type
 newtype Login = Login Text
   deriving stock (Eq, Ord, Show)
   deriving (FromJSON, PersistField, PersistFieldSql, ToHttpApiData) via Parsed Login
@@ -119,6 +124,7 @@ validSegment segment =
     && Text.all (\c -> isAsciiLower c || isAsciiUpper c || isDigit c || c `elem` ("._-" :: String)) segment
 
 -- | A pull request's or issue's number within its repository.
+type Number :: Type
 newtype Number = Number Int
   deriving stock (Eq, Ord, Show)
   deriving (FromJSON, PersistField, PersistFieldSql, ToHttpApiData) via Parsed Number
@@ -133,6 +139,7 @@ instance Parse Number where
 -- | An access token. It has no 'Show' and no JSON or database instances,
 -- so it cannot end up in logs or the cache; it lives in the system keyring
 -- and only the HTTP client reads it, through 'unparse'.
+type Token :: Type
 newtype Token = Token Text
   deriving stock (Eq)
 
@@ -149,6 +156,7 @@ instance Parse Token where
   unparse (Token token) = token
 
 -- | One pull request or issue, wherever it lives.
+type Ref :: Type
 data Ref = Ref
   { host :: Host
   , repo :: RepoName

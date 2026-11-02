@@ -11,10 +11,12 @@ module Usta.UI.Platform
   ) where
 
 import Data.GI.Base (AttrOp ((:=)), set)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 import qualified System.Info
 
+type Platform :: Type
 data Platform
   = MacOS
   | Linux

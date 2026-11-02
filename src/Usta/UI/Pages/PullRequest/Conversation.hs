@@ -17,6 +17,7 @@ module Usta.UI.Pages.PullRequest.Conversation
 import Control.Monad (forM_, unless)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
@@ -29,6 +30,7 @@ import Usta.UI.Style (Tone (..))
 
 -- | Something that happened on the pull request. Add a constructor and a
 -- case in 'eventRow' for a new kind.
+type Event :: Type
 data Event
   = Committed Text Text
     -- ^ Short hash and message.
@@ -37,6 +39,7 @@ data Event
   | ReviewRequestedFrom Text
 
 -- | An inline review comment on one line.
+type Thread :: Type
 data Thread = Thread
   { location :: Text
   , line :: Text
@@ -45,11 +48,13 @@ data Thread = Thread
   , resolved :: Bool
   }
 
+type MergeState :: Type
 data MergeState = MergeState
   { checksPassed :: Bool
   , approvalsMissing :: Int
   }
 
+type Model :: Type
 data Model = Model
   { openedBy :: Text
   , openedAgo :: Text

@@ -19,6 +19,7 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -36,6 +37,7 @@ import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
 
 -- | A review comment attached to a line of a file's diff.
+type Comment :: Type
 data Comment = Comment
   { onLine :: Int
     -- ^ Index into the file's diff lines.
@@ -44,6 +46,7 @@ data Comment = Comment
   , body :: Text
   }
 
+type Model :: Type
 data Model = Model
   { files :: [(Diff.File, [Comment])]
   , range :: Text
@@ -56,6 +59,7 @@ data Model = Model
   }
 
 -- | One changed file as shown in both columns.
+type Entry :: Type
 data Entry = Entry
   { file :: Diff.File
   , row :: Gtk.Button
@@ -305,6 +309,7 @@ review m = do
 
 -- | A pull request whose branch the local mirror is still fetching. The
 -- file list comes from the forge API; diffs need the mirror.
+type Fetching :: Type
 data Fetching = Fetching
   { branchName :: Text
   , percent :: Double

@@ -27,6 +27,7 @@ import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import qualified Usta.UI.Pages.Issue as Issue
 import qualified Usta.UI.Pages.Issues as Issues
+import qualified Usta.UI.Pages.NewIssue as NewIssue
 import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
@@ -69,9 +70,9 @@ build app = do
         PullRequests.new openNewPullRequest (openPullRequest "Pull requests" . summaryOf)
           PullRequests.sample
           >>= Gtk.toWidget
-      -- Creating issues gets its screen next.
-      Sidebar.Issues ->
-        Issues.new (pure ()) (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget
+      Sidebar.Issues -> do
+        let openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
+        Issues.new openNewIssue (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -239,6 +240,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
+  , NewIssue.css
   , windowCss
   ]
 

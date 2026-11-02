@@ -32,6 +32,7 @@ executable usta
     Usta.UI.Pages.Inbox
     Usta.UI.Pages.Issue
     Usta.UI.Pages.Issues
+    Usta.UI.Pages.NewIssue
     Usta.UI.Pages.NewPullRequest
     Usta.UI.Pages.PullRequest
     Usta.UI.Pages.PullRequest.Checks

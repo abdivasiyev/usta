@@ -24,6 +24,7 @@ import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
+import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
@@ -34,11 +35,23 @@ build :: Gtk.Application -> IO Gtk.ApplicationWindow
 build app = do
   header <- headerBar Platform.current
 
+  -- Two screens: "main" (sidebar and pages) and "detail" (one pull
+  -- request, full width, with a way back).
+  screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
+  let openPullRequest backLabel summary = do
+        old <- Gtk.stackGetChildByName screens "detail"
+        forM_ old $ Gtk.stackRemove screens
+        detail <- PullRequest.new backLabel (Gtk.stackSetVisibleChildName screens "main") summary
+        void $ Gtk.stackAddNamed screens detail (Just "detail")
+        Gtk.stackSetVisibleChildName screens "detail"
+
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
     content <- case page of
       Sidebar.Inbox -> Inbox.new Inbox.sample >>= Gtk.toWidget
-      Sidebar.PullRequests -> PullRequests.new PullRequests.sample >>= Gtk.toWidget
+      Sidebar.PullRequests ->
+        PullRequests.new (openPullRequest "Pull requests" . summaryOf) PullRequests.sample
+          >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -50,6 +63,7 @@ build app = do
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True]
   #append body sidebar
   #append body pages
+  void $ Gtk.stackAddNamed screens body (Just "main")
 
   footer <- Shortcut.bar
     [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
@@ -57,7 +71,7 @@ build app = do
 
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
-  #append root body
+  #append root screens
   #append root footer
 
   -- GTK hides the titlebar widget in fullscreen, and ours holds search and
@@ -79,6 +93,26 @@ build app = do
   -- shortcuts (j, k, e) work instead of typing into the search field.
   Gtk.windowSetFocus window (Nothing :: Maybe Gtk.Widget)
   pure window
+
+-- | The detail header from a list row. File and commit counts are sample
+-- values until the detail is loaded from the forge.
+summaryOf :: PullRequests.PullRequest -> PullRequest.Summary
+summaryOf pr = PullRequest.Summary
+  { PullRequest.forge = PullRequests.forge pr
+  , PullRequest.host = PullRequests.host pr
+  , PullRequest.repo = PullRequests.repo pr
+  , PullRequest.number = PullRequests.number pr
+  , PullRequest.title = PullRequests.title pr
+  , PullRequest.state = if PullRequests.draft pr then PullRequest.Draft else PullRequest.Open
+  , PullRequest.comments = PullRequests.comments pr
+  , PullRequest.files = 2
+  , PullRequest.commits = 1
+  , PullRequest.checks = case PullRequests.checks pr of
+      PullRequests.ChecksPassed -> Just (Success, "1/1")
+      PullRequests.ChecksFailed -> Just (Danger, "1 failed")
+      PullRequests.ChecksRunning -> Just (Warning, "running")
+      PullRequests.NoChecks -> Nothing
+  }
 
 headerBar :: Platform.Platform -> IO Gtk.HeaderBar
 headerBar platform = do
@@ -125,6 +159,7 @@ styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
+  , PullRequest.css
   , windowCss
   ]
 

@@ -15,8 +15,8 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import Database.Persist (PersistField)
 import Database.Persist.Sql (PersistFieldSql)
-import Numeric.Natural (Natural)
 
+import Usta.Types.Count (Count)
 import Usta.Types.Involvement (Involvement)
 import Usta.Types.Login (Login)
 import Usta.Types.Parse (Parse (..), Parsed (..))
@@ -93,10 +93,10 @@ data PullRequest = PullRequest
     -- ^ 'Nothing' when the repository runs no checks.
   , review :: Maybe Review
     -- ^ 'Nothing' when nobody is asked to review.
-  , comments :: Natural
-  , changedFiles :: Maybe Natural
+  , comments :: Count
+  , changedFiles :: Maybe Count
     -- ^ 'Nothing' until the details are fetched; lists don't carry it.
-  , commits :: Maybe Natural
+  , commits :: Maybe Count
   , involvement :: [Involvement]
   , createdAt :: UTCTime
   , updatedAt :: UTCTime

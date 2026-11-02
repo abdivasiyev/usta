@@ -8,8 +8,8 @@ module Usta.Types.Repository
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import Numeric.Natural (Natural)
 
+import Usta.Types.Count (Count)
 import Usta.Types.Host (Host)
 import Usta.Types.RepoName (RepoName)
 
@@ -21,8 +21,8 @@ data Repository = Repository
   , description :: Maybe Text
   , defaultBranch :: Text
   , private :: Bool
-  , openPullRequests :: Natural
-  , openIssues :: Natural
+  , openPullRequests :: Count
+  , openIssues :: Count
   , updatedAt :: UTCTime
   }
   deriving stock (Eq, Show)

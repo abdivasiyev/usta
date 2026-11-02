@@ -8,8 +8,8 @@ module Usta.Types.Issue
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import Numeric.Natural (Natural)
 
+import Usta.Types.Count (Count)
 import Usta.Types.Involvement (Involvement)
 import Usta.Types.Label (Label)
 import Usta.Types.Login (Login)
@@ -22,7 +22,7 @@ data Issue = Issue
   , title :: Text
   , author :: Login
   , labels :: [Label]
-  , comments :: Natural
+  , comments :: Count
   , involvement :: [Involvement]
   , createdAt :: UTCTime
   , updatedAt :: UTCTime

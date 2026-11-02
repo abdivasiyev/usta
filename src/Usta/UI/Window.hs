@@ -36,6 +36,7 @@ import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
 import qualified Usta.UI.Pages.PullRequest.Files as Files
 import qualified Usta.UI.Components.Diff as Diff
 import qualified Usta.UI.Pages.PullRequests as PullRequests
+import qualified Usta.UI.Pages.Repositories as Repositories
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Style (Tone (..))
@@ -76,6 +77,10 @@ build app = do
       Sidebar.Issues -> do
         let openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
         Issues.new openNewIssue (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget
+      -- The forms open with sample fields until they take the repository.
+      Sidebar.Repositories -> do
+        let openNewIssue _ = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
+        Repositories.new openNewIssue (const openNewPullRequest) Repositories.sample >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -263,7 +268,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css
+  , NewIssue.css, Repositories.css
   , windowCss
   ]
 

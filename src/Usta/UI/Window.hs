@@ -50,7 +50,8 @@ build app = do
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
     content <- case page of
-      Sidebar.Inbox -> Inbox.new Inbox.sample >>= Gtk.toWidget
+      Sidebar.Inbox ->
+        Inbox.new (openPullRequest "Inbox" . notificationSummary) Inbox.sample >>= Gtk.toWidget
       Sidebar.PullRequests ->
         PullRequests.new (openPullRequest "Pull requests" . summaryOf) PullRequests.sample
           >>= Gtk.toWidget
@@ -103,6 +104,29 @@ tabContent :: PullRequest.Tab -> IO Gtk.Widget
 tabContent tab = case tab of
   PullRequest.Conversation -> Conversation.new Conversation.sample
   _ -> PullRequest.placeholder tab
+
+-- | The detail header from an inbox notification about a pull request.
+notificationSummary :: Inbox.Notification -> PullRequest.Summary
+notificationSummary n = PullRequest.Summary
+  { PullRequest.forge = Inbox.forge n
+  , PullRequest.host = Inbox.host n
+  , PullRequest.repo = Inbox.repo n
+  , PullRequest.number = Inbox.number n
+  , PullRequest.title = Inbox.title n
+  , PullRequest.state =
+      if Inbox.kind n == Inbox.MergedPullRequest then PullRequest.MergedState else PullRequest.Open
+  , PullRequest.comments = 1
+  , PullRequest.files = length (Inbox.changes n)
+  , PullRequest.commits = 1
+  -- The tab has room for a word, not the card's "1 of 1 passed".
+  , PullRequest.checks = fmap (\(tone, _) -> (tone, short tone)) (Inbox.checks n)
+  }
+  where
+    short tone = case tone of
+      Success -> "passed"
+      Danger -> "failed"
+      Warning -> "running"
+      _ -> ""
 
 summaryOf :: PullRequests.PullRequest -> PullRequest.Summary
 summaryOf pr = PullRequest.Summary

@@ -53,6 +53,7 @@ data Change = Change Text Int Int
 data Notification = Notification
   { kind :: Kind
   , forge :: Forge.Kind
+  , host :: Text
   , repo :: Text
   , number :: Int
   , title :: Text
@@ -76,8 +77,9 @@ keeps f n = case f of
   Unread -> unread n
   Participating -> reason n `elem` [ReviewRequested, Mentioned, Assigned]
 
-new :: [Notification] -> IO Gtk.Box
-new notifications = do
+-- | @onOpen@ runs for "Open review" on a pull request.
+new :: (Notification -> IO ()) -> [Notification] -> IO Gtk.Box
+new onOpen notifications = do
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
   previewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
@@ -94,7 +96,7 @@ new notifications = do
     forM_ selected $ \row -> do
       index <- Gtk.listBoxRowGetIndex row
       when (index >= 0 && fromIntegral index < length notifications) $ do
-        content <- preview (notifications !! fromIntegral index)
+        content <- preview onOpen (notifications !! fromIntegral index)
         GI.set previewScroll [#child := content]
 
   (filters, buttons) <- Segmented.new ["All", "Unread", "Participating"] 0
@@ -181,8 +183,8 @@ notificationRow n = do
   #append row body
   pure row
 
-preview :: Notification -> IO Gtk.Box
-preview n = do
+preview :: (Notification -> IO ()) -> Notification -> IO Gtk.Box
+preview onOpen n = do
   pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #cssClasses := ["u-preview"]
@@ -237,8 +239,10 @@ preview n = do
 
   actions <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   let primary = if kind n == Issue then "Open issue" else "Open review"
-  Button.new Button.defaults { Button.label = Just primary, Button.variant = Button.Primary }
-    >>= #append actions
+  open <- Button.new Button.defaults { Button.label = Just primary, Button.variant = Button.Primary }
+  -- Issues get their own screen later; for now only pull requests open.
+  when (kind n /= Issue) $ void $ GI.on open #clicked (onOpen n)
+  #append actions open
   Button.new Button.defaults { Button.label = Just "Mark as done" } >>= #append actions
   Button.new Button.defaults { Button.label = Just "Open in browser" } >>= #append actions
   #append pane actions
@@ -292,11 +296,15 @@ sample =
   ]
   where
     pr f r num t why new' ago br op ch rv cs =
-      Notification PullRequest f r num t why new' ago (Just br) op ch rv cs
+      Notification PullRequest f (hostOf f) r num t why new' ago (Just br) op ch rv cs
     merged f r num t ago =
-      Notification MergedPullRequest f r num t WasMerged False ago Nothing ("merged " <> ago <> " ago") Nothing Nothing []
+      Notification MergedPullRequest f (hostOf f) r num t WasMerged False ago Nothing ("merged " <> ago <> " ago") Nothing Nothing []
     issue f r num t why new' ago =
-      Notification Issue f r num t why new' ago Nothing ("opened " <> ago <> " ago") Nothing Nothing []
+      Notification Issue f (hostOf f) r num t why new' ago Nothing ("opened " <> ago <> " ago") Nothing Nothing []
+    hostOf f = case f of
+      Forge.GitHub -> "github.com"
+      Forge.GitLab -> "gitlab.com"
+      Forge.Forgejo -> "git.azizovich.uz"
 
 css :: Text
 css = mconcat

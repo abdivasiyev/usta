@@ -31,17 +31,22 @@
           bytestring
           containers
           directory
+          esqueleto
           filepath
           gi-gdk4
           gi-glib
           gi-gtk4
           gi-pango
           haskell-gi-base
+          http-api-data
           http-client
           http-client-tls
+          monad-logger
+          persistent
+          persistent-sqlite
+          resourcet
           servant
           servant-client
-          sqlite-simple
           stm
           text
           time

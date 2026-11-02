@@ -11,7 +11,7 @@ module Usta.UI.Components.Diff
   , css
   ) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
@@ -34,8 +34,9 @@ data File = File
   }
 
 -- | @attached@ pairs a line's index with a widget shown under it.
-new :: File -> [(Int, Gtk.Widget)] -> IO Gtk.Box
-new file attached = do
+-- A viewed file shows only its header; @onViewed@ hears every toggle.
+new :: File -> [(Int, Gtk.Widget)] -> (Bool -> IO ()) -> IO Gtk.Box
+new file attached onViewed = do
   card <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #cssClasses := ["u-card", "u-diff"]
                          ]
@@ -53,13 +54,28 @@ new file attached = do
   #append header check
   #append card header
 
+  body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #visible := not (viewed file)
+                         ]
   forM_ (zip [0 ..] (diffLines file)) $ \(index, line) -> do
-    lineRow line >>= #append card
+    lineRow line >>= #append body
     forM_ [w | (i, w) <- attached, i == index] $ \w -> do
       holder <- GI.new Gtk.Box [#cssClasses := ["diff-attached"]]
       #append holder w
-      #append card holder
+      #append body holder
+  #append card body
+  setCollapsed card (viewed file)
+
+  void $ GI.on check #toggled $ do
+    isViewed <- GI.get check #active
+    GI.set body [#visible := not isViewed]
+    setCollapsed card isViewed
+    onViewed isViewed
   pure card
+  where
+    setCollapsed card collapsed
+      | collapsed = Gtk.widgetAddCssClass card "collapsed"
+      | otherwise = Gtk.widgetRemoveCssClass card "collapsed"
 
 stat :: File -> Text
 stat file = "+" <> count isAdded <> " −" <> count isRemoved
@@ -123,4 +139,5 @@ css = mconcat
   , "box.u-diff box.diff-line.removed { background: var(--danger-bg); color: var(--danger); }"
   , "box.u-diff box.diff-attached { padding: 8px 12px 8px 108px; background: var(--surface); }"
   , "box.u-diff > box:last-child { border-radius: 0 0 8px 8px; }"
+  , "box.u-diff.collapsed box.diff-header { border-bottom: none; border-radius: 8px; }"
   ]

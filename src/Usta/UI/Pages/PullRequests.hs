@@ -54,7 +54,10 @@ data Relation = WaitingForMyReview | CreatedByMe | AssignedToMe
 
 data PullRequest = PullRequest
   { forge :: Forge.Kind
+  , host :: Text
   , repo :: Text
+    -- ^ Full name, e.g. "abdivasiyev/usta"; the list shows the part after
+    -- the owner.
   , number :: Int
   , title :: Text
   , branch :: Text
@@ -84,8 +87,9 @@ inTab t pr = case t of
   AssignedTab -> relation pr == AssignedToMe
   AllTab -> True
 
-new :: [PullRequest] -> IO Gtk.Box
-new prs = do
+-- | @onOpen@ runs when a row is clicked or activated with Enter.
+new :: (PullRequest -> IO ()) -> [PullRequest] -> IO Gtk.Box
+new onOpen prs = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 14
                          , #hexpand := True
@@ -136,6 +140,9 @@ new prs = do
     #append list row
   empty <- GI.new Gtk.Label [#label := "Nothing here", #cssClasses := ["muted", "empty"]]
   Gtk.listBoxSetPlaceholder list (Just empty)
+  void $ GI.on list #rowActivated $ \row -> do
+    index <- Gtk.listBoxRowGetIndex row
+    onOpen (prs !! fromIntegral index)
 
   current <- newIORef ReviewTab
   Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
@@ -180,7 +187,8 @@ pullRequestRow pr = do
 
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   Forge.smallDot (forge pr) >>= #append meta
-  label (repo pr <> " #" <> T.pack (show (number pr))) ["meta", "mono"] >>= #append meta
+  let shortName = T.drop 1 (T.dropWhile (/= '/') (repo pr))
+  label (shortName <> " #" <> T.pack (show (number pr))) ["meta", "mono"] >>= #append meta
   label "·" ["meta"] >>= #append meta
   label (branch pr) ["meta", "mono"] >>= #append meta
   label "·" ["meta"] >>= #append meta
@@ -207,15 +215,15 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 sample :: [PullRequest]
 sample =
-  [ PullRequest Forge.GitHub "usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "abdivasiyev"
+  [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "abdivasiyev"
       ChecksPassed ReviewRequested 1 "5m" False WaitingForMyReview
-  , PullRequest Forge.Forgejo "homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "abdivasiyev"
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "abdivasiyev"
       ChecksFailed ReviewRequested 0 "22m" False WaitingForMyReview
-  , PullRequest Forge.Forgejo "homelab" 47 "feat: add binary cache health check" "cache-health" "abdivasiyev"
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "abdivasiyev"
       ChecksRunning NoReviewers 2 "Yesterday" False CreatedByMe
-  , PullRequest Forge.GitHub "usta" 6 "feat: render main window with GTK4" "feat/main-window" "abdivasiyev"
+  , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "abdivasiyev"
       NoChecks NoReviewers 0 "Mon" True CreatedByMe
-  , PullRequest Forge.Forgejo "nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "abdivasiyev"
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "abdivasiyev"
       ChecksPassed Approved 3 "Mon" False CreatedByMe
   ]
 

@@ -1,0 +1,172 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedLabels #-}
+
+-- | One pull request: header with a way back, and tabs for the
+-- conversation, changed files, commits and checks.
+module Usta.UI.Pages.PullRequest
+  ( State (..)
+  , Summary (..)
+  , Tab (..)
+  , new
+  , css
+  ) where
+
+import Control.Monad (forM, forM_, void, when)
+import qualified Data.GI.Base as GI
+import Data.GI.Base (AttrOp ((:=)))
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
+
+import qualified Usta.UI.Components.Badge as Badge
+import qualified Usta.UI.Components.Button as Button
+import qualified Usta.UI.Components.Forge as Forge
+import Usta.UI.Style (Tone (..), toneClass)
+
+data State = Open | Draft | MergedState | Closed
+  deriving (Eq, Show, Enum, Bounded)
+
+stateBadge :: State -> (Tone, Text)
+stateBadge s = case s of
+  Open -> (Success, "Open")
+  Draft -> (Neutral, "Draft")
+  MergedState -> (Merged, "Merged")
+  Closed -> (Danger, "Closed")
+
+-- | What the header and tab bar need; the tabs load their own content.
+data Summary = Summary
+  { forge :: Forge.Kind
+  , host :: Text
+  , repo :: Text
+  , number :: Int
+  , title :: Text
+  , state :: State
+  , comments :: Int
+  , files :: Int
+  , commits :: Int
+  , checks :: Maybe (Tone, Text)
+    -- ^ Shown next to the Checks tab, e.g. @(Success, "1/1")@.
+  }
+
+data Tab = Conversation | Files | Commits | Checks
+  deriving (Eq, Show, Enum, Bounded)
+
+tabName :: Tab -> Text
+tabName = T.toLower . T.pack . show
+
+-- | @backLabel@ names where Back goes, e.g. "Pull requests" or "Inbox".
+new :: Text -> IO () -> Summary -> IO Gtk.Box
+new backLabel onBack summary = do
+  page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #hexpand := True
+                         , #vexpand := True
+                         , #cssClasses := ["u-pull-request"]
+                         ]
+  header summary backLabel onBack >>= #append page
+
+  content <- GI.new Gtk.Stack [#vexpand := True, #hexpand := True]
+  forM_ [minBound .. maxBound] $ \tab -> do
+    -- Each tab gets its screen in the following changes.
+    placeholder <- GI.new Gtk.Label [#label := T.pack (show tab), #cssClasses := ["muted"]]
+    void $ Gtk.stackAddNamed content placeholder (Just (tabName tab))
+
+  tabBar summary (Gtk.stackSetVisibleChildName content . tabName) >>= #append page
+  #append page content
+  pure page
+
+header :: Summary -> Text -> IO () -> IO Gtk.Box
+header s backLabel onBack = do
+  bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                        , #spacing := 12
+                        , #cssClasses := ["pr-header"]
+                        ]
+  back <- Button.new Button.defaults
+    { Button.label = Just backLabel
+    , Button.icon = Just "go-previous-symbolic"
+    , Button.variant = Button.Flat
+    }
+  void $ GI.on back #clicked onBack
+  #append bar back
+
+  titles <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                           , #spacing := 2
+                           , #hexpand := True
+                           , #valign := Gtk.AlignCenter
+                           ]
+  meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  Forge.smallDot (forge s) >>= #append meta
+  label (host s <> "/" <> repo s) ["meta", "mono"] >>= #append meta
+  label ("#" <> T.pack (show (number s))) ["meta"] >>= #append meta
+  let (tone, text) = stateBadge (state s)
+  Badge.new tone text >>= #append meta
+  #append titles meta
+  titleLabel <- label (title s) ["pr-title"]
+  GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
+  #append titles titleLabel
+  #append bar titles
+
+  Button.new Button.defaults { Button.label = Just "Check out locally" } >>= #append bar
+  Button.new Button.defaults { Button.label = Just "Open in browser" } >>= #append bar
+  pure bar
+
+-- | Underlined tabs with counts; calls @onSelect@ with the chosen tab.
+tabBar :: Summary -> (Tab -> IO ()) -> IO Gtk.Box
+tabBar s onSelect = do
+  bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                        , #spacing := 4
+                        , #cssClasses := ["pr-tabs"]
+                        ]
+  buttons <- forM [minBound .. maxBound] $ \tab -> do
+    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+    label (T.pack (show tab)) [] >>= #append row
+    case (tab, checks s) of
+      (Checks, Just (tone, text)) -> label text ["tab-count", toneClass tone] >>= #append row
+      (Checks, Nothing) -> pure ()
+      _ -> label (T.pack (show (count tab))) ["tab-count"] >>= #append row
+    button <- GI.new Gtk.ToggleButton [#child := row]
+    #append bar button
+    pure (tab, button)
+  case buttons of
+    (_, first) : rest -> do
+      forM_ rest $ \(_, b) -> GI.set b [#group := first]
+      GI.set first [#active := True]
+    [] -> pure ()
+  forM_ buttons $ \(tab, button) ->
+    void $ GI.on button #toggled $ do
+      active <- GI.get button #active
+      when active (onSelect tab)
+  pure bar
+  where
+    count tab = case tab of
+      Conversation -> comments s
+      Files -> files s
+      Commits -> commits s
+      Checks -> 0
+
+label :: Text -> [Text] -> IO Gtk.Label
+label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
+
+css :: Text
+css = mconcat
+  [ "box.u-pull-request box.pr-header {"
+  , "  padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);"
+  , "}"
+  , "box.u-pull-request label.meta { font-size: 12px; color: var(--text-muted); }"
+  , "box.u-pull-request label.pr-title { font-size: 16px; font-weight: 600; }"
+  , "box.u-pull-request box.pr-tabs {"
+  , "  padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--border);"
+  , "}"
+  , "box.pr-tabs button {"
+  , "  min-height: 44px; padding: 0 12px; border: none; border-radius: 0; background: transparent;"
+  , "  box-shadow: none; background-image: none; color: var(--text-soft);"
+  , "}"
+  , "box.pr-tabs button:hover { color: var(--text); }"
+  , "box.pr-tabs button:checked {"
+  , "  color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent);"
+  , "}"
+  , "box.pr-tabs label.tab-count { font-size: 12px; font-weight: 400; color: var(--text-muted); }"
+  , "box.pr-tabs label.tab-count.tone-success { color: var(--success); }"
+  , "box.pr-tabs label.tab-count.tone-danger { color: var(--danger); }"
+  , "box.pr-tabs label.tab-count.tone-warning { color: var(--warning); }"
+  ]

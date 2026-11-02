@@ -16,8 +16,11 @@ executable usta
     src
 
   other-modules:
+    Usta.UI.Components.Avatar
     Usta.UI.Components.Badge
     Usta.UI.Components.Button
+    Usta.UI.Components.Icon
+    Usta.UI.Components.Shortcut
     Usta.UI.Style
 
   build-depends:

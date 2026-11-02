@@ -9,18 +9,27 @@ module Usta.DB
   , databaseFile
   , withDatabase
   , run
+  , WrongHost (..)
+  , requireHost
   ) where
 
+import Control.Exception (Exception, throwIO)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Foldable (for_)
 import Control.Monad.Logger (runNoLoggingT)
 import Data.Kind (Type)
 import qualified Data.Text as Text
+import Database.Persist (get)
 import Database.Persist.Sql (ConnectionPool, SqlPersistT, runMigrationQuiet, runSqlPool)
 import Database.Persist.Sqlite (mkSqliteConnectionInfo, withSqlitePoolInfo)
 import System.Directory (XdgDirectory (XdgData), createDirectoryIfMissing, getHomeDirectory, getXdgDirectory)
 import System.FilePath ((</>))
 
 import Usta.DB.Schema (migrateAll)
+import Usta.DB.Schema.Account (AccountId)
+import qualified Usta.DB.Schema.Account as Account
+import Usta.Types.Host (Host)
 import qualified Usta.Types.Platform as Platform
 
 -- | A query, run against the cache by 'run'.
@@ -50,3 +59,25 @@ withDatabase file action =
 -- | Runs a query in one transaction.
 run :: ConnectionPool -> Result a -> IO a
 run pool query = runSqlPool query pool
+
+-- | A save was handed something from another server than the account it
+-- is saved under. Thrown by 'requireHost'; 'run' then rolls the whole
+-- transaction back.
+type WrongHost :: Type
+data WrongHost = WrongHost
+  { accountHost :: Host
+  , itemHost :: Host
+  }
+  deriving stock (Show)
+
+instance Exception WrongHost
+
+-- | Throws 'WrongHost' unless every host is the account's. Rows don't
+-- store the host; they take it from their account, so a pull request
+-- from github.com saved under a Forgejo account would silently move.
+requireHost :: AccountId -> [Host] -> Result ()
+requireHost key hosts = do
+  account <- get key
+  for_ account $ \row ->
+    for_ hosts $ \host ->
+      when (host /= row.host) $ liftIO (throwIO WrongHost {accountHost = row.host, itemHost = host})

@@ -26,9 +26,11 @@ executable usta
     Usta.UI.Components.Icon
     Usta.UI.Components.MarkdownEditor
     Usta.UI.Components.NavItem
+    Usta.UI.Components.Progress
     Usta.UI.Components.SearchField
     Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcut
+    Usta.UI.Components.Skeleton
     Usta.UI.Gallery
     Usta.UI.Pages.AddAccount
     Usta.UI.Pages.Inbox

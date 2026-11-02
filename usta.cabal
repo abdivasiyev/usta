@@ -17,6 +17,9 @@ executable usta
 
   other-modules:
     Usta.DB.Schema.Account
+    Usta.DB.Schema.Issue
+    Usta.DB.Schema.IssueInvolvement
+    Usta.DB.Schema.IssueLabel
     Usta.DB.Schema.Notification
     Usta.DB.Schema.PullRequest
     Usta.DB.Schema.PullRequestInvolvement

@@ -7,12 +7,15 @@ module Usta.UI.Components.Forge
   ( Kind (..)
   , dot
   , smallDot
+  , name
+  , tile
   , css
   ) where
 
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
 data Kind = GitHub | GitLab | Forgejo
@@ -25,6 +28,27 @@ dot kind = make kind []
 -- | The 6px dot used inside list rows.
 smallDot :: Kind -> IO Gtk.Widget
 smallDot kind = make kind ["small"]
+
+-- | "GitHub", "GitLab", "Forgejo".
+name :: Kind -> Text
+name kind = case kind of
+  GitHub -> "GitHub"
+  GitLab -> "GitLab"
+  Forgejo -> "Forgejo"
+
+-- | The 32px square with the forge's initial, for accounts and sign-in.
+tile :: Kind -> IO Gtk.Widget
+tile kind = do
+  l <- GI.new Gtk.Label [ #label := initial
+                        , #valign := Gtk.AlignCenter
+                        , #cssClasses := ["u-forge-tile", kindClass kind]
+                        ]
+  Gtk.toWidget l
+  where
+    -- GitLab takes its second word's letter, so it doesn't repeat GitHub's.
+    initial = case kind of
+      GitLab -> "L"
+      _ -> T.take 1 (name kind)
 
 make :: Kind -> [Text] -> IO Gtk.Widget
 make kind extra = do
@@ -46,6 +70,12 @@ css = mconcat
   , "box.u-forge-dot.github { background: var(--text); }"
   , "box.u-forge-dot.gitlab { background: #6D28D9; }"
   , "box.u-forge-dot.forgejo { background: #C2410C; }"
+  , "label.u-forge-tile {"
+  , "  min-width: 32px; min-height: 32px; border-radius: 8px; font-weight: 700; color: #FFFFFF;"
+  , "}"
+  , "label.u-forge-tile.github { background: var(--text); color: var(--surface); }"
+  , "label.u-forge-tile.gitlab { background: #6D28D9; }"
+  , "label.u-forge-tile.forgejo { background: #C2410C; }"
   , "@media (prefers-color-scheme: dark) {"
   , "  box.u-forge-dot.gitlab { background: #A78BFA; }"
   , "  box.u-forge-dot.forgejo { background: #F08A4B; }"

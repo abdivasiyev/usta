@@ -211,8 +211,7 @@ description pieces = do
 
 accountRow :: Account -> IO Gtk.Widget
 accountRow a = do
-  tile <- label (T.take 1 (forgeName (forge a))) ["forge-tile", forgeClass (forge a)]
-  GI.set tile [#xalign := 0.5, #valign := Gtk.AlignCenter]
+  tile <- Forge.tile (forge a)
   status <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   if connected a
     then do
@@ -236,15 +235,6 @@ accountRow a = do
   where
     authText BrowserSignIn = "Browser sign-in"
     authText AccessToken = "Access token"
-
-forgeName :: Forge.Kind -> Text
-forgeName k = case k of
-  Forge.GitHub -> "GitHub"
-  Forge.GitLab -> "GitLab"
-  Forge.Forgejo -> "Forgejo"
-
-forgeClass :: Forge.Kind -> Text
-forgeClass = T.toLower . forgeName
 
 -- | System, Light or Dark; switches the app's colors right away.
 themeChoice :: IO Gtk.Widget
@@ -311,12 +301,6 @@ css = mconcat
   , "box.u-settings box.setting:last-child { border-bottom: none; }"
   , "box.u-settings box.setting label.title { font-weight: 600; }"
   , "box.u-settings box.setting label.description { font-size: 13px; color: var(--text-muted); }"
-  , "box.u-settings label.forge-tile {"
-  , "  min-width: 32px; min-height: 32px; border-radius: 8px; font-weight: 700; color: #FFFFFF;"
-  , "}"
-  , "box.u-settings label.forge-tile.github { background: var(--text); color: var(--surface); }"
-  , "box.u-settings label.forge-tile.gitlab { background: #6D28D9; }"
-  , "box.u-settings label.forge-tile.forgejo { background: #C2410C; }"
   , "box.u-settings switch:checked { background: var(--accent); }"
   , "box.u-settings radio:checked { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }"
   , "box.u-settings label.connected { color: var(--success); }"

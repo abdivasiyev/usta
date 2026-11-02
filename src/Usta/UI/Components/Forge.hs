@@ -18,7 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
-import Usta.Core.Id (Kind (..))
+import Usta.Types.Forge (Kind (..))
 
 -- | The 8px dot used in the sidebar.
 dot :: Kind -> IO Gtk.Widget

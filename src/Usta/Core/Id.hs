@@ -81,25 +81,33 @@ validHost text = case Text.splitOn ":" text of
       Text.all isDigit port && maybe False (\p -> p >= 1 && p <= (65535 :: Int)) (readMaybe (Text.unpack port))
 
 -- | A repository's full name, @owner/name@, as the forge spells it.
+--
+-- The fields stay private: exporting them would let a record update skip
+-- the parser. Read them with 'owner' and 'shortName'.
 type RepoName :: Type
-data RepoName = RepoName Text Text
+data RepoName = RepoName
+  { repoOwner :: Text
+    -- ^ The user or organization: @abdivasiyev@.
+  , repoShortName :: Text
+    -- ^ The repository within it: @usta@.
+  }
   deriving stock (Eq, Ord, Show)
   deriving (FromJSON, PersistField, PersistFieldSql) via Parsed RepoName
 
 instance Parse RepoName where
   type Raw RepoName = Text
   parse raw = case Text.splitOn "/" raw of
-    [o, n] | validSegment o && validSegment n -> Right (RepoName o n)
+    [o, n] | validSegment o && validSegment n -> Right RepoName {repoOwner = o, repoShortName = n}
     _ -> Left "a repository as owner/name, such as abdivasiyev/usta"
-  unparse (RepoName o n) = o <> "/" <> n
+  unparse r = repoOwner r <> "/" <> repoShortName r
 
 -- | The user or organization that owns the repository.
 owner :: RepoName -> Text
-owner (RepoName o _) = o
+owner = repoOwner
 
 -- | The name without the owner, as lists show it: @usta@.
 shortName :: RepoName -> Text
-shortName (RepoName _ n) = n
+shortName = repoShortName
 
 -- | A user's name on a forge.
 type Login :: Type

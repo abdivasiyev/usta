@@ -24,6 +24,7 @@ import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
+import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import qualified Usta.UI.Pages.PullRequest.Commits as Commits
@@ -40,16 +41,20 @@ build :: Gtk.Application -> IO Gtk.ApplicationWindow
 build app = do
   header <- headerBar Platform.current
 
-  -- Two screens: "main" (sidebar and pages) and "detail" (one pull
-  -- request, full width, with a way back).
+  -- Two screens: "main" (sidebar and pages) and "detail" (a full-width
+  -- screen such as one pull request or the new pull request form).
   screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
-  let openPullRequest backLabel summary = do
+  let backToMain = Gtk.stackSetVisibleChildName screens "main"
+      showDetail :: Gtk.Widget -> IO ()
+      showDetail widget = do
         old <- Gtk.stackGetChildByName screens "detail"
         forM_ old $ Gtk.stackRemove screens
-        detail <- PullRequest.new backLabel (Gtk.stackSetVisibleChildName screens "main")
-                    (tabContent summary) summary
-        void $ Gtk.stackAddNamed screens detail (Just "detail")
+        void $ Gtk.stackAddNamed screens widget (Just "detail")
         Gtk.stackSetVisibleChildName screens "detail"
+      openPullRequest backLabel summary =
+        PullRequest.new backLabel backToMain (tabContent summary) summary
+          >>= Gtk.toWidget >>= showDetail
+      openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
 
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
@@ -57,7 +62,8 @@ build app = do
       Sidebar.Inbox ->
         Inbox.new (openPullRequest "Inbox" . notificationSummary) Inbox.sample >>= Gtk.toWidget
       Sidebar.PullRequests ->
-        PullRequests.new (openPullRequest "Pull requests" . summaryOf) PullRequests.sample
+        PullRequests.new openNewPullRequest (openPullRequest "Pull requests" . summaryOf)
+          PullRequests.sample
           >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
@@ -200,6 +206,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
+  , NewPullRequest.css
   , windowCss
   ]
 

@@ -18,8 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
-data Kind = GitHub | GitLab | Forgejo
-  deriving (Eq, Show, Enum, Bounded)
+import Usta.Core.Id (Kind (..))
 
 -- | The 8px dot used in the sidebar.
 dot :: Kind -> IO Gtk.Widget

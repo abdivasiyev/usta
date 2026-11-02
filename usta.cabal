@@ -54,12 +54,26 @@ executable usta
     Usta.UI.Window
 
   build-depends:
+    aeson,
+    async,
     base,
+    bytestring,
+    containers,
+    directory,
+    filepath,
     gi-glib,
     gi-gtk4,
     gi-pango,
     haskell-gi-base,
-    text
+    http-client,
+    http-client-tls,
+    servant,
+    servant-client,
+    sqlite-simple,
+    stm,
+    text,
+    time,
+    typed-process
 
   default-language: GHC2021
   ghc-options: -Wall

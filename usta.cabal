@@ -20,6 +20,8 @@ executable usta
     Usta.Types.Forge
     Usta.Types.Host
     Usta.Types.Involvement
+    Usta.Types.Issue
+    Usta.Types.Label
     Usta.Types.Login
     Usta.Types.Notification
     Usta.Types.Number
@@ -27,6 +29,7 @@ executable usta
     Usta.Types.PullRequest
     Usta.Types.Ref
     Usta.Types.RepoName
+    Usta.Types.Repository
     Usta.Types.ThreadId
     Usta.Types.Token
     Usta.UI.Components.Avatar

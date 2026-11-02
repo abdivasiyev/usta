@@ -19,10 +19,12 @@ executable usta
     Usta.Types.Account
     Usta.Types.Forge
     Usta.Types.Host
+    Usta.Types.Involvement
     Usta.Types.Login
     Usta.Types.Notification
     Usta.Types.Number
     Usta.Types.Parse
+    Usta.Types.PullRequest
     Usta.Types.Ref
     Usta.Types.RepoName
     Usta.Types.ThreadId

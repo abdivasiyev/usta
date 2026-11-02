@@ -58,6 +58,10 @@
         buildInputs = [pkgs.adwaita-icon-theme];
         shellHook = ''
           export XDG_DATA_DIRS="${pkgs.adwaita-icon-theme}/share:${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+          # The checks from CONTRIBUTING.md run on every commit.
+          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git config core.hooksPath .githooks
+          fi
         '';
       };
     });

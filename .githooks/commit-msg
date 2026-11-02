@@ -1,0 +1,20 @@
+#!/bin/sh
+# Rejects commit messages that credit an AI tool. Whoever commits is the
+# author and owns the change; see "Using AI tools" in CONTRIBUTING.md.
+
+message_file="$1"
+
+tools='claude|anthropic|copilot|chatgpt|openai|gpt-[0-9]|gemini|cursor|codeium|windsurf|aider|devin'
+
+found=$(grep -v '^#' "$message_file" | grep -inE \
+  -e "^co-authored-by:.*($tools)" \
+  -e "generated (with|by) .*($tools)")
+
+if [ -n "$found" ]; then
+  echo "commit-msg: this message credits an AI tool:" >&2
+  echo "$found" | sed 's/^/  line /' >&2
+  echo "" >&2
+  echo "You are the author of what you commit. Remove these lines;" >&2
+  echo "see \"Using AI tools\" in CONTRIBUTING.md." >&2
+  exit 1
+fi

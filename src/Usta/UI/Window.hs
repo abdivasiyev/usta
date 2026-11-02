@@ -26,6 +26,8 @@ import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
+import qualified Usta.UI.Pages.PullRequest.Files as Files
+import qualified Usta.UI.Components.Diff as Diff
 import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
@@ -103,6 +105,7 @@ build app = do
 tabContent :: PullRequest.Tab -> IO Gtk.Widget
 tabContent tab = case tab of
   PullRequest.Conversation -> Conversation.new Conversation.sample
+  PullRequest.Files -> Files.new Files.sample
   _ -> PullRequest.placeholder tab
 
 -- | The detail header from an inbox notification about a pull request.
@@ -191,7 +194,7 @@ styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
-  , PullRequest.css, Conversation.css
+  , PullRequest.css, Conversation.css, Diff.css, Files.css
   , windowCss
   ]
 

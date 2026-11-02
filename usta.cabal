@@ -18,6 +18,8 @@ executable usta
   other-modules:
     Usta.DB.Schema.Account
     Usta.DB.Schema.Notification
+    Usta.DB.Schema.PullRequest
+    Usta.DB.Schema.PullRequestInvolvement
     Usta.DB.Schema.Repository
     Usta.Types.Account
     Usta.Types.Forge

@@ -16,6 +16,8 @@ executable usta
     src
 
   other-modules:
+    Usta.DB
+    Usta.DB.Schema
     Usta.DB.Schema.Account
     Usta.DB.Schema.Issue
     Usta.DB.Schema.IssueInvolvement
@@ -24,6 +26,7 @@ executable usta
     Usta.DB.Schema.PullRequest
     Usta.DB.Schema.PullRequestInvolvement
     Usta.DB.Schema.Repository
+    Usta.DB.Schema.SyncCursor
     Usta.Types.Account
     Usta.Types.Forge
     Usta.Types.Host

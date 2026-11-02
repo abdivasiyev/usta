@@ -25,6 +25,7 @@ import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import qualified Usta.UI.Components.SyncStatus as SyncStatus
 import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Style as Style
 
@@ -33,6 +34,7 @@ styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Icon.css
   , NavItem.css, SearchField.css, Segmented.css, Shortcut.css, Skeleton.css, Progress.css
+  , SyncStatus.css
   , galleryCss
   ]
 
@@ -121,6 +123,13 @@ build app = do
     Progress.new [Progress.Plain "Fetching ", Progress.Code "feat/big-refactor"] (Progress.Percent 64)
       >>= #append column
     Progress.new [Progress.Plain "Talking to git.azizovich.uz"] Progress.Unknown >>= #append column
+    #append row column
+
+  section page "Sync status" $ \row -> do
+    column <- vbox 12
+    forM_ [ SyncStatus.Synced "1 min ago", SyncStatus.Syncing "3 of 5 repositories"
+          , SyncStatus.Offline, SyncStatus.Failed ] $ \state ->
+      SyncStatus.new state (pure ()) >>= #append column
     #append row column
 
   scroller <- GI.new Gtk.ScrolledWindow [#child := page, #vexpand := True]

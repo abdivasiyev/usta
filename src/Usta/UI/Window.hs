@@ -27,6 +27,7 @@ import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
+import qualified Usta.UI.Components.SyncStatus as SyncStatus
 import qualified Usta.UI.Pages.AddAccount as AddAccount
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
@@ -321,9 +322,8 @@ headerBar platform onSettings onSearch = do
   Gtk.widgetAddController search click
   #packStart header search
 
-  sync <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Badge.dot Success >>= #append sync
-  GI.new Gtk.Label [#label := "Synced 1 min ago", #cssClasses := ["muted", "sync"]] >>= #append sync
+  -- Retrying needs the sync engine, which comes later.
+  sync <- SyncStatus.new (SyncStatus.Synced "1 min ago") (pure ())
 
   refresh <- Button.new Button.defaults
     { Button.icon = Just "view-refresh-symbolic"
@@ -351,7 +351,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css
   , windowCss
   ]
 
@@ -362,5 +362,4 @@ windowCss = mconcat
   , "  border-bottom: 1px solid var(--border); box-shadow: none;"
   , "}"
   , "headerbar.u-header label.brand { font-weight: 700; font-size: 15px; margin-right: 12px; }"
-  , "headerbar.u-header label.sync { font-size: 13px; }"
   ]

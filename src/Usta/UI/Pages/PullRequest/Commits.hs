@@ -13,6 +13,7 @@ module Usta.UI.Pages.PullRequest.Commits
 import Control.Monad (forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -22,6 +23,7 @@ import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Diff as Diff
 import Usta.UI.Components.Diff (Line (..))
 
+type Commit :: Type
 data Commit = Commit
   { hash :: Text
     -- ^ Full hash; lists show the first seven characters.

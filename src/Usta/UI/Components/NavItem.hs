@@ -12,6 +12,7 @@ module Usta.UI.Components.NavItem
 import Control.Monad (forM_, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)), set)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -19,6 +20,7 @@ import qualified GI.Gtk as Gtk
 import qualified Usta.UI.Components.Badge as Badge
 import Usta.UI.Style (Tone)
 
+type Config :: Type
 data Config = Config
   { label :: Text
   , count :: Maybe Int

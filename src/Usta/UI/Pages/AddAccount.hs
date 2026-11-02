@@ -17,6 +17,7 @@ import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -28,6 +29,7 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Platform as Platform
 import Usta.UI.Style (Tone (..))
 
+type Model :: Type
 data Model = Model
   { forge :: Forge.Kind
     -- ^ The forge selected at start.
@@ -51,6 +53,7 @@ for kind = sample
   }
 
 -- | A forge server, parsed from what was typed.
+type Server :: Type
 newtype Server = Server { host :: Text }
   deriving (Eq, Show)
 

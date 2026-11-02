@@ -15,6 +15,7 @@ module Usta.UI.Components.Icon
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
 import qualified GI.GLib as GLib
@@ -22,6 +23,7 @@ import qualified GI.Gtk as Gtk
 
 import Usta.UI.Style (Tone, toneClass)
 
+type Icon :: Type
 data Icon
   = Logo
   | PullRequest

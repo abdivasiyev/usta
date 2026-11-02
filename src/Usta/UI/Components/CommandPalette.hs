@@ -16,6 +16,7 @@ import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.List (find, findIndex)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -23,9 +24,11 @@ import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Shortcut as Shortcut
 
+type Kind :: Type
 data Kind = PullRequest | Issue | Repository | Command
   deriving (Eq, Enum, Bounded)
 
+type Item :: Type
 data Item = Item
   { kind :: Kind
   , title :: Text
@@ -34,6 +37,7 @@ data Item = Item
   , run :: IO ()
   }
 
+type Model :: Type
 data Model = Model
   { recent :: [Item]
     -- ^ Shown before anything is typed.
@@ -42,6 +46,7 @@ data Model = Model
   }
 
 -- | What was typed, parsed once: an optional kind prefix and the search term.
+type Query :: Type
 data Query = Query (Maybe Kind) Text
 
 prefix :: Kind -> Text

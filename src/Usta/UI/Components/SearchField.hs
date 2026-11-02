@@ -13,11 +13,13 @@ import Control.Monad (forM_)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)), set)
 import Data.Int (Int32)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Shortcut as Shortcut
 
+type Config :: Type
 data Config = Config
   { placeholder :: Text
   , shortcut :: Maybe Text

@@ -18,6 +18,7 @@ import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -33,11 +34,13 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
 
+type Kind :: Type
 data Kind = PullRequest | MergedPullRequest | Issue
   deriving (Eq, Show)
 
 -- | Why a notification is in the inbox. Add a constructor and its label
 -- and tone to introduce a new one.
+type Reason :: Type
 data Reason = ReviewRequested | ChecksFailed | Mentioned | Assigned | WasMerged
   deriving (Eq, Show, Enum, Bounded)
 
@@ -50,8 +53,10 @@ reasonBadge reason = case reason of
   WasMerged -> (Merged, "Merged")
 
 -- | A changed file: path, lines added, lines removed.
+type Change :: Type
 data Change = Change Text Int Int
 
+type Notification :: Type
 data Notification = Notification
   { kind :: Kind
   , forge :: Forge.Kind
@@ -70,6 +75,7 @@ data Notification = Notification
   , changes :: [Change]
   }
 
+type Filter :: Type
 data Filter = All | Unread | Participating
   deriving (Eq, Enum, Bounded)
 

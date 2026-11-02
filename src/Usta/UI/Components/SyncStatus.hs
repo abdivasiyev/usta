@@ -11,6 +11,7 @@ module Usta.UI.Components.SyncStatus
 import Control.Monad (void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
@@ -18,6 +19,7 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import Usta.UI.Style (Tone (..))
 
+type State :: Type
 data State
   = Synced Text
     -- ^ When, e.g. "1 min ago".

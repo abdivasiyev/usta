@@ -15,6 +15,7 @@ import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -28,12 +29,15 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import Usta.UI.Style (Tone (..))
 
 -- | A label as the forge defines it, shown in a tone.
+type Label :: Type
 data Label = Label Tone Text
 
 -- | How the issue involves you; decides which tab shows it.
+type Relation :: Type
 data Relation = AssignedToMe | CreatedByMe | MentionedMe
   deriving (Eq, Show, Enum, Bounded)
 
+type Issue :: Type
 data Issue = Issue
   { forge :: Forge.Kind
   , host :: Text
@@ -51,6 +55,7 @@ data Issue = Issue
   , relation :: Relation
   }
 
+type Tab :: Type
 data Tab = AssignedTab | CreatedTab | MentionedTab | ClosedTab
   deriving (Eq, Enum, Bounded)
 

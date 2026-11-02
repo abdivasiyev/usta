@@ -16,14 +16,17 @@ import Control.Monad (forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
 -- | A piece of a caption: plain text, or a branch or path in code font.
+type Part :: Type
 data Part = Plain Text | Code Text
 
 -- | How much is done, when that is known.
+type Amount :: Type
 data Amount = Percent Double | Unknown
 
 -- | Just the bar. An unknown amount moves back and forth while it is on

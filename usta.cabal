@@ -83,4 +83,5 @@ executable usta
     typed-process
 
   default-language: GHC2021
+  default-extensions: DataKinds
   ghc-options: -Wall

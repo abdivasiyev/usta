@@ -15,6 +15,7 @@ module Usta.UI.Pages.Settings
 import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32)
@@ -28,8 +29,10 @@ import qualified Usta.UI.Components.Shortcut as Shortcut
 import Usta.UI.Style (Tone (..))
 
 -- | How usta signed in to the forge.
+type Auth :: Type
 data Auth = BrowserSignIn | AccessToken
 
+type Account :: Type
 data Account = Account
   { forge :: Forge.Kind
   , host :: Text
@@ -38,6 +41,7 @@ data Account = Account
   , connected :: Bool
   }
 
+type Model :: Type
 data Model = Model
   { accounts :: [Account]
   , syncIntervals :: [Text]
@@ -50,6 +54,7 @@ data Model = Model
     -- ^ Keys and what they do, as the shortcut strip shows them.
   }
 
+type Section :: Type
 data Section = Accounts | Sync | Notifications | Appearance | Keyboard
   deriving (Eq, Enum, Bounded)
 
@@ -176,6 +181,7 @@ section s m onAddAccount = do
     capitalize t = T.toUpper (T.take 1 t) <> T.drop 1 t
 
 -- | A piece of a row's description, in the normal or the code font.
+type Piece :: Type
 data Piece = Piece Text Bool
 
 plain, code :: Text -> Piece

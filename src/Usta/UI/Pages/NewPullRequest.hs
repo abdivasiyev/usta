@@ -13,6 +13,7 @@ module Usta.UI.Pages.NewPullRequest
 import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -23,6 +24,7 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
 import Usta.UI.Style (Tone (..))
 
+type Model :: Type
 data Model = Model
   { repositories :: [Text]
   , targets :: [Text]

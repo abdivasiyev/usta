@@ -16,6 +16,7 @@ import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -26,6 +27,7 @@ import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
 import Usta.UI.Style (Tone (..))
 
+type Commit :: Type
 data Commit = Commit
   { hash :: Text
   , message :: Text
@@ -33,8 +35,10 @@ data Commit = Commit
   }
 
 -- | The README, already parsed from Markdown into the blocks we show.
+type Block :: Type
 data Block = Heading Text | Paragraph Text | Code Text
 
+type Repository :: Type
 data Repository = Repository
   { forge :: Forge.Kind
   , host :: Text

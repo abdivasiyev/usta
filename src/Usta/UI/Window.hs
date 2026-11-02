@@ -65,7 +65,10 @@ build app = do
   forM_ [minBound .. maxBound] $ \page -> do
     content <- case page of
       Sidebar.Inbox ->
-        Inbox.new (openPullRequest "Inbox" . notificationSummary) Inbox.sample >>= Gtk.toWidget
+        let open n
+              | Inbox.kind n == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
+              | otherwise = openPullRequest "Inbox" (notificationSummary n)
+        in Inbox.new open Inbox.sample >>= Gtk.toWidget
       Sidebar.PullRequests ->
         PullRequests.new openNewPullRequest (openPullRequest "Pull requests" . summaryOf)
           PullRequests.sample
@@ -149,6 +152,26 @@ notificationSummary n = PullRequest.Summary
       Danger -> "failed"
       Warning -> "running"
       _ -> ""
+
+-- | An issue's detail from an inbox notification about it.
+notificationIssue :: Inbox.Notification -> Issue.Model
+notificationIssue n = Issue.Model
+  { Issue.forge = Inbox.forge n
+  , Issue.host = Inbox.host n
+  , Issue.repo = Inbox.repo n
+  , Issue.number = Inbox.number n
+  , Issue.title = Inbox.title n
+  , Issue.closed = False
+  , Issue.comments =
+      [ Issue.Comment "abdivasiyev" "AA" (Inbox.opened n)
+          "Found while reviewing: describe what happens and what you expected."
+      ]
+  , Issue.events = []
+  , Issue.assignees = [("AA", "abdivasiyev")]
+  , Issue.labels = []
+  , Issue.milestone = Nothing
+  , Issue.linkedPullRequests = []
+  }
 
 -- | An issue's detail from its list row. The thread and side details are
 -- sample content until the issue is loaded from the forge.

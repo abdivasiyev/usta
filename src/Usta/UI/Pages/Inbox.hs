@@ -77,7 +77,7 @@ keeps f n = case f of
   Unread -> unread n
   Participating -> reason n `elem` [ReviewRequested, Mentioned, Assigned]
 
--- | @onOpen@ runs for "Open review" on a pull request.
+-- | @onOpen@ runs for "Open review" or "Open issue".
 new :: (Notification -> IO ()) -> [Notification] -> IO Gtk.Box
 new onOpen notifications = do
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
@@ -240,8 +240,7 @@ preview onOpen n = do
   actions <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   let primary = if kind n == Issue then "Open issue" else "Open review"
   open <- Button.new Button.defaults { Button.label = Just primary, Button.variant = Button.Primary }
-  -- Issues get their own screen later; for now only pull requests open.
-  when (kind n /= Issue) $ void $ GI.on open #clicked (onOpen n)
+  void $ GI.on open #clicked (onOpen n)
   #append actions open
   Button.new Button.defaults { Button.label = Just "Mark as done" } >>= #append actions
   Button.new Button.defaults { Button.label = Just "Open in browser" } >>= #append actions

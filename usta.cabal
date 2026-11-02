@@ -41,6 +41,7 @@ executable usta
     Usta.UI.Pages.PullRequest.Files
     Usta.UI.Pages.PullRequests
     Usta.UI.Pages.Repositories
+    Usta.UI.Pages.Settings
     Usta.UI.Platform
     Usta.UI.Sidebar
     Usta.UI.Style

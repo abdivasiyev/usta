@@ -51,7 +51,8 @@ new cfg = do
 
 css :: Text
 css = mconcat
-  [ "searchentry.u-search {"
+  -- GTK names a search entry's node "entry", with a "search" class.
+  [ "entry.u-search {"
   , "  min-height: 34px; padding-right: 60px; background: var(--input-bg); color: var(--text);"
   , "  border: 1px solid var(--input-border); border-radius: 8px; box-shadow: none;"
   , "}"

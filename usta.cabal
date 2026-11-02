@@ -18,6 +18,7 @@ executable usta
   other-modules:
     Usta.DB
     Usta.DB.Account
+    Usta.DB.Issue
     Usta.DB.Notification
     Usta.DB.PullRequest
     Usta.DB.Schema

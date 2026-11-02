@@ -16,13 +16,16 @@ executable usta
     src
 
   other-modules:
+    Usta.Types.Account
     Usta.Types.Forge
     Usta.Types.Host
     Usta.Types.Login
+    Usta.Types.Notification
     Usta.Types.Number
     Usta.Types.Parse
     Usta.Types.Ref
     Usta.Types.RepoName
+    Usta.Types.ThreadId
     Usta.Types.Token
     Usta.UI.Components.Avatar
     Usta.UI.Components.Badge

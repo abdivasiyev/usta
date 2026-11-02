@@ -17,6 +17,7 @@ import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.SearchField as SearchField
@@ -115,7 +116,7 @@ headerBar platform = do
 
 styles :: [Text]
 styles =
-  [ Avatar.css, Badge.css, Button.css, Card.css, Icon.css, NavItem.css
+  [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Shortcut.css, Sidebar.css
   , windowCss
   ]

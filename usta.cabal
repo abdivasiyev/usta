@@ -16,6 +16,7 @@ executable usta
     src
 
   other-modules:
+    Usta.Core.Parse
     Usta.UI.Components.Avatar
     Usta.UI.Components.Badge
     Usta.UI.Components.Button

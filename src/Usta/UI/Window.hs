@@ -26,6 +26,7 @@ import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
+import qualified Usta.UI.Pages.AddAccount as AddAccount
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import qualified Usta.UI.Pages.Issue as Issue
@@ -64,8 +65,8 @@ build app = do
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
       openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
       openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
-      -- Adding an account needs the sign-in flow, which comes later.
-      openSettings = Settings.new backToMain (pure ()) (Settings.sample shortcuts) >>= showDetail
+      openAddAccount = Gtk.toWidget screens >>= \anchor -> AddAccount.open anchor AddAccount.sample (pure ())
+      openSettings = Settings.new backToMain openAddAccount (Settings.sample shortcuts) >>= showDetail
 
   -- The palette wraps the whole window, so it exists only further down.
   paletteOpener <- newIORef (pure ())
@@ -127,7 +128,7 @@ build app = do
               [ command "Sync now" (keys "R") (pure ())
               , command "New pull request" (keys "Shift P") openNewPullRequest
               , command "New issue" (keys "Shift I") openNewIssue
-              , command "Add forge account" "" (pure ())
+              , command "Add forge account" "" openAddAccount
               , command "Open settings" (keys ",") openSettings
               , command themeTitle "" $
                   forM_ settings $ \s -> GI.set s [#gtkInterfaceColorScheme := nextScheme]
@@ -331,7 +332,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css
   , windowCss
   ]
 

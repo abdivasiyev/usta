@@ -30,6 +30,7 @@ executable usta
     Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcut
     Usta.UI.Gallery
+    Usta.UI.Pages.AddAccount
     Usta.UI.Pages.Inbox
     Usta.UI.Pages.Issue
     Usta.UI.Pages.Issues

@@ -13,13 +13,14 @@ import qualified Usta.UI.Gallery as Gallery
 import qualified Usta.UI.Window as Window
 
 -- | @usta --gallery@ opens the component gallery instead of the app;
--- @usta --welcome@ starts on the first-run screen.
+-- @usta --welcome@ and @usta --first-sync@ preview the first-run states.
 main :: IO ()
 main = do
   args <- getArgs
   let open
         | "--gallery" `elem` args = void . Gallery.build
-        | "--welcome" `elem` args = void . Window.buildFirstRun
+        | "--welcome" `elem` args = void . Window.buildAt Window.FirstRun
+        | "--first-sync" `elem` args = void . Window.buildAt Window.FirstSync
         | otherwise = void . Window.build
   app <- new Application [#applicationId := "io.github.abdivasiyev.Usta"
                          , On #activate (void $ open ?self)]

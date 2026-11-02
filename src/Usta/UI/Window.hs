@@ -25,6 +25,7 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Pages.PullRequest as PullRequest
+import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
 import qualified Usta.UI.Pages.PullRequest.Files as Files
 import qualified Usta.UI.Components.Diff as Diff
@@ -45,7 +46,7 @@ build app = do
         old <- Gtk.stackGetChildByName screens "detail"
         forM_ old $ Gtk.stackRemove screens
         detail <- PullRequest.new backLabel (Gtk.stackSetVisibleChildName screens "main")
-                    tabContent summary
+                    (tabContent summary) summary
         void $ Gtk.stackAddNamed screens detail (Just "detail")
         Gtk.stackSetVisibleChildName screens "detail"
 
@@ -102,10 +103,13 @@ build app = do
 -- | The detail header from a list row. File and commit counts are sample
 -- values until the detail is loaded from the forge.
 -- | Each tab of a pull request; sample content until the forge supplies it.
-tabContent :: PullRequest.Tab -> IO Gtk.Widget
-tabContent tab = case tab of
+tabContent :: PullRequest.Summary -> PullRequest.Tab -> IO Gtk.Widget
+tabContent summary tab = case tab of
   PullRequest.Conversation -> Conversation.new Conversation.sample
   PullRequest.Files -> Files.new Files.sample
+  PullRequest.Checks -> Checks.new $ case PullRequest.checks summary of
+    Just (Danger, _) -> Checks.failing
+    _ -> Checks.passing
   _ -> PullRequest.placeholder tab
 
 -- | The detail header from an inbox notification about a pull request.
@@ -194,7 +198,7 @@ styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
-  , PullRequest.css, Conversation.css, Diff.css, Files.css
+  , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css
   , windowCss
   ]
 

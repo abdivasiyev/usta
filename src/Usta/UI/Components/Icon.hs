@@ -28,6 +28,7 @@ data Icon
   | Issue
   | Check
   | Cross
+  | Skipped
   deriving (Eq, Show, Enum, Bounded)
 
 -- | An icon at the given size in pixels, in the surrounding text color.
@@ -70,6 +71,10 @@ source icon = case icon of
     ]
   Check -> line [ stroke "path" "d='M5 12l5 5 9-10'" ]
   Cross -> line [ stroke "path" "d='M6 6l12 12M18 6L6 18'" ]
+  Skipped -> line
+    [ stroke "circle" "cx='12' cy='12' r='8.5'"
+    , stroke "path" "d='M8 12h8'"
+    ]
   where
     svg64 parts = mconcat
       ([ "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'>" ]

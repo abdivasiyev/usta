@@ -21,10 +21,9 @@ import Database.Persist (EntityField, Unique)
 import Database.Persist.TH
 
 import Usta.DB.Schema.Account (AccountId)
+import Usta.Types.Count (Count)
 import Usta.Types.RepoName (RepoName)
 
--- Counts are Int: persistent has no Natural column. Reading a row turns
--- them back into Natural and rejects a negative one.
 -- 'discoverEntities' passes the entities already in scope (the accounts
 -- table), so the account reference becomes a foreign key; without it
 -- persistent drops the reference silently.
@@ -37,8 +36,8 @@ Repository sql=repositories
     description       Text Maybe
     defaultBranch     Text
     private           Bool
-    openPullRequests  Int
-    openIssues        Int
+    openPullRequests  Count
+    openIssues        Count
     updatedAt         UTCTime
     syncedAt          UTCTime
 

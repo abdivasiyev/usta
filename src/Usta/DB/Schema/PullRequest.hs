@@ -21,13 +21,12 @@ import Database.Persist (EntityField, Unique)
 import Database.Persist.TH
 
 import Usta.DB.Schema.Account (AccountId)
+import Usta.Types.Count (Count)
 import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (Checks, Review, State)
 import Usta.Types.RepoName (RepoName)
 
--- Counts are Int: persistent has no Natural column. Reading a row turns
--- them back into Natural and rejects a negative one.
 -- 'discoverEntities' passes the entities already in scope (the accounts
 -- table), so the account reference becomes a foreign key.
 share
@@ -44,9 +43,9 @@ PullRequest sql=pull_requests
     state         State
     checks        Checks Maybe
     review        Review Maybe
-    comments      Int
-    changedFiles  Int Maybe
-    commits       Int Maybe
+    comments      Count
+    changedFiles  Count Maybe
+    commits       Count Maybe
     createdAt     UTCTime
     updatedAt     UTCTime
     syncedAt      UTCTime

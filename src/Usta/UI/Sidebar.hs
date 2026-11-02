@@ -7,7 +7,6 @@ module Usta.UI.Sidebar
   ( Page (..)
   , pageName
   , pageTitle
-  , ForgeKind (..)
   , Model (..)
   , sample
   , new
@@ -22,6 +21,7 @@ import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.NavItem as NavItem
 
 -- | Every place the sidebar can take you.
@@ -51,13 +51,10 @@ pageTitle page = case page of
   Issues -> "Issues"
   Repositories -> "Repositories"
 
-data ForgeKind = GitHub | GitLab | Forgejo
-  deriving (Eq, Show)
-
 -- | What the sidebar shows. Comes from the cache once sync exists.
 data Model = Model
   { counts :: Page -> Maybe Int
-  , forges :: [(ForgeKind, Text)]
+  , forges :: [(Forge.Kind, Text)]
   , pinned :: [Text]
   }
 
@@ -69,7 +66,7 @@ sample = Model
       AssignedToMe -> Just 3
       Mentions -> Just 1
       _ -> Nothing
-  , forges = [(GitHub, "github.com"), (Forgejo, "git.azizovich.uz")]
+  , forges = [(Forge.GitHub, "github.com"), (Forge.Forgejo, "git.azizovich.uz")]
   , pinned = ["abdivasiyev/usta", "abdivasiyev/homelab", "abdivasiyev/nix"]
   }
 
@@ -104,7 +101,7 @@ new model selected onSelect = do
   forgeGroup <- vbox 2
   Card.sectionTitle "Forges" >>= #append forgeGroup
   forM_ (forges model) $ \(kind, host) -> do
-    dot <- forgeDot kind
+    dot <- Forge.dot kind
     NavItem.new NavItem.defaults { NavItem.label = host, NavItem.leading = Just dot }
       >>= #append forgeGroup
   NavItem.new NavItem.defaults { NavItem.label = "+ Add forge", NavItem.link = True }
@@ -120,18 +117,6 @@ new model selected onSelect = do
 
   pure sidebar
 
--- | Each forge keeps its own color, independent of status tones.
-forgeDot :: ForgeKind -> IO Gtk.Widget
-forgeDot kind = do
-  dot <- GI.new Gtk.Box [ #cssClasses := ["u-dot", forgeClass kind]
-                        , #valign := Gtk.AlignCenter
-                        ]
-  Gtk.toWidget dot
-  where
-    forgeClass GitHub = "forge-github"
-    forgeClass GitLab = "forge-gitlab"
-    forgeClass Forgejo = "forge-forgejo"
-
 vbox :: Int -> IO Gtk.Box
 vbox gap = GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := fromIntegral gap]
 
@@ -141,11 +126,4 @@ css = mconcat
   , "  background: var(--sidebar); border-right: 1px solid var(--border); padding: 16px 12px;"
   , "}"
   , "box.u-sidebar label.u-section-title { margin: 0 10px 6px; }"
-  , "box.u-dot.forge-github { background: var(--text); }"
-  , "box.u-dot.forge-gitlab { background: #6D28D9; }"
-  , "box.u-dot.forge-forgejo { background: #C2410C; }"
-  , "@media (prefers-color-scheme: dark) {"
-  , "  box.u-dot.forge-gitlab { background: #A78BFA; }"
-  , "  box.u-dot.forge-forgejo { background: #F08A4B; }"
-  , "}"
   ]

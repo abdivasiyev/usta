@@ -20,6 +20,7 @@ executable usta
     Usta.UI.Components.Badge
     Usta.UI.Components.Button
     Usta.UI.Components.Card
+    Usta.UI.Components.Forge
     Usta.UI.Components.Icon
     Usta.UI.Components.NavItem
     Usta.UI.Components.SearchField

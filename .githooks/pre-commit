@@ -1,0 +1,21 @@
+#!/bin/sh
+# Rejects files that configure AI tools; they stay on the contributor's
+# machine. See "Using AI tools" in CONTRIBUTING.md.
+
+found=$(git diff --cached --name-only --diff-filter=ACR | grep -E \
+  -e '(^|/)\.claude/' \
+  -e '(^|/)(CLAUDE|AGENTS|GEMINI)\.md$' \
+  -e '(^|/)\.cursor/' \
+  -e '(^|/)\.(cursorrules|windsurfrules)$' \
+  -e '(^|/)\.aider' \
+  -e '(^|/)\.github/copilot-instructions\.md$')
+
+if [ -n "$found" ]; then
+  echo "pre-commit: these files configure AI tools:" >&2
+  echo "$found" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "Keep them out of the repository: unstage them with" >&2
+  echo "  git restore --staged <file>" >&2
+  echo "and add them to .git/info/exclude so they stay local." >&2
+  exit 1
+fi

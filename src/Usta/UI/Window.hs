@@ -5,9 +5,10 @@
 -- strip at the bottom.
 module Usta.UI.Window
   ( build
+  , buildFirstRun
   ) where
 
-import Control.Monad (forM_, join, void)
+import Control.Monad (forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -42,13 +43,21 @@ import qualified Usta.UI.Components.Diff as Diff
 import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Pages.Repositories as Repositories
 import qualified Usta.UI.Pages.Settings as Settings
+import qualified Usta.UI.Pages.Welcome as Welcome
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Style as Style
 
 build :: Gtk.Application -> IO Gtk.ApplicationWindow
-build app = do
+build = buildWith False
+
+-- | Starts on the welcome screen, as before any account is connected.
+buildFirstRun :: Gtk.Application -> IO Gtk.ApplicationWindow
+buildFirstRun = buildWith True
+
+buildWith :: Bool -> Gtk.Application -> IO Gtk.ApplicationWindow
+buildWith firstRun app = do
   -- Two screens: "main" (sidebar and pages) and "detail" (a full-width
   -- screen such as one pull request or the new pull request form).
   screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
@@ -144,12 +153,22 @@ build app = do
   (withPalette, openPalette) <- CommandPalette.new rootWidget paletteModel
   writeIORef paletteOpener openPalette
 
+  -- The welcome screen covers the whole window until an account is added.
+  top <- GI.new Gtk.Stack [#transitionType := Gtk.StackTransitionTypeCrossfade]
+  void $ Gtk.stackAddNamed top withPalette (Just "app")
+  when firstRun $ do
+    let connect kind = Gtk.toWidget top >>= \anchor ->
+          AddAccount.open anchor (AddAccount.for kind) (Gtk.stackSetVisibleChildName top "app")
+    welcome <- Welcome.new connect
+    void $ Gtk.stackAddNamed top welcome (Just "welcome")
+    Gtk.stackSetVisibleChildName top "welcome"
+
   window <- GI.new Gtk.ApplicationWindow [ #application := app
                                          , #title := "usta"
                                          , #defaultWidth := 1280
                                          , #defaultHeight := 800
                                          , #titlebar := noTitlebar
-                                         , #child := withPalette
+                                         , #child := top
                                          , #cssClasses := ["usta"]
                                          ]
   Gtk.toWidget window >>= \w -> Style.install w styles
@@ -332,7 +351,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css
   , windowCss
   ]
 

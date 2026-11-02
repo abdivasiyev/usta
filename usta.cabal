@@ -28,6 +28,7 @@ executable usta
     Usta.DB.Schema.Repository
     Usta.DB.Schema.SyncCursor
     Usta.Types.Account
+    Usta.Types.Count
     Usta.Types.Forge
     Usta.Types.Host
     Usta.Types.Involvement

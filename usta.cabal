@@ -1,4 +1,4 @@
-cabal-version: 3.0
+cabal-version: 3.14
 name: usta
 version: 0.1.0.0
 synopsis: A native desktop client for code forges
@@ -96,6 +96,5 @@ executable usta
     time,
     typed-process
 
-  default-language: GHC2021
-  default-extensions: DataKinds
+  default-language: GHC2024
   ghc-options: -Wall

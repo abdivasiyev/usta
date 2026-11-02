@@ -149,7 +149,9 @@ open anchor m onAdded = do
   Gtk.widgetAddCssClass methods "methods"
   #append body methods
 
-  signIn <- GI.new Gtk.Stack [#vhomogeneous := False]
+  -- Size to the visible page only: measuring the hidden one's wrapped
+  -- hint against the visible one's height makes GTK warn.
+  signIn <- GI.new Gtk.Stack [#vhomogeneous := False, #hhomogeneous := False]
   tokenPage <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10]
   caption "Personal access token" >>= #append tokenPage
   token <- GI.new Gtk.PasswordEntry [ #placeholderText := "Paste your token"

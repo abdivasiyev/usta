@@ -37,6 +37,7 @@ import qualified Usta.UI.Pages.PullRequest.Files as Files
 import qualified Usta.UI.Components.Diff as Diff
 import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Pages.Repositories as Repositories
+import qualified Usta.UI.Pages.Settings as Settings
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Style (Tone (..))
@@ -44,8 +45,6 @@ import qualified Usta.UI.Style as Style
 
 build :: Gtk.Application -> IO Gtk.ApplicationWindow
 build app = do
-  header <- headerBar Platform.current
-
   -- Two screens: "main" (sidebar and pages) and "detail" (a full-width
   -- screen such as one pull request or the new pull request form).
   screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
@@ -61,6 +60,10 @@ build app = do
           >>= Gtk.toWidget >>= showDetail
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
       openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
+      -- Adding an account needs the sign-in flow, which comes later.
+      openSettings = Settings.new backToMain (pure ()) (Settings.sample shortcuts) >>= showDetail
+
+  header <- headerBar Platform.current openSettings
 
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
@@ -94,9 +97,7 @@ build app = do
   #append body pages
   void $ Gtk.stackAddNamed screens body (Just "main")
 
-  footer <- Shortcut.bar
-    [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
-    (Just "2 forges · 3 accounts")
+  footer <- Shortcut.bar shortcuts (Just "2 forges · 3 accounts")
 
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
@@ -221,8 +222,13 @@ summaryOf pr = PullRequest.Summary
       PullRequests.NoChecks -> Nothing
   }
 
-headerBar :: Platform.Platform -> IO Gtk.HeaderBar
-headerBar platform = do
+-- | The single-key shortcuts, for the footer strip and Settings.
+shortcuts :: [(Text, Text)]
+shortcuts =
+  [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
+
+headerBar :: Platform.Platform -> IO () -> IO Gtk.HeaderBar
+headerBar platform onSettings = do
   header <- GI.new Gtk.HeaderBar [#cssClasses := ["u-header"]]
   Platform.configureHeaderBar platform header
 
@@ -253,6 +259,7 @@ headerBar platform = do
     , Button.variant = Button.Flat
     , Button.tooltip = Just "Settings"
     }
+  void $ GI.on settings #clicked onSettings
   avatar <- Avatar.new 32 "AA"
 
   -- packEnd fills from the right edge inwards.
@@ -268,7 +275,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
-  , NewIssue.css, Repositories.css
+  , NewIssue.css, Repositories.css, Settings.css
   , windowCss
   ]
 

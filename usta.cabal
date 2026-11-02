@@ -27,6 +27,7 @@ executable usta
     Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcut
     Usta.UI.Gallery
+    Usta.UI.Pages.Inbox
     Usta.UI.Platform
     Usta.UI.Sidebar
     Usta.UI.Style
@@ -36,6 +37,7 @@ executable usta
     base,
     gi-glib,
     gi-gtk4,
+    gi-pango,
     haskell-gi-base,
     text
 

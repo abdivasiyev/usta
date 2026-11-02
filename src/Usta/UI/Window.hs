@@ -24,6 +24,7 @@ import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
+import qualified Usta.UI.Pages.Issues as Issues
 import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
@@ -65,6 +66,8 @@ build app = do
         PullRequests.new openNewPullRequest (openPullRequest "Pull requests" . summaryOf)
           PullRequests.sample
           >>= Gtk.toWidget
+      -- Opening and creating issues get their screens next.
+      Sidebar.Issues -> Issues.new (pure ()) (const (pure ())) Issues.sample >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -206,7 +209,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css
+  , NewPullRequest.css, Issues.css
   , windowCss
   ]
 

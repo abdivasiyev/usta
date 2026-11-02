@@ -17,6 +17,7 @@ executable usta
 
   other-modules:
     Usta.DB
+    Usta.DB.Account
     Usta.DB.Schema
     Usta.DB.Schema.Account
     Usta.DB.Schema.Issue

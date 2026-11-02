@@ -11,9 +11,10 @@ module Usta.UI.Pages.PullRequest.Files
   , css
   ) where
 
-import Control.Monad (forM, forM_, void)
+import Control.Monad (filterM, forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -47,75 +48,145 @@ data Model = Model
   , approvalsNeeded :: Int
   }
 
+-- | One changed file as shown in both columns.
+data Entry = Entry
+  { file :: Diff.File
+  , row :: Gtk.Button
+  , mark :: Gtk.Box
+  , card :: Gtk.Box
+  }
+
+-- | Space around and between the diffs; matches the CSS below.
+padding, gap :: Double
+padding = 16
+gap = 16
+
 new :: Model -> IO Gtk.Widget
 new m = do
   columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #cssClasses := ["u-files"]
                             ]
-  fileList m >>= #append columns
-
-  main <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                         , #spacing := 16
-                         , #cssClasses := ["diffs"]
-                         ]
-  toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
-  label "Diff computed locally" ["muted", "small"] >>= #append toolbar
-  label (range m) ["muted", "small", "mono"] >>= #append toolbar
-  #append main toolbar
-  forM_ (files m) $ \(file, comments) -> do
-    attached <- forM comments $ \c -> do
-      w <- thread c >>= Gtk.toWidget
-      pure (onLine c, w)
-    Diff.new file attached >>= #append main
-  scroll <- GI.new Gtk.ScrolledWindow [ #child := main
-                                      , #hexpand := True
-                                      , #vexpand := True
-                                      ]
-  #append columns scroll
-
-  review m >>= #append columns
-  Gtk.toWidget columns
-
-fileList :: Model -> IO Gtk.Box
-fileList m = do
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 6
                          , #widthRequest := 240
                          , #hexpand := False
                          , #cssClasses := ["file-list"]
                          ]
-  GI.new Gtk.SearchEntry [#placeholderText := "Filter files"] >>= #append side
-  -- The first file is the one in view until scrolling is tracked.
-  forM_ (zip [0 :: Int ..] (files m)) $ \(index, (file, _)) -> do
-    row <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                          , #spacing := 8
-                          , #cssClasses := ["file-row"] <> ["current" | index == 0]
-                          ]
-    mark <- GI.new Gtk.Box [ #cssClasses := ["viewed-mark"] <> ["done" | Diff.viewed file]
-                           , #valign := Gtk.AlignCenter
-                           ]
-    if Diff.viewed file
-      then Icon.toned 10 Success Icon.Check >>= #append mark
-      else pure ()
-    #append row mark
-    name <- label (Diff.path file) ["mono", "small"]
-    GI.set name [#hexpand := True]
-    #append row name
-    let (plus, minus) = counts file
-    label ("+" <> plus) ["mono", "small", "added"] >>= #append row
-    label ("−" <> minus) ["mono", "small", "removed"] >>= #append row
-    #append side row
-  let total = length (files m)
-      seen = length (filter (Diff.viewed . fst) (files m))
-  progress <- label (T.pack (show seen) <> " of " <> T.pack (show total) <> " files viewed") ["muted", "small"]
+  filterEntry <- GI.new Gtk.SearchEntry [#placeholderText := "Filter files"]
+  #append side filterEntry
+  #append columns side
+
+  main <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #spacing := round gap
+                         , #cssClasses := ["diffs"]
+                         ]
+  toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
+  label "Diff computed locally" ["muted", "small"] >>= #append toolbar
+  label (range m) ["muted", "small", "mono"] >>= #append toolbar
+  #append main toolbar
+  scroll <- GI.new Gtk.ScrolledWindow [ #child := main
+                                      , #hexpand := True
+                                      , #vexpand := True
+                                      ]
+  adjustment <- Gtk.scrolledWindowGetVadjustment scroll
+
+  progress <- label "" ["muted", "small"]
   GI.set progress [#vexpand := True, #valign := Gtk.AlignEnd]
+
+  entriesRef <- newIORef []
+  let updateProgress = do
+        entries <- readIORef entriesRef
+        seen <- length . filter id <$> mapM (\e -> Gtk.widgetHasCssClass (mark e) "done") entries
+        GI.set progress [ #label := T.pack (show seen) <> " of " <> T.pack (show (length entries))
+                                    <> " files viewed" ]
+
+  entries <- forM (files m) $ \(f, comments) -> do
+    attached <- forM comments $ \c -> do
+      w <- thread c >>= Gtk.toWidget
+      pure (onLine c, w)
+    markBox <- viewedMark (Diff.viewed f)
+    diff <- Diff.new f attached $ \isViewed -> do
+      setViewed markBox isViewed
+      updateProgress
+    #append main diff
+    button <- fileRow f markBox
+    #append side button
+    pure (Entry f button markBox diff)
+  writeIORef entriesRef entries
   #append side progress
-  pure side
+  updateProgress
+
+  let setCurrent current =
+        forM_ entries $ \e ->
+          if Diff.path (file e) == Diff.path (file current)
+            then Gtk.widgetAddCssClass (row e) "current"
+            else Gtk.widgetRemoveCssClass (row e) "current"
+      -- Where each shown diff starts inside the scrolled column.
+      offsets = do
+        toolbarHeight <- fromIntegral <$> Gtk.widgetGetHeight toolbar
+        shown <- filterM (Gtk.widgetGetVisible . card) entries
+        heights <- mapM (fmap fromIntegral . Gtk.widgetGetHeight . card) shown
+        let starts = scanl (\y h -> y + h + gap) (padding + toolbarHeight + gap) heights
+        pure (zip shown starts)
+
+  forM_ entries $ \e ->
+    void $ GI.on (row e) #clicked $ do
+      positions <- offsets
+      forM_ [y | (other, y) <- positions, Diff.path (file other) == Diff.path (file e)] $ \y ->
+        Gtk.adjustmentSetValue adjustment (y - padding)
+      setCurrent e
+
+  -- The highlight follows whichever diff is at the top of the view.
+  void $ GI.on adjustment #valueChanged $ do
+    top <- Gtk.adjustmentGetValue adjustment
+    positions <- offsets
+    case [e | (e, y) <- positions, y - padding <= top + 1] of
+      [] -> forM_ (take 1 positions) (setCurrent . fst)
+      passed -> setCurrent (last passed)
+
+  void $ GI.on filterEntry #searchChanged $ do
+    query <- T.toLower <$> Gtk.editableGetText filterEntry
+    forM_ entries $ \e -> do
+      let keep = query `T.isInfixOf` T.toLower (Diff.path (file e))
+      GI.set (row e) [#visible := keep]
+      GI.set (card e) [#visible := keep]
+
+  forM_ (take 1 entries) setCurrent
+  #append columns scroll
+  review m >>= #append columns
+  Gtk.toWidget columns
+
+-- | The square in the file list: empty, or checked once viewed.
+viewedMark :: Bool -> IO Gtk.Box
+viewedMark isViewed = do
+  box <- GI.new Gtk.Box [#cssClasses := ["viewed-mark"], #valign := Gtk.AlignCenter]
+  check <- Icon.toned 10 Success Icon.Check
+  #append box check
+  setViewed box isViewed
+  pure box
+
+setViewed :: Gtk.Box -> Bool -> IO ()
+setViewed box isViewed = do
+  if isViewed then Gtk.widgetAddCssClass box "done" else Gtk.widgetRemoveCssClass box "done"
+  child <- Gtk.widgetGetFirstChild box
+  forM_ child $ \c -> GI.set c [#visible := isViewed]
+
+fileRow :: Diff.File -> Gtk.Box -> IO Gtk.Button
+fileRow f markBox = do
+  content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  #append content markBox
+  name <- label (Diff.path f) ["mono", "small"]
+  GI.set name [#hexpand := True]
+  #append content name
+  label ("+" <> count isAdded) ["mono", "small", "added"] >>= #append content
+  label ("−" <> count isRemoved) ["mono", "small", "removed"] >>= #append content
+  GI.new Gtk.Button [#child := content, #hasFrame := False, #cssClasses := ["file-row"]]
   where
-    counts file =
-      ( T.pack (show (length [() | Added _ _ <- Diff.diffLines file]))
-      , T.pack (show (length [() | Removed _ _ <- Diff.diffLines file]))
-      )
+    count p = T.pack (show (length (filter p (Diff.diffLines f))))
+    isAdded (Added _ _) = True
+    isAdded _ = False
+    isRemoved (Removed _ _) = True
+    isRemoved _ = False
 
 thread :: Comment -> IO Gtk.Box
 thread c = do
@@ -270,8 +341,12 @@ css = mconcat
   , "box.u-files box.file-list {"
   , "  padding: 12px; background: var(--sidebar); border-right: 1px solid var(--border);"
   , "}"
-  , "box.u-files box.file-row { padding: 8px 8px; border-radius: 6px; }"
-  , "box.u-files box.file-row.current { background: var(--nav-active); }"
+  , "box.u-files button.file-row {"
+  , "  padding: 8px; border-radius: 6px; border: none; box-shadow: none; background: transparent;"
+  , "  background-image: none; color: var(--text); font-weight: 400;"
+  , "}"
+  , "box.u-files button.file-row:hover { background: var(--border-subtle); }"
+  , "box.u-files button.file-row.current { background: var(--nav-active); }"
   , "box.u-files box.viewed-mark {"
   , "  min-width: 14px; min-height: 14px; border-radius: 3px; border: 1.5px solid var(--text-muted);"
   , "}"

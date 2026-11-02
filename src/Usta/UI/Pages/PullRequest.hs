@@ -8,6 +8,7 @@ module Usta.UI.Pages.PullRequest
   , Summary (..)
   , Tab (..)
   , new
+  , placeholder
   , css
   ) where
 
@@ -55,9 +56,10 @@ data Tab = Conversation | Files | Commits | Checks
 tabName :: Tab -> Text
 tabName = T.toLower . T.pack . show
 
--- | @backLabel@ names where Back goes, e.g. "Pull requests" or "Inbox".
-new :: Text -> IO () -> Summary -> IO Gtk.Box
-new backLabel onBack summary = do
+-- | @backLabel@ names where Back goes, e.g. "Pull requests" or "Inbox";
+-- @tabContent@ builds each tab's screen.
+new :: Text -> IO () -> (Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
+new backLabel onBack tabContent summary = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
@@ -67,13 +69,17 @@ new backLabel onBack summary = do
 
   content <- GI.new Gtk.Stack [#vexpand := True, #hexpand := True]
   forM_ [minBound .. maxBound] $ \tab -> do
-    -- Each tab gets its screen in the following changes.
-    placeholder <- GI.new Gtk.Label [#label := T.pack (show tab), #cssClasses := ["muted"]]
-    void $ Gtk.stackAddNamed content placeholder (Just (tabName tab))
+    widget <- tabContent tab
+    void $ Gtk.stackAddNamed content widget (Just (tabName tab))
 
   tabBar summary (Gtk.stackSetVisibleChildName content . tabName) >>= #append page
   #append page content
   pure page
+
+-- | A stand-in for a tab whose screen does not exist yet.
+placeholder :: Tab -> IO Gtk.Widget
+placeholder tab =
+  GI.new Gtk.Label [#label := T.pack (show tab), #cssClasses := ["muted"]] >>= Gtk.toWidget
 
 header :: Summary -> Text -> IO () -> IO Gtk.Box
 header s backLabel onBack = do

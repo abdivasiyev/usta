@@ -29,6 +29,7 @@ executable usta
     Usta.UI.Gallery
     Usta.UI.Pages.Inbox
     Usta.UI.Pages.PullRequest
+    Usta.UI.Pages.PullRequest.Conversation
     Usta.UI.Pages.PullRequests
     Usta.UI.Platform
     Usta.UI.Sidebar

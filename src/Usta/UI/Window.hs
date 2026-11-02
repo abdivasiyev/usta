@@ -25,6 +25,7 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Pages.PullRequest as PullRequest
+import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
 import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
@@ -41,7 +42,8 @@ build app = do
   let openPullRequest backLabel summary = do
         old <- Gtk.stackGetChildByName screens "detail"
         forM_ old $ Gtk.stackRemove screens
-        detail <- PullRequest.new backLabel (Gtk.stackSetVisibleChildName screens "main") summary
+        detail <- PullRequest.new backLabel (Gtk.stackSetVisibleChildName screens "main")
+                    tabContent summary
         void $ Gtk.stackAddNamed screens detail (Just "detail")
         Gtk.stackSetVisibleChildName screens "detail"
 
@@ -96,6 +98,12 @@ build app = do
 
 -- | The detail header from a list row. File and commit counts are sample
 -- values until the detail is loaded from the forge.
+-- | Each tab of a pull request; sample content until the forge supplies it.
+tabContent :: PullRequest.Tab -> IO Gtk.Widget
+tabContent tab = case tab of
+  PullRequest.Conversation -> Conversation.new Conversation.sample
+  _ -> PullRequest.placeholder tab
+
 summaryOf :: PullRequests.PullRequest -> PullRequest.Summary
 summaryOf pr = PullRequest.Summary
   { PullRequest.forge = PullRequests.forge pr
@@ -159,7 +167,7 @@ styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
-  , PullRequest.css
+  , PullRequest.css, Conversation.css
   , windowCss
   ]
 

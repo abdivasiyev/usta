@@ -31,6 +31,7 @@ executable usta
     Usta.UI.Pages.Inbox
     Usta.UI.Pages.PullRequest
     Usta.UI.Pages.PullRequest.Checks
+    Usta.UI.Pages.PullRequest.Commits
     Usta.UI.Pages.PullRequest.Conversation
     Usta.UI.Pages.PullRequest.Files
     Usta.UI.Pages.PullRequests

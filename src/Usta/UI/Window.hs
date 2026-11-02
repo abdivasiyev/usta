@@ -26,6 +26,7 @@ import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
+import qualified Usta.UI.Pages.PullRequest.Commits as Commits
 import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
 import qualified Usta.UI.Pages.PullRequest.Files as Files
 import qualified Usta.UI.Components.Diff as Diff
@@ -107,10 +108,10 @@ tabContent :: PullRequest.Summary -> PullRequest.Tab -> IO Gtk.Widget
 tabContent summary tab = case tab of
   PullRequest.Conversation -> Conversation.new Conversation.sample
   PullRequest.Files -> Files.new Files.sample
+  PullRequest.Commits -> Commits.new Commits.sample
   PullRequest.Checks -> Checks.new $ case PullRequest.checks summary of
     Just (Danger, _) -> Checks.failing
     _ -> Checks.passing
-  _ -> PullRequest.placeholder tab
 
 -- | The detail header from an inbox notification about a pull request.
 notificationSummary :: Inbox.Notification -> PullRequest.Summary
@@ -198,7 +199,7 @@ styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
-  , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css
+  , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , windowCss
   ]
 

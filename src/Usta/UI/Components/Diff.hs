@@ -8,6 +8,7 @@ module Usta.UI.Components.Diff
   ( Line (..)
   , File (..)
   , new
+  , plain
   , css
   ) where
 
@@ -36,7 +37,14 @@ data File = File
 -- | @attached@ pairs a line's index with a widget shown under it.
 -- A viewed file shows only its header; @onViewed@ hears every toggle.
 new :: File -> [(Int, Gtk.Widget)] -> (Bool -> IO ()) -> IO Gtk.Box
-new file attached onViewed = do
+new file attached onViewed = build file attached (Just onViewed)
+
+-- | A diff to read, without the "Viewed" toggle, e.g. for one commit.
+plain :: File -> IO Gtk.Box
+plain file = build file { viewed = False } [] Nothing
+
+build :: File -> [(Int, Gtk.Widget)] -> Maybe (Bool -> IO ()) -> IO Gtk.Box
+build file attached onViewed = do
   card <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #cssClasses := ["u-card", "u-diff"]
                          ]
@@ -46,12 +54,6 @@ new file attached onViewed = do
                            ]
   label (path file) ["mono", "strong"] >>= #append header
   label (stat file) ["muted", "small"] >>= #append header
-  check <- GI.new Gtk.CheckButton [ #label := "Viewed"
-                                  , #active := viewed file
-                                  , #hexpand := True
-                                  , #halign := Gtk.AlignEnd
-                                  ]
-  #append header check
   #append card header
 
   body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
@@ -66,11 +68,18 @@ new file attached onViewed = do
   #append card body
   setCollapsed card (viewed file)
 
-  void $ GI.on check #toggled $ do
-    isViewed <- GI.get check #active
-    GI.set body [#visible := not isViewed]
-    setCollapsed card isViewed
-    onViewed isViewed
+  forM_ onViewed $ \report -> do
+    check <- GI.new Gtk.CheckButton [ #label := "Viewed"
+                                    , #active := viewed file
+                                    , #hexpand := True
+                                    , #halign := Gtk.AlignEnd
+                                    ]
+    #append header check
+    void $ GI.on check #toggled $ do
+      isViewed <- GI.get check #active
+      GI.set body [#visible := not isViewed]
+      setCollapsed card isViewed
+      report isViewed
   pure card
   where
     setCollapsed card collapsed

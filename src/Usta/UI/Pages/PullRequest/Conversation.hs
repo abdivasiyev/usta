@@ -80,10 +80,10 @@ new m = do
   descriptionCard m >>= #append main
   timeline <- vbox 10
   Gtk.widgetAddCssClass timeline "timeline"
-  forM_ (events m) $ \e -> eventRow e >>= #append timeline
+  forM_ m.events $ \e -> eventRow e >>= #append timeline
   #append main timeline
-  forM_ (threads m) $ \t -> threadCard t >>= #append main
-  mergeBox (merge m) >>= #append main
+  forM_ m.threads $ \t -> threadCard t >>= #append main
+  mergeBox m.merge >>= #append main
   commentBox >>= #append main
 
   -- Keep the reading column a comfortable width on wide windows.
@@ -106,10 +106,10 @@ descriptionCard m = do
                         , #cssClasses := ["card-header"]
                         ]
   Avatar.new 24 "AA" >>= #append top
-  label (openedBy m) ["strong"] >>= #append top
-  label ("opened this " <> openedAgo m) ["muted"] >>= #append top
+  label m.openedBy ["strong"] >>= #append top
+  label ("opened this " <> m.openedAgo) ["muted"] >>= #append top
   #append card top
-  text <- label (description m) ["card-body"]
+  text <- label m.description ["card-body"]
   GI.set text [#wrap := True]
   #append card text
   pure card
@@ -140,12 +140,12 @@ threadCard t = do
                         , #cssClasses := ["card-header", "plain"]
                         ]
   label "Comment on" ["strong"] >>= #append top
-  where' <- label (location t) ["mono", "link"]
+  where' <- label t.location ["mono", "link"]
   GI.set where' [#hexpand := True]
   #append top where'
-  unless (resolved t) $ Badge.new Warning "Unresolved" >>= #append top
+  unless t.resolved $ Badge.new Warning "Unresolved" >>= #append top
   #append card top
-  label ("+  " <> line t) ["mono", "diff-add"] >>= #append card
+  label ("+  " <> t.line) ["mono", "diff-add"] >>= #append card
   comment <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #spacing := 10
                             , #cssClasses := ["card-body"]
@@ -154,8 +154,8 @@ threadCard t = do
   GI.set avatar [#valign := Gtk.AlignStart]
   #append comment avatar
   text <- vbox 4
-  label (author t) ["strong"] >>= #append text
-  bodyLabel <- label (body t) []
+  label t.author ["strong"] >>= #append text
+  bodyLabel <- label t.body []
   GI.set bodyLabel [#wrap := True]
   #append text bodyLabel
   #append comment text
@@ -167,7 +167,7 @@ mergeBox s = do
   card <- Card.new
   Gtk.widgetAddCssClass card "merge-box"
   status <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["merge-row"]]
-  if checksPassed s
+  if s.checksPassed
     then do
       Icon.toned 16 Success Icon.Check >>= #append status
       label "All checks have passed" [] >>= #append status
@@ -175,7 +175,7 @@ mergeBox s = do
       Icon.toned 16 Danger Icon.Cross >>= #append status
       label "Some checks failed" [] >>= #append status
   #append card status
-  unless (approvalsMissing s == 0) $ do
+  unless (s.approvalsMissing == 0) $ do
     waiting <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["merge-row"]]
     Badge.dot Warning >>= #append waiting
     label "Waiting for 1 approving review" [] >>= #append waiting
@@ -187,7 +187,7 @@ mergeBox s = do
   mergeButton <- Button.new Button.defaults { Button.label = Just "Merge", Button.variant = Button.Primary }
   GI.set mergeButton [ #hexpand := True
                      , #halign := Gtk.AlignEnd
-                     , #sensitive := approvalsMissing s == 0 && checksPassed s
+                     , #sensitive := s.approvalsMissing == 0 && s.checksPassed
                      ]
   #append actions mergeButton
   #append card actions
@@ -223,22 +223,22 @@ details m = do
 
   section side "Branch" $ \box -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-    label (source m) ["chip", "mono"] >>= #append row
+    label m.source ["chip", "mono"] >>= #append row
     label "→" ["muted"] >>= #append row
-    label (target m) ["chip", "mono"] >>= #append row
+    label m.target ["chip", "mono"] >>= #append row
     #append box row
   section side "Reviewers" $ \box ->
-    forM_ (reviewers m) $ \(tone, name) -> do
+    forM_ m.reviewers $ \(tone, name) -> do
       row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
       Badge.dot tone >>= #append row
       label name [] >>= #append row
       #append box row
   section side "Labels" $ \box -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-    forM_ (labels m) $ \(tone, name) -> Badge.new tone name >>= #append row
+    forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
     #append box row
   section side "Linked issues" $ \box ->
-    forM_ (linkedIssues m) $ \issue -> label issue ["link"] >>= #append box
+    forM_ m.linkedIssues $ \issue -> label issue ["link"] >>= #append box
   pure side
   where
     section :: Gtk.Box -> Text -> (Gtk.Box -> IO ()) -> IO ()

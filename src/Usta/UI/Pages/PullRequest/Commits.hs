@@ -59,7 +59,7 @@ new commits = do
     pure (c, button)
   let select c = do
         forM_ rows $ \(other, button) ->
-          if hash other == hash c
+          if other.hash == c.hash
             then Gtk.widgetAddCssClass button "selected"
             else Gtk.widgetRemoveCssClass button "selected"
         content <- detail c
@@ -74,49 +74,49 @@ new commits = do
 commitRow :: Commit -> IO Gtk.Button
 commitRow c = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
-  avatar <- Avatar.new 24 (initials c)
+  avatar <- Avatar.new 24 c.initials
   GI.set avatar [#valign := Gtk.AlignStart]
   #append content avatar
   text <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #hexpand := True]
-  title <- label (subject c) ["strong"]
+  title <- label c.subject ["strong"]
   GI.set title [#ellipsize := Pango.EllipsizeModeEnd]
   #append text title
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  label (author c) ["muted", "small"] >>= #append meta
+  label c.author ["muted", "small"] >>= #append meta
   label age' ["muted", "small"] >>= #append meta
   #append text meta
   #append content text
-  label (T.take 7 (hash c)) ["mono", "small", "hash"] >>= #append content
+  label (T.take 7 c.hash) ["mono", "small", "hash"] >>= #append content
   GI.new Gtk.Button [ #child := content
                     , #hasFrame := False
                     , #cssClasses := ["commit"]
                     ]
   where
-    age' = "committed " <> age c
+    age' = "committed " <> c.age
 
 detail :: Commit -> IO Gtk.Box
 detail c = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 16, #cssClasses := ["commit-detail"]]
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
-  title <- label (subject c) ["commit-title"]
+  title <- label c.subject ["commit-title"]
   GI.set title [#wrap := True]
   #append header title
-  if T.null (message c)
+  if T.null c.message
     then pure ()
     else do
-      body <- label (message c) ["soft"]
+      body <- label c.message ["soft"]
       GI.set body [#wrap := True]
       #append header body
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Avatar.new 20 (initials c) >>= #append meta
-  label (author c) ["small", "strong"] >>= #append meta
-  label ("committed " <> age c) ["muted", "small"] >>= #append meta
-  fullHash <- label (hash c) ["mono", "small", "muted"]
+  Avatar.new 20 c.initials >>= #append meta
+  label c.author ["small", "strong"] >>= #append meta
+  label ("committed " <> c.age) ["muted", "small"] >>= #append meta
+  fullHash <- label c.hash ["mono", "small", "muted"]
   GI.set fullHash [#hexpand := True, #halign := Gtk.AlignEnd, #selectable := True]
   #append meta fullHash
   #append header meta
   #append box header
-  forM_ (changes c) $ \f -> Diff.plain f >>= #append box
+  forM_ c.changes $ \f -> Diff.plain f >>= #append box
   pure box
 
 label :: Text -> [Text] -> IO Gtk.Label

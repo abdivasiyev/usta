@@ -37,12 +37,12 @@ instance Parse RepoName where
   parse raw = case Text.splitOn "/" raw of
     [o, n] | isPathSegment o && isPathSegment n -> Right RepoName {repoOwner = o, repoShortName = n}
     _ -> Left "a repository as owner/name, such as abdivasiyev/usta"
-  unparse r = repoOwner r <> "/" <> repoShortName r
+  unparse r = r.repoOwner <> "/" <> r.repoShortName
 
 -- | The user or organization that owns the repository.
 owner :: RepoName -> Text
-owner = repoOwner
+owner = (.repoOwner)
 
 -- | The name without the owner, as lists show it: @usta@.
 shortName :: RepoName -> Text
-shortName = repoShortName
+shortName = (.repoShortName)

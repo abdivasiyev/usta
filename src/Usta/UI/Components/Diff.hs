@@ -55,25 +55,25 @@ build file attached onViewed = do
                            , #spacing := 10
                            , #cssClasses := ["diff-header"]
                            ]
-  label (path file) ["mono", "strong"] >>= #append header
+  label file.path ["mono", "strong"] >>= #append header
   label (stat file) ["muted", "small"] >>= #append header
   #append card header
 
   body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                         , #visible := not (viewed file)
+                         , #visible := not file.viewed
                          ]
-  forM_ (zip [0 ..] (diffLines file)) $ \(index, line) -> do
+  forM_ (zip [0 ..] file.diffLines) $ \(index, line) -> do
     lineRow line >>= #append body
     forM_ [w | (i, w) <- attached, i == index] $ \w -> do
       holder <- GI.new Gtk.Box [#cssClasses := ["diff-attached"]]
       #append holder w
       #append body holder
   #append card body
-  setCollapsed card (viewed file)
+  setCollapsed card file.viewed
 
   forM_ onViewed $ \report -> do
     check <- GI.new Gtk.CheckButton [ #label := "Viewed"
-                                    , #active := viewed file
+                                    , #active := file.viewed
                                     , #hexpand := True
                                     , #halign := Gtk.AlignEnd
                                     ]
@@ -92,7 +92,7 @@ build file attached onViewed = do
 stat :: File -> Text
 stat file = "+" <> count isAdded <> " −" <> count isRemoved
   where
-    count p = T.pack (show (length (filter p (diffLines file))))
+    count p = T.pack (show (length (filter p file.diffLines)))
     isAdded (Added _ _) = True
     isAdded _ = False
     isRemoved (Removed _ _) = True

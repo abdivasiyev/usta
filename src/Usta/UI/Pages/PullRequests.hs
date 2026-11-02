@@ -92,9 +92,9 @@ tabLabel t = case t of
 
 inTab :: Tab -> PullRequest -> Bool
 inTab t pr = case t of
-  ReviewTab -> relation pr == WaitingForMyReview
-  CreatedTab -> relation pr == CreatedByMe
-  AssignedTab -> relation pr == AssignedToMe
+  ReviewTab -> pr.relation == WaitingForMyReview
+  CreatedTab -> pr.relation == CreatedByMe
+  AssignedTab -> pr.relation == AssignedToMe
   AllTab -> True
 
 -- | @onNew@ runs for "New pull request"; @onOpen@ when a row is clicked
@@ -184,7 +184,7 @@ pullRequestRow :: PullRequest -> IO Gtk.Box
 pullRequestRow pr = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 14]
 
-  icon <- Icon.toned 16 (if draft pr then Neutral else Success) Icon.PullRequest
+  icon <- Icon.toned 16 (if pr.draft then Neutral else Success) Icon.PullRequest
   #append row icon
 
   body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
@@ -192,20 +192,20 @@ pullRequestRow pr = do
                          , #hexpand := True
                          ]
   titleLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  titleLabel <- label (title pr) ["title"]
+  titleLabel <- label pr.title ["title"]
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
   #append titleLine titleLabel
-  when (draft pr) $ Badge.new Neutral "Draft" >>= #append titleLine
+  when pr.draft $ Badge.new Neutral "Draft" >>= #append titleLine
   #append body titleLine
 
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Forge.smallDot (forge pr) >>= #append meta
-  let shortName = T.drop 1 (T.dropWhile (/= '/') (repo pr))
-  label (shortName <> " #" <> T.pack (show (number pr))) ["meta", "mono"] >>= #append meta
+  Forge.smallDot pr.forge >>= #append meta
+  let shortName = T.drop 1 (T.dropWhile (/= '/') pr.repo)
+  label (shortName <> " #" <> T.pack (show pr.number)) ["meta", "mono"] >>= #append meta
   label "·" ["meta"] >>= #append meta
-  label (branch pr) ["meta", "mono"] >>= #append meta
+  label pr.branch ["meta", "mono"] >>= #append meta
   label "·" ["meta"] >>= #append meta
-  label (author pr) ["meta"] >>= #append meta
+  label pr.author ["meta"] >>= #append meta
   #append body meta
   #append row body
 
@@ -213,12 +213,12 @@ pullRequestRow pr = do
         l <- label text classes
         GI.set l [#widthRequest := width]
         #append row l
-      (checksTone, checksText) = checksLabel (checks pr)
-      (reviewTone, reviewText) = reviewLabel (review pr)
+      (checksTone, checksText) = checksLabel pr.checks
+      (reviewTone, reviewText) = reviewLabel pr.review
   column checksText ["status", toneText checksTone] 120
   column reviewText ["status", toneText reviewTone] 140
-  column (T.pack (show (comments pr))) ["meta", "number"] 32
-  column (updated pr) ["meta", "number"] 72
+  column (T.pack (show pr.comments)) ["meta", "number"] 32
+  column pr.updated ["meta", "number"] 72
   pure row
   where
     toneText tone = "tone-" <> T.toLower (T.pack (show tone))

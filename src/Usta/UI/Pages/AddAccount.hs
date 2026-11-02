@@ -49,7 +49,7 @@ sample = Model
 for :: Forge.Kind -> Model
 for kind = sample
   { forge = kind
-  , server = if kind == Forge.Forgejo then server sample else defaultServer kind
+  , server = if kind == Forge.Forgejo then sample.server else defaultServer kind
   }
 
 -- | A forge server, parsed from what was typed.
@@ -122,7 +122,7 @@ open anchor m onAdded = do
                           ]
   choices <- forM [minBound .. maxBound] $ \kind -> do
     card <- forgeCard kind
-    GI.set card [#active := kind == forge m]
+    GI.set card [#active := kind == m.forge]
     #append cards card
     pure (card, kind)
   case choices of
@@ -133,7 +133,7 @@ open anchor m onAdded = do
   -- 2. Server
   step "2. Server" >>= #append body
   caption "Server URL" >>= #append body
-  url <- GI.new Gtk.Entry [ #text := server m
+  url <- GI.new Gtk.Entry [ #text := m.server
                           , #placeholderText := "https://git.example.com"
                           , #cssClasses := ["mono"]
                           ]
@@ -188,7 +188,7 @@ open anchor m onAdded = do
   #append footer cancel
   #append footer add
 
-  selected <- newIORef (forge m)
+  selected <- newIORef m.forge
   let refresh = do
         kind <- readIORef selected
         text <- Gtk.editableGetText url
@@ -197,7 +197,7 @@ open anchor m onAdded = do
         let parsed = parseServer text
         case parsed of
           _ | T.null (T.strip text) -> GI.set status [#visible := False]
-          Right s | host s `elem` reachable m -> do
+          Right s | s.host `elem` m.reachable -> do
             GI.set status [#visible := True]
             GI.set statusIcon [#visible := True]
             GI.set statusText [ #label := Forge.name kind <> " API reachable"
@@ -213,7 +213,7 @@ open anchor m onAdded = do
             GI.set statusText [#label := problem, #cssClasses := ["status", "problem"]]
         GI.set scopesHint [#label := scopesMarkup kind]
         GI.set browserHint
-          [ #label := "usta opens " <> either (const "the server") host parsed
+          [ #label := "usta opens " <> either (const "the server") (.host) parsed
               <> " in your browser and comes back here once you approve."
           ]
         Gtk.stackSetVisibleChildName signIn (if browser then "browser" else "token")

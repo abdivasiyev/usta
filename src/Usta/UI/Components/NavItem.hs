@@ -49,17 +49,17 @@ defaults = Config
 new :: Config -> IO Gtk.Button
 new cfg = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  forM_ (dot cfg) $ \tone -> Badge.dot tone >>= #append row
-  forM_ (leading cfg) $ #append row
-  text <-GI.new Gtk.Label [#label := label cfg, #xalign := 0, #hexpand := True]
-  when (mono cfg) $ Gtk.widgetAddCssClass text "mono"
+  forM_ cfg.dot $ \tone -> Badge.dot tone >>= #append row
+  forM_ cfg.leading $ #append row
+  text <-GI.new Gtk.Label [#label := cfg.label, #xalign := 0, #hexpand := True]
+  when cfg.mono $ Gtk.widgetAddCssClass text "mono"
   #append row text
-  forM_ (count cfg) $ \n -> do
+  forM_ cfg.count $ \n -> do
     countLabel <- GI.new Gtk.Label [#label := T.pack (show n), #cssClasses := ["count"]]
     #append row countLabel
   button <- GI.new Gtk.Button [#child := row, #cssClasses := ["u-nav-item"]]
-  when (active cfg) $ Gtk.widgetAddCssClass button "active"
-  when (link cfg) $ Gtk.widgetAddCssClass button "link"
+  when cfg.active $ Gtk.widgetAddCssClass button "active"
+  when cfg.link $ Gtk.widgetAddCssClass button "link"
   set button [#hasFrame := False]
   pure button
 

@@ -57,7 +57,7 @@ open anchor m = do
                          , #vexpand := True
                          , #cssClasses := ["form"]
                          ]
-  repo <- Gtk.dropDownNewFromStrings (repositories m)
+  repo <- Gtk.dropDownNewFromStrings m.repositories
   Gtk.toWidget repo >>= field "Repository" >>= #append body
   title <- GI.new Gtk.Entry [#placeholderText := "Short summary of the problem or idea"]
   Gtk.toWidget title >>= field "Title" >>= #append body
@@ -72,7 +72,7 @@ open anchor m = do
                          ]
   labelsEntry <- GI.new Gtk.Entry [#placeholderText := "Add labels"]
   Gtk.toWidget labelsEntry >>= field "Labels" >>= #append pair
-  assigneeEntry <- GI.new Gtk.Entry [#text := assignee m]
+  assigneeEntry <- GI.new Gtk.Entry [#text := m.assignee]
   Gtk.toWidget assigneeEntry >>= field "Assignee" >>= #append pair
   #append body pair
 

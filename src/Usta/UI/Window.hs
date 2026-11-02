@@ -106,12 +106,12 @@ buildAt start app = do
           >>= Gtk.toWidget
       Sidebar.Inbox ->
         let open n
-              | Inbox.kind n == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
+              | n.kind == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
               | otherwise = openPullRequest "Inbox" (notificationSummary n)
         in Inbox.new open Inbox.sample >>= Gtk.toWidget
       Sidebar.PullRequests ->
         PullRequests.new openNewPullRequest
-          (\pr -> openPullRequestWith (PullRequests.fetching pr) "Pull requests" (summaryOf pr))
+          (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))
           PullRequests.sample
           >>= Gtk.toWidget
       Sidebar.Issues ->
@@ -224,25 +224,25 @@ tabContent fetch summary tab = case tab of
   PullRequest.Conversation -> Conversation.new Conversation.sample
   PullRequest.Files -> Files.new Files.sample
   PullRequest.Commits -> Commits.new Commits.sample
-  PullRequest.Checks -> Checks.new $ case PullRequest.checks summary of
+  PullRequest.Checks -> Checks.new $ case summary.checks of
     Just (Danger, _) -> Checks.failing
     _ -> Checks.passing
 
 -- | The detail header from an inbox notification about a pull request.
 notificationSummary :: Inbox.Notification -> PullRequest.Summary
 notificationSummary n = PullRequest.Summary
-  { PullRequest.forge = Inbox.forge n
-  , PullRequest.host = Inbox.host n
-  , PullRequest.repo = Inbox.repo n
-  , PullRequest.number = Inbox.number n
-  , PullRequest.title = Inbox.title n
+  { PullRequest.forge = n.forge
+  , PullRequest.host = n.host
+  , PullRequest.repo = n.repo
+  , PullRequest.number = n.number
+  , PullRequest.title = n.title
   , PullRequest.state =
-      if Inbox.kind n == Inbox.MergedPullRequest then PullRequest.MergedState else PullRequest.Open
+      if n.kind == Inbox.MergedPullRequest then PullRequest.MergedState else PullRequest.Open
   , PullRequest.comments = 1
-  , PullRequest.files = length (Inbox.changes n)
+  , PullRequest.files = length n.changes
   , PullRequest.commits = 1
   -- The tab has room for a word, not the card's "1 of 1 passed".
-  , PullRequest.checks = fmap (\(tone, _) -> (tone, short tone)) (Inbox.checks n)
+  , PullRequest.checks = fmap (\(tone, _) -> (tone, short tone)) n.checks
   }
   where
     short tone = case tone of
@@ -254,14 +254,14 @@ notificationSummary n = PullRequest.Summary
 -- | An issue's detail from an inbox notification about it.
 notificationIssue :: Inbox.Notification -> Issue.Model
 notificationIssue n = Issue.Model
-  { Issue.forge = Inbox.forge n
-  , Issue.host = Inbox.host n
-  , Issue.repo = Inbox.repo n
-  , Issue.number = Inbox.number n
-  , Issue.title = Inbox.title n
+  { Issue.forge = n.forge
+  , Issue.host = n.host
+  , Issue.repo = n.repo
+  , Issue.number = n.number
+  , Issue.title = n.title
   , Issue.closed = False
   , Issue.comments =
-      [ Issue.Comment "abdivasiyev" "AA" (Inbox.opened n)
+      [ Issue.Comment "abdivasiyev" "AA" n.opened
           "Found while reviewing: describe what happens and what you expected."
       ]
   , Issue.events = []
@@ -275,23 +275,23 @@ notificationIssue n = Issue.Model
 -- sample content until the issue is loaded from the forge.
 issueDetail :: Issues.Issue -> Issue.Model
 issueDetail i = Issue.Model
-  { Issue.forge = Issues.forge i
-  , Issue.host = Issues.host i
-  , Issue.repo = Issues.repo i
-  , Issue.number = Issues.number i
-  , Issue.title = Issues.title i
-  , Issue.closed = Issues.closed i
+  { Issue.forge = i.forge
+  , Issue.host = i.host
+  , Issue.repo = i.repo
+  , Issue.number = i.number
+  , Issue.title = i.title
+  , Issue.closed = i.closed
   , Issue.comments =
-      [ Issue.Comment (Issues.author i) "AA" ("opened " <> Issues.opened i)
+      [ Issue.Comment i.author "AA" ("opened " <> i.opened)
           "Main.hs still prints Hello world.\nOpen a Gtk.ApplicationWindow on activate, with the header bar from the design."
       , Issue.Comment "abdivasiyev" "AA" "commented 1 hour ago"
           "gi-gtk4 is in now (#2). The window needs wrapGAppsHook4 in the flake so it finds the GSettings schemas."
       ]
   , Issue.events =
-      [ Issue.LabelAdded tone name | Issues.Label tone name <- Issues.labels i ]
+      [ Issue.LabelAdded tone name | Issues.Label tone name <- i.labels ]
       <> [Issue.ReferencedBy "#6 feat: render main window with GTK4"]
   , Issue.assignees = [("AA", "abdivasiyev")]
-  , Issue.labels = [ (tone, name) | Issues.Label tone name <- Issues.labels i ]
+  , Issue.labels = [ (tone, name) | Issues.Label tone name <- i.labels ]
   , Issue.milestone = Just "First window"
   , Issue.linkedPullRequests = ["#6 feat: render main window with GTK4"]
   }
@@ -301,29 +301,29 @@ shortRef :: Text -> Int -> Text
 shortRef repo number = T.drop 1 (T.dropWhile (/= '/') repo) <> " #" <> T.pack (show number)
 
 paletteItem :: (Text -> PullRequest.Summary -> IO ()) -> PullRequests.PullRequest -> CommandPalette.Item
-paletteItem open pr = CommandPalette.Item CommandPalette.PullRequest (PullRequests.title pr)
-  (shortRef (PullRequests.repo pr) (PullRequests.number pr)) (open "Back" (summaryOf pr))
+paletteItem open pr = CommandPalette.Item CommandPalette.PullRequest pr.title
+  (shortRef pr.repo pr.number) (open "Back" (summaryOf pr))
 
 issueItem :: (Text -> Issue.Model -> IO ()) -> Issues.Issue -> CommandPalette.Item
-issueItem open i = CommandPalette.Item CommandPalette.Issue (Issues.title i)
-  (shortRef (Issues.repo i) (Issues.number i)) (open "Back" (issueDetail i))
+issueItem open i = CommandPalette.Item CommandPalette.Issue i.title
+  (shortRef i.repo i.number) (open "Back" (issueDetail i))
 
 repositoryItem :: IO () -> Repositories.Repository -> CommandPalette.Item
-repositoryItem open r = CommandPalette.Item CommandPalette.Repository (Repositories.name r)
-  (Repositories.host r) open
+repositoryItem open r = CommandPalette.Item CommandPalette.Repository r.name
+  r.host open
 
 summaryOf :: PullRequests.PullRequest -> PullRequest.Summary
 summaryOf pr = PullRequest.Summary
-  { PullRequest.forge = PullRequests.forge pr
-  , PullRequest.host = PullRequests.host pr
-  , PullRequest.repo = PullRequests.repo pr
-  , PullRequest.number = PullRequests.number pr
-  , PullRequest.title = PullRequests.title pr
-  , PullRequest.state = if PullRequests.draft pr then PullRequest.Draft else PullRequest.Open
-  , PullRequest.comments = PullRequests.comments pr
-  , PullRequest.files = fst (PullRequests.changes pr)
-  , PullRequest.commits = snd (PullRequests.changes pr)
-  , PullRequest.checks = case PullRequests.checks pr of
+  { PullRequest.forge = pr.forge
+  , PullRequest.host = pr.host
+  , PullRequest.repo = pr.repo
+  , PullRequest.number = pr.number
+  , PullRequest.title = pr.title
+  , PullRequest.state = if pr.draft then PullRequest.Draft else PullRequest.Open
+  , PullRequest.comments = pr.comments
+  , PullRequest.files = fst pr.changes
+  , PullRequest.commits = snd pr.changes
+  , PullRequest.checks = case pr.checks of
       PullRequests.ChecksPassed -> Just (Success, "1/1")
       PullRequests.ChecksFailed -> Just (Danger, "1 failed")
       PullRequests.ChecksRunning -> Just (Warning, "running")

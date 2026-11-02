@@ -46,8 +46,8 @@ defaults = Config
 
 new :: Config -> IO Gtk.Button
 new cfg = do
-  button <- GI.new Gtk.Button [#cssClasses := ["u-button", variantClass (variant cfg)]]
-  case (icon cfg, label cfg) of
+  button <- GI.new Gtk.Button [#cssClasses := ["u-button", variantClass cfg.variant]]
+  case (cfg.icon, cfg.label) of
     (Just name, Nothing) -> do
       set button [#iconName := name]
       Gtk.widgetAddCssClass button "icon-only"
@@ -60,7 +60,7 @@ new cfg = do
       #append box caption
       set button [#child := box]
     (Nothing, Nothing) -> pure ()
-  forM_ (tooltip cfg) $ \t -> set button [#tooltipText := t]
+  forM_ cfg.tooltip $ \t -> set button [#tooltipText := t]
   pure button
 
 variantClass :: Variant -> Text

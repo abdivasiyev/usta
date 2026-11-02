@@ -42,10 +42,10 @@ new cfg = do
   #append box tabs
 
   buffer <- GI.new Gtk.TextBuffer []
-  Gtk.textBufferSetText buffer (text cfg) (-1)
+  Gtk.textBufferSetText buffer cfg.text (-1)
   view <- GI.new Gtk.TextView [ #buffer := buffer
                               , #wrapMode := Gtk.WrapModeWordChar
-                              , #heightRequest := height cfg
+                              , #heightRequest := cfg.height
                               , #topMargin := 12
                               , #bottomMargin := 12
                               , #leftMargin := 12
@@ -55,7 +55,7 @@ new cfg = do
   rendered <- GI.new Gtk.Label [ #wrap := True
                                , #xalign := 0
                                , #yalign := 0
-                               , #heightRequest := height cfg
+                               , #heightRequest := cfg.height
                                , #cssClasses := ["preview"]
                                ]
   stack <- GI.new Gtk.Stack []
@@ -75,7 +75,7 @@ new cfg = do
           GI.set rendered [#label := current]
         Gtk.stackSetVisibleChildName stack name
 
-  forM_ (hint cfg) $ \h ->
+  forM_ cfg.hint $ \h ->
     GI.new Gtk.Label [#label := h, #xalign := 0, #cssClasses := ["hint"]] >>= #append box
   pure (box, buffer)
 

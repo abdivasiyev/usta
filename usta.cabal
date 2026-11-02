@@ -110,4 +110,8 @@ executable usta
     typed-process
 
   default-language: GHC2024
+  default-extensions:
+    DuplicateRecordFields
+    NoFieldSelectors
+    OverloadedRecordDot
   ghc-options: -Wall

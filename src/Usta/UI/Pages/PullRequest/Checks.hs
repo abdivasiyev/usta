@@ -68,7 +68,7 @@ new m = do
                          , #hexpand := False
                          , #cssClasses := ["runs"]
                          ]
-  heading <- Card.sectionTitle (provider m)
+  heading <- Card.sectionTitle m.provider
   Gtk.widgetAddCssClass heading "provider"
   #append side heading
   #append columns side
@@ -79,14 +79,14 @@ new m = do
                            ]
   #append columns detail
 
-  rows <- forM (runs m) $ \run -> do
+  rows <- forM m.runs $ \run -> do
     button <- runRow run
     #append side button
     pure (run, button)
 
   let select run = do
         forM_ rows $ \(other, button) ->
-          if name other == name run
+          if other.name == run.name
             then Gtk.widgetAddCssClass button "selected"
             else Gtk.widgetRemoveCssClass button "selected"
         old <- Gtk.widgetGetFirstChild detail
@@ -95,7 +95,7 @@ new m = do
   forM_ rows $ \(run, button) -> void $ GI.on button #clicked (select run)
 
   -- Open on the first failure, since that is what needs attention.
-  case filter ((== Failed) . status) (runs m) <> runs m of
+  case filter ((== Failed) . (.status)) m.runs <> m.runs of
     run : _ -> select run
     [] -> pure ()
   Gtk.toWidget columns
@@ -104,18 +104,18 @@ runRow :: Run -> IO Gtk.Button
 runRow run = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
   statusIcon run >>= #append content
-  title <- label (name run) ["mono"]
+  title <- label run.name ["mono"]
   GI.set title [#hexpand := True]
   #append content title
-  label (if status run == Skipped then "Skipped" else duration run) ["muted", "small"]
+  label (if run.status == Skipped then "Skipped" else run.duration) ["muted", "small"]
     >>= #append content
   GI.new Gtk.Button [ #child := content
                     , #hasFrame := False
-                    , #cssClasses := ["run", statusClass (status run)]
+                    , #cssClasses := ["run", statusClass run.status]
                     ]
 
 statusIcon :: Run -> IO Gtk.Image
-statusIcon run = case status run of
+statusIcon run = case run.status of
   Passed -> Icon.toned 16 Success Icon.Check
   Failed -> Icon.toned 16 Danger Icon.Cross
   Skipped -> Icon.toned 16 Neutral Icon.Skipped
@@ -127,30 +127,30 @@ runDetail :: Run -> IO Gtk.Box
 runDetail run = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #vexpand := True]
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
-  title <- label (name run) ["mono", "run-title"]
+  title <- label run.name ["mono", "run-title"]
   GI.set title [#hexpand := True]
   #append header title
-  summary <- label (summaryText run) ["small", statusClass (status run)]
+  summary <- label (summaryText run) ["small", statusClass run.status]
   #append header summary
   Button.new Button.defaults { Button.label = Just "Copy log" } >>= #append header
   Button.new Button.defaults { Button.label = Just "Re-run job", Button.variant = Button.Primary }
     >>= #append header
   #append box header
-  logView (output run) >>= #append box
+  logView run.output >>= #append box
   pure box
 
 -- | "Failed on step 3 of 4", counted from the step markers in the log.
 summaryText :: Run -> Text
-summaryText run = case status run of
-  Passed -> "Passed in " <> duration run
+summaryText run = case run.status of
+  Passed -> "Passed in " <> run.duration
   Skipped -> "Skipped"
-  Failed -> case findIndex isFailure (output run) of
+  Failed -> case findIndex isFailure run.output of
     Nothing -> "Failed"
     Just at ->
-      let failedStep = length (filter isStep (take at (output run)))
+      let failedStep = length (filter isStep (take at run.output))
       in "Failed on step " <> T.pack (show failedStep) <> " of " <> T.pack (show totalSteps)
   where
-    totalSteps = length (filter isStep (output run))
+    totalSteps = length (filter isStep run.output)
     isStep (Step _) = True
     isStep _ = False
     isFailure (Failure _) = True

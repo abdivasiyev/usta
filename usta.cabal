@@ -31,6 +31,7 @@ executable usta
     Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcut
     Usta.UI.Components.Skeleton
+    Usta.UI.Components.SyncStatus
     Usta.UI.Gallery
     Usta.UI.Pages.AddAccount
     Usta.UI.Pages.Inbox

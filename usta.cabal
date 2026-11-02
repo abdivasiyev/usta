@@ -16,6 +16,9 @@ executable usta
     src
 
   other-modules:
+    Usta.DB.Schema.Account
+    Usta.DB.Schema.Notification
+    Usta.DB.Schema.Repository
     Usta.Types.Account
     Usta.Types.Forge
     Usta.Types.Host

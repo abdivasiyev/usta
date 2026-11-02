@@ -34,6 +34,7 @@ executable usta
     Usta.Types.Notification
     Usta.Types.Number
     Usta.Types.Parse
+    Usta.Types.Platform
     Usta.Types.PullRequest
     Usta.Types.Ref
     Usta.Types.RepoName

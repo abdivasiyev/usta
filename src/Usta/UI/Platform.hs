@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
 
--- | What differs per operating system: window controls and how keyboard
--- shortcuts are written.
+-- | What differs per operating system in the UI: window controls and how
+-- keyboard shortcuts are written. 'Platform' itself lives in
+-- "Usta.Types.Platform" and is re-exported here.
 module Usta.UI.Platform
   ( Platform (..)
   , current
@@ -11,25 +12,10 @@ module Usta.UI.Platform
   ) where
 
 import Data.GI.Base (AttrOp ((:=)), set)
-import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
-import qualified System.Info
 
-type Platform :: Type
-data Platform
-  = MacOS
-  | Linux
-  | Windows
-  | OtherOS
-  deriving (Eq, Show)
-
-current :: Platform
-current = case System.Info.os of
-  "darwin" -> MacOS
-  "linux" -> Linux
-  "mingw32" -> Windows
-  _ -> OtherOS
+import Usta.Types.Platform (Platform (..), current)
 
 -- | A shortcut on the primary modifier: "⌘K" on macOS, "Ctrl K" elsewhere.
 -- Keybindings themselves use GTK's @<Primary>@, which maps the same way.

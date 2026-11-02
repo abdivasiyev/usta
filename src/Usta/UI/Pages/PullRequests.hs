@@ -68,6 +68,10 @@ data PullRequest = PullRequest
   , updated :: Text
   , draft :: Bool
   , relation :: Relation
+  , changes :: (Int, Int)
+    -- ^ Changed files and commits.
+  , fetching :: Maybe Double
+    -- ^ Percent done while the local mirror still fetches the branch.
   }
 
 data Tab = ReviewTab | CreatedTab | AssignedTab | AllTab
@@ -219,15 +223,17 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 sample :: [PullRequest]
 sample =
   [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "abdivasiyev"
-      ChecksPassed ReviewRequested 1 "5m" False WaitingForMyReview
+      ChecksPassed ReviewRequested 1 "5m" False WaitingForMyReview (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "abdivasiyev"
-      ChecksFailed ReviewRequested 0 "22m" False WaitingForMyReview
+      ChecksFailed ReviewRequested 0 "22m" False WaitingForMyReview (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "abdivasiyev"
-      ChecksRunning NoReviewers 2 "Yesterday" False CreatedByMe
+      ChecksRunning NoReviewers 2 "Yesterday" False CreatedByMe (2, 1) Nothing
   , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "abdivasiyev"
-      NoChecks NoReviewers 0 "Mon" True CreatedByMe
+      NoChecks NoReviewers 0 "Mon" True CreatedByMe (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "abdivasiyev"
-      ChecksPassed Approved 3 "Mon" False CreatedByMe
+      ChecksPassed Approved 3 "Mon" False CreatedByMe (2, 1) Nothing
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 21 "refactor: move every host to den aspects" "refactor/den-aspects" "abdivasiyev"
+      ChecksRunning ReviewRequested 0 "1h" False WaitingForMyReview (212, 14) (Just 64)
   ]
 
 css :: Text

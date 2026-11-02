@@ -87,9 +87,10 @@ inTab t pr = case t of
   AssignedTab -> relation pr == AssignedToMe
   AllTab -> True
 
--- | @onOpen@ runs when a row is clicked or activated with Enter.
-new :: (PullRequest -> IO ()) -> [PullRequest] -> IO Gtk.Box
-new onOpen prs = do
+-- | @onNew@ runs for "New pull request"; @onOpen@ when a row is clicked
+-- or activated with Enter.
+new :: IO () -> (PullRequest -> IO ()) -> [PullRequest] -> IO Gtk.Box
+new onNew onOpen prs = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 14
                          , #hexpand := True
@@ -103,8 +104,10 @@ new onOpen prs = do
                              , #cssClasses := ["page-title"]
                              ]
   #append heading title'
-  Button.new Button.defaults { Button.label = Just "New pull request", Button.variant = Button.Primary }
-    >>= #append heading
+  newButton <- Button.new Button.defaults
+    { Button.label = Just "New pull request", Button.variant = Button.Primary }
+  void $ GI.on newButton #clicked onNew
+  #append heading newButton
   #append page heading
 
   -- Tab labels carry their counts, e.g. "Review requested  2".

@@ -28,6 +28,7 @@ executable usta
     Usta.UI.Components.Shortcut
     Usta.UI.Gallery
     Usta.UI.Pages.Inbox
+    Usta.UI.Pages.PullRequests
     Usta.UI.Platform
     Usta.UI.Sidebar
     Usta.UI.Style

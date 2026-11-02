@@ -24,6 +24,7 @@ import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Pages.Inbox as Inbox
+import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Style (Tone (..))
@@ -37,6 +38,7 @@ build app = do
   forM_ [minBound .. maxBound] $ \page -> do
     content <- case page of
       Sidebar.Inbox -> Inbox.new Inbox.sample >>= Gtk.toWidget
+      Sidebar.PullRequests -> PullRequests.new PullRequests.sample >>= Gtk.toWidget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -122,7 +124,7 @@ headerBar platform = do
 styles :: [Text]
 styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
-  , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css
+  , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , windowCss
   ]
 

@@ -43,6 +43,7 @@ executable usta
     Usta.Diagram.Class
     Usta.Diagram.Entity
     Usta.Diagram.Flowchart
+    Usta.Diagram.Gantt
     Usta.Diagram.Layered
     Usta.Diagram.Pie
     Usta.Diagram.Quadrant

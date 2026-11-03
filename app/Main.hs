@@ -70,18 +70,18 @@ cache = do
     changes <- newBus
     statuses <- newBus
     sync <- Sync.start Sync.Settings {pool = pool, changes = changes, statuses = statuses, every = 60} []
+    root <- Mirrors.defaultRoot
+    mirrorStatuses <- newBus
+    mirrors <- Mirrors.start Mirrors.Settings {pool = pool, changes = changes, statuses = mirrorStatuses, root = root}
     accounts <- Accounts.connect Accounts.Settings
       { manager = manager
       , keyring = Keyring.system
       , pool = pool
       , changes = changes
       , sync = sync
+      , mirrors = mirrors
       , forgejoApi = \host -> apiUrl host "/api/v1"
       }
-    -- The window shows mirrors next; for now they are only kept fresh.
-    root <- Mirrors.defaultRoot
-    mirrorStatuses <- newBus
-    _ <- Mirrors.start Mirrors.Settings {pool = pool, changes = changes, statuses = mirrorStatuses, root = root}
     let source = Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync)
         start = if null saved then Window.FirstRun else Window.Ready
     runApp (void . Window.buildAt start source)

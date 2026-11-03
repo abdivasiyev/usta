@@ -19,10 +19,12 @@ import qualified Usta.Diagram.Class as Class
 import qualified Usta.Diagram.Entity as Entity
 import qualified Usta.Diagram.Flowchart as Flowchart
 import qualified Usta.Diagram.Gantt as Gantt
+import qualified Usta.Diagram.Journey as Journey
 import qualified Usta.Diagram.Pie as Pie
 import qualified Usta.Diagram.Quadrant as Quadrant
 import qualified Usta.Diagram.Sequence as Sequence
 import qualified Usta.Diagram.State as State
+import qualified Usta.Diagram.Timeline as Timeline
 import Usta.Diagram.Scene
 import qualified Usta.Mermaid as Mermaid
 
@@ -36,6 +38,8 @@ data Kind
   | Pie Pie.Pie
   | Quadrant Quadrant.Quadrant
   | Gantt Gantt.Gantt
+  | Journey Journey.Journey
+  | Timeline Timeline.Timeline
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -61,6 +65,8 @@ parse source = do
         "pie" -> Pie <$> Pie.parse (T.unlines meaningful)
         "quadrantchart" -> Quadrant <$> Quadrant.parse (T.unlines meaningful)
         "gantt" -> Gantt <$> Gantt.parse (T.unlines meaningful)
+        "journey" -> Journey <$> Journey.parse (T.unlines meaningful)
+        "timeline" -> Timeline <$> Timeline.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -90,6 +96,8 @@ draw measure d = do
     Pie p -> Pie.draw measure p
     Quadrant q -> Quadrant.draw measure q
     Gantt g -> Gantt.draw measure g
+    Journey j -> Journey.draw measure j
+    Timeline t -> Timeline.draw measure t
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

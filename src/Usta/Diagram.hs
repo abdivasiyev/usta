@@ -37,6 +37,7 @@ import qualified Usta.Diagram.State as State
 import qualified Usta.Diagram.Timeline as Timeline
 import qualified Usta.Diagram.Treemap as Treemap
 import qualified Usta.Diagram.XyChart as XyChart
+import qualified Usta.Diagram.ZenUml as ZenUml
 import Usta.Diagram.Scene
 import qualified Usta.Mermaid as Mermaid
 
@@ -83,6 +84,7 @@ parse source = do
       kind <- case word of
         w | w `elem` ["graph", "flowchart"] -> Flowchart <$> Mermaid.parse (T.unlines meaningful)
         "sequencediagram" -> Sequence <$> Sequence.parse (T.unlines meaningful)
+        "zenuml" -> Sequence <$> ZenUml.parse (T.unlines meaningful)
         w | w `elem` ["classdiagram", "classdiagram-v2"] -> Class <$> Class.parse (T.unlines meaningful)
         w | w `elem` ["statediagram", "statediagram-v2"] -> State <$> State.parse (T.unlines meaningful)
         "erdiagram" -> Entity <$> Entity.parse (T.unlines meaningful)

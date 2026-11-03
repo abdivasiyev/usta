@@ -65,6 +65,7 @@ executable usta
     Usta.Diagram.Timeline
     Usta.Diagram.Treemap
     Usta.Diagram.XyChart
+    Usta.Diagram.ZenUml
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api

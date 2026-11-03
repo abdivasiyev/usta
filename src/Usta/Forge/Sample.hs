@@ -113,6 +113,7 @@ new now account = do
         , F.createPull = \_ _ -> refuse
         , F.branches = \_ -> pure ["master"]
         , F.labels = \_ -> pure []
+        , F.compare = \_ _ _ -> pure ([], [])
         , F.markUnread = \thread -> do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->

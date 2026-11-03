@@ -100,6 +100,9 @@ forgejo manager base host token = do
     , branches = \repo -> map (.name) <$> run client
         (everyPage (\page limit -> Api.api.branches (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , labels = \repo -> map (.name) <$> repoLabels client repo
+    , compare = \repo into tip -> do
+        c <- run client (Api.api.compare (owner repo) (shortName repo) (Api.BaseHead into tip))
+        pure (map (.commit) c.commits, c.files)
     , cloneUrls = \repo -> do
         r <- run client (Api.api.repository (owner repo) (shortName repo))
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}

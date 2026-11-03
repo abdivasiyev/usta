@@ -26,6 +26,8 @@ module Usta.Forge.Forgejo.Api
   , BranchName (..)
   , RepoLabel (..)
   , Reviewers (..)
+  , BaseHead (..)
+  , Comparison (..)
   , NotificationQuery (..)
   , ThreadQuery (..)
   , ThreadState (..)
@@ -146,6 +148,9 @@ data Routes mode = Routes
   , labels
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels"
            :> RecordQueryParam ListQuery :> Get '[JSON] [RepoLabel]
+  , compare
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "compare"
+           :> Capture "basehead" BaseHead :> Get '[JSON] Comparison
   }
   deriving stock (Generic)
 
@@ -247,6 +252,27 @@ newtype DiffOf = DiffOf Number
 
 instance ToHttpApiData DiffOf where
   toUrlPiece (DiffOf n) = toUrlPiece n <> ".diff"
+
+-- | The path segment "base...head": what head has that base does not.
+type BaseHead :: Type
+data BaseHead = BaseHead Text Text
+
+instance ToHttpApiData BaseHead where
+  toUrlPiece (BaseHead base tip) = toUrlPiece (base <> "..." <> tip)
+
+-- | The commits, oldest first, and the files they change.
+type Comparison :: Type
+data Comparison = Comparison
+  { commits :: [ApiCommit]
+  , files :: [Text]
+  }
+
+instance FromJSON Comparison where
+  parseJSON = withObject "Compare" $ \o -> do
+    commits <- o .:? "commits" .!= []
+    files <- o .:? "files" .!= []
+    names <- traverse (withObject "File" (.: "filename")) files
+    pure Comparison {commits = commits, files = names}
 
 -- | The path segment "<sha>.diff": a commit as a diff.
 type CommitDiffOf :: Type

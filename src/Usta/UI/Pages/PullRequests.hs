@@ -7,6 +7,7 @@ module Usta.UI.Pages.PullRequests
   , Review (..)
   , Relation (..)
   , PullRequest (..)
+  , fromPullRequest
   , sample
   , new
   , css
@@ -27,7 +28,12 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
+import Usta.UI.Format (Clock, short)
 import Usta.UI.Style (Tone (..))
+import Usta.Types.Involvement (Involvement (..))
+import Usta.Types.Parse (unparse)
+import qualified Usta.Types.PullRequest as P
+import Usta.Types.Ref (Ref (..))
 
 type Checks :: Type
 data Checks = ChecksPassed | ChecksFailed | ChecksRunning | NoChecks
@@ -51,7 +57,7 @@ reviewLabel r = case r of
   ChangesRequested -> (Danger, "Changes requested")
   NoReviewers -> (Neutral, "No reviewers")
 
--- | How the pull request involves you; decides which tab shows it.
+-- | How the pull request involves you; decides which tabs show it.
 type Relation :: Type
 data Relation = WaitingForMyReview | CreatedByMe | AssignedToMe
   deriving (Eq, Show, Enum, Bounded)
@@ -72,7 +78,7 @@ data PullRequest = PullRequest
   , comments :: Int
   , updated :: Text
   , draft :: Bool
-  , relation :: Relation
+  , relations :: [Relation]
   , changes :: (Int, Int)
     -- ^ Changed files and commits.
   , fetching :: Maybe Double
@@ -92,9 +98,9 @@ tabLabel t = case t of
 
 inTab :: Tab -> PullRequest -> Bool
 inTab t pr = case t of
-  ReviewTab -> pr.relation == WaitingForMyReview
-  CreatedTab -> pr.relation == CreatedByMe
-  AssignedTab -> pr.relation == AssignedToMe
+  ReviewTab -> WaitingForMyReview `elem` pr.relations
+  CreatedTab -> CreatedByMe `elem` pr.relations
+  AssignedTab -> AssignedToMe `elem` pr.relations
   AllTab -> True
 
 -- | @onNew@ runs for "New pull request"; @onOpen@ when a row is clicked
@@ -223,23 +229,61 @@ pullRequestRow pr = do
   where
     toneText tone = "tone-" <> T.toLower (T.pack (show tone))
 
+-- | The list row for a synced pull request; 'Nothing' once it is merged or
+-- closed, since the list shows open ones.
+fromPullRequest :: Clock -> Forge.Kind -> P.PullRequest -> Maybe PullRequest
+fromPullRequest c forge pr
+  | pr.state `elem` [P.Merged, P.Closed] = Nothing
+  | otherwise = Just PullRequest
+      { forge = forge
+      , host = unparse pr.ref.host
+      , repo = unparse pr.ref.repo
+      , number = unparse pr.ref.number
+      , title = pr.title
+      , branch = pr.headBranch
+      , author = unparse pr.author
+      , checks = maybe NoChecks checks pr.checks
+      , review = maybe NoReviewers review pr.review
+      , comments = unparse pr.comments
+      , updated = short c pr.updatedAt
+      , draft = pr.state == P.Draft
+      , relations = [rel | Just rel <- map relation pr.involvement]
+      , changes = (maybe 0 unparse pr.changedFiles, maybe 0 unparse pr.commits)
+        -- 0 until the details are fetched.
+      , fetching = Nothing
+      }
+  where
+    checks state = case state of
+      P.ChecksPassed -> ChecksPassed
+      P.ChecksFailed -> ChecksFailed
+      P.ChecksRunning -> ChecksRunning
+    review state = case state of
+      P.AwaitingReview -> ReviewRequested
+      P.Approved -> Approved
+      P.ChangesRequested -> ChangesRequested
+    relation i = case i of
+      AsReviewer -> Just WaitingForMyReview
+      AsAuthor -> Just CreatedByMe
+      AsAssignee -> Just AssignedToMe
+      AsMentioned -> Nothing
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
 sample :: [PullRequest]
 sample =
   [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "abdivasiyev"
-      ChecksPassed ReviewRequested 1 "5m" False WaitingForMyReview (2, 1) Nothing
+      ChecksPassed ReviewRequested 1 "5m" False [WaitingForMyReview] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "abdivasiyev"
-      ChecksFailed ReviewRequested 0 "22m" False WaitingForMyReview (2, 1) Nothing
+      ChecksFailed ReviewRequested 0 "22m" False [WaitingForMyReview] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "abdivasiyev"
-      ChecksRunning NoReviewers 2 "Yesterday" False CreatedByMe (2, 1) Nothing
+      ChecksRunning NoReviewers 2 "Yesterday" False [CreatedByMe] (2, 1) Nothing
   , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "abdivasiyev"
-      NoChecks NoReviewers 0 "Mon" True CreatedByMe (2, 1) Nothing
+      NoChecks NoReviewers 0 "Mon" True [CreatedByMe] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "abdivasiyev"
-      ChecksPassed Approved 3 "Mon" False CreatedByMe (2, 1) Nothing
+      ChecksPassed Approved 3 "Mon" False [CreatedByMe] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 21 "refactor: move every host to den aspects" "refactor/den-aspects" "abdivasiyev"
-      ChecksRunning ReviewRequested 0 "1h" False WaitingForMyReview (212, 14) (Just 64)
+      ChecksRunning ReviewRequested 0 "1h" False [WaitingForMyReview] (212, 14) (Just 64)
   ]
 
 css :: Text

@@ -10,16 +10,23 @@ module Usta.UI.Style
   , toneClass
   , install
   , setTheme
+  , themes
   , tokens
   ) where
 
-import Control.Monad (forM_, void)
+import Control.Monad (forM_, unless, void, when)
 import Data.GI.Base (AttrOp ((:=)), SignalProxy (PropertyNotify), get, new, on, set)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
+import Foreign.C.Types (CInt (..))
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import Usta.Preferences (Theme (..))
+import qualified Usta.Types.Platform as Platform
+
+foreign import ccall unsafe "usta_system_dark" systemDark :: IO CInt
 
 -- | The meaning a colored element carries. Add a constructor here and a
 -- matching @.tone-*@ rule in the component CSS to introduce a new one.
@@ -62,16 +69,38 @@ install widget components = do
   void $ on settings (PropertyNotify #gtkInterfaceColorScheme) (const sync)
 
 -- | Light, dark, or whatever the system uses; 'install' makes the tokens
--- follow.
+-- follow. On Linux GTK reads the system's choice from the desktop, so
+-- 'System' gives the setting back to it; on macOS GTK cannot, so usta
+-- reads the appearance itself.
 setTheme :: Theme -> IO ()
 setTheme theme = do
   settings <- Gtk.settingsGetDefault
-  forM_ settings $ \s -> set s [#gtkInterfaceColorScheme := scheme]
+  forM_ settings $ \s -> case theme of
+    Light -> choose s Gtk.InterfaceColorSchemeLight
+    Dark -> choose s Gtk.InterfaceColorSchemeDark
+    System
+      | Platform.current == Platform.MacOS -> do
+          dark <- (/= 0) <$> systemDark
+          choose s (if dark then Gtk.InterfaceColorSchemeDark else Gtk.InterfaceColorSchemeLight)
+      | otherwise -> Gtk.settingsResetProperty s "gtk-interface-color-scheme"
   where
-    scheme = case theme of
-      System -> Gtk.InterfaceColorSchemeDefault
-      Light -> Gtk.InterfaceColorSchemeLight
-      Dark -> Gtk.InterfaceColorSchemeDark
+    -- Only a change is set, so pages repaint only when the theme changes.
+    choose s scheme = do
+      now <- get s #gtkInterfaceColorScheme
+      unless (now == scheme) $ set s [#gtkInterfaceColorScheme := scheme]
+
+-- | 'setTheme' for a window: while the choice is 'System', macOS's
+-- appearance is read again every two seconds, so switching it applies
+-- without restarting usta.
+themes :: IO (Theme -> IO ())
+themes = do
+  chosen <- newIORef System
+  when (Platform.current == Platform.MacOS) $
+    void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 2 $ do
+      theme <- readIORef chosen
+      when (theme == System) (setTheme System)
+      pure True
+  pure (\theme -> writeIORef chosen theme >> setTheme theme)
 
 tokens :: Text
 tokens = mconcat

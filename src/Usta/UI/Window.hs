@@ -131,7 +131,8 @@ buildAt start given app = do
   states <- newIORef []
   shownDetails <- newIORef (0 :: Int)
   -- The saved theme, before anything is drawn.
-  source.preferences >>= Style.setTheme . (.theme)
+  applyTheme <- Style.themes
+  source.preferences >>= applyTheme . (.theme)
   let backToMain = Gtk.stackSetVisibleChildName screens "main"
       showDetail :: Gtk.Widget -> IO ()
       -- The new screen fades in over the old one, which goes once hidden.
@@ -239,7 +240,7 @@ buildAt start given app = do
               , Settings.onClearCache = source.clearCache
               , Settings.preferences = chosen
               , Settings.onPreferences = \p -> do
-                  Style.setTheme p.theme
+                  applyTheme p.theme
                   source.setPreferences p
               }
         Settings.new backToMain (addAccountThen openSettings) model >>= showDetail
@@ -455,7 +456,7 @@ buildAt start given app = do
               , command "Open settings" (keys ",") openSettings
               , command themeTitle "" $ do
                   chosen <- source.preferences
-                  Style.setTheme nextTheme
+                  applyTheme nextTheme
                   source.setPreferences chosen {theme = nextTheme}
               ]
         pullRequests <- map (paletteItem openPullRequest) <$> source.pullRequests

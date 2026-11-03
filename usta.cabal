@@ -196,7 +196,9 @@ executable usta
     NoFieldSelectors
     OverloadedRecordDot
   ghc-options: -Wall -threaded
-  c-sources: cbits/keyring.c
+  c-sources:
+    cbits/appearance.c
+    cbits/keyring.c
 
   if os(darwin)
     frameworks:

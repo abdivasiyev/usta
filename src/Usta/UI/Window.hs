@@ -11,7 +11,7 @@ module Usta.UI.Window
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
-import Control.Monad (forM_, join, void, when)
+import Control.Monad (forM, forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
@@ -137,7 +137,23 @@ buildAt start source app = do
   let openNotification n
         | n.kind == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
         | otherwise = openPullRequest "Inbox" (notificationSummary n)
-  inboxPage <- source.inbox >>= Inbox.new openNotification
+  -- "Mark as done" asks the forge, so it runs off the main thread; the
+  -- pages redraw once the cache has the answer.
+  inboxRef <- newIORef (pure ())
+  let setDone n done = do
+        anchor <- Gtk.toWidget screens
+        void $ forkIO $ do
+          result <- source.setDone n done
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            either (Settings.notice anchor (if done then "Not marked done" else "Not moved to the inbox"))
+              (const (join (readIORef inboxRef))) result
+            pure False
+      inboxActions = Inbox.Actions {open = openNotification, setDone = setDone}
+  initial <- source.inbox
+  inboxPages <- forM inboxViews $ \(page, view) -> (,) page <$> Inbox.new view inboxActions initial
+  let reloadInbox = do
+        everything <- source.inbox
+        forM_ inboxPages $ \(_, p) -> p.update everything
   pullRequestPage <- source.pullRequests >>= PullRequests.new openNewPullRequest
     (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))
   issuePage <- source.issues >>= Issues.new openNewIssue (openIssue "Issues" . issueDetail)
@@ -178,19 +194,14 @@ buildAt start source app = do
         known <- readIORef states
         accounts <- source.accounts
         notifications <- source.inbox
-        prs <- source.pullRequests
-        issues <- source.issues
         let count n = if n > 0 then Just n else Nothing
             syncing host = or [s == Sync.Syncing | a <- accounts, a.host == host, Just s <- [lookup a.accountId known]]
         pure Sidebar.Model
           { Sidebar.counts = \page -> case page of
-              Sidebar.Inbox -> count (length (filter (.unread) notifications))
-              Sidebar.ReviewRequests -> count (length [() | pr <- prs, PullRequests.WaitingForMyReview `elem` pr.relations])
-              Sidebar.AssignedToMe -> count $
-                length [() | pr <- prs, PullRequests.AssignedToMe `elem` pr.relations]
-                  + length [() | i <- issues, not i.closed, Issues.AssignedToMe `elem` i.relations]
-              Sidebar.Mentions -> count (length [() | n <- notifications, n.reason == Just Inbox.Mentioned])
-              _ -> Nothing
+              Sidebar.Done -> Nothing
+              _ -> case lookup page inboxViews of
+                Just view -> count (length (filter (Inbox.lists view) notifications))
+                Nothing -> Nothing
           , Sidebar.forges = [(a.forge, a.host) | a <- accounts]
           , Sidebar.forgeSync = \host -> if syncing host then Just Sidebar.ForgeSyncing else Nothing
           , Sidebar.pinned = []
@@ -220,10 +231,10 @@ buildAt start source app = do
         SyncStatus.new state source.syncNow >>= Gtk.toWidget >>= replaceChild syncChip
       reload resource = do
         case resource of
-          Resource.Notifications -> source.inbox >>= inboxPage.update
+          Resource.Notifications -> reloadInbox
           -- Inbox rows show their pull request's checks and review.
           Resource.PullRequests -> do
-            source.inbox >>= inboxPage.update
+            reloadInbox
             source.pullRequests >>= pullRequestPage.update
           Resource.Issues -> source.issues >>= issuePage.update
           Resource.Repositories -> source.repositories >>= repositoryPage.update
@@ -240,6 +251,7 @@ buildAt start source app = do
             Shortcut.bar shortcuts (Just (plural (length (nubOrd [a.host | a <- accounts])) "forge" "forges"
                                             <> " · " <> plural (length accounts) "account" "accounts"))
         Gtk.toWidget footer >>= replaceChild footerSlot
+  writeIORef inboxRef (reloadInbox >> drawSidebar)
   -- Signing in or out changes the lists and the accounts at once.
   source.onChange $ \resource -> reload resource >> drawSyncChip >> drawFooter
   source.onStatus $ \status -> do
@@ -256,7 +268,7 @@ buildAt start source app = do
       Sidebar.Inbox | start == FirstSync ->
         Inbox.syncing "First sync: fetching notifications from 2 forges. Items appear as they arrive."
           >>= Gtk.toWidget
-      Sidebar.Inbox -> Gtk.toWidget inboxPage.widget
+      _ | Just p <- lookup page inboxPages -> Gtk.toWidget p.widget
       Sidebar.PullRequests -> Gtk.toWidget pullRequestPage.widget
       Sidebar.Issues -> Gtk.toWidget issuePage.widget
       Sidebar.Repositories -> Gtk.toWidget repositoryPage.widget
@@ -361,6 +373,16 @@ tabContent source fetch summary tab = case tab of
   PullRequest.Checks -> Checks.new $ case summary.checks of
     Just (Danger, _) -> Checks.failing
     _ -> Checks.passing
+
+-- | The sidebar's pages that list notifications.
+inboxViews :: [(Sidebar.Page, Inbox.View)]
+inboxViews =
+  [ (Sidebar.Inbox, Inbox.Everything)
+  , (Sidebar.ReviewRequests, Inbox.Only Inbox.ReviewRequested)
+  , (Sidebar.AssignedToMe, Inbox.Only Inbox.Assigned)
+  , (Sidebar.Mentions, Inbox.Only Inbox.Mentioned)
+  , (Sidebar.Done, Inbox.Finished)
+  ]
 
 -- | The detail header from an inbox notification about a pull request.
 notificationSummary :: Inbox.Notification -> PullRequest.Summary

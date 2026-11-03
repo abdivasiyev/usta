@@ -8,6 +8,10 @@ module Usta.UI.Pages.Inbox
   , Reason (..)
   , Change (..)
   , Notification (..)
+  , View (..)
+  , Actions (..)
+  , lists
+  , webUrl
   , fromNotification
   , sample
   , new
@@ -23,6 +27,7 @@ import Data.Kind (Type)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -85,6 +90,45 @@ data Notification = Notification
   , changes :: [Change]
   }
 
+-- | Which notifications a page lists.
+type View :: Type
+data View
+  = Everything
+    -- ^ The inbox: unread and not marked done.
+  | Only Reason
+    -- ^ The inbox, with that badge only.
+  | Finished
+    -- ^ Marked done here, or read on the forge.
+  deriving (Eq, Show)
+
+lists :: View -> Notification -> Bool
+lists view n = case view of
+  Everything -> waiting
+  Only reason -> waiting && n.reason == Just reason
+  Finished -> not waiting
+  where
+    waiting = n.unread && not n.done
+
+-- | What the preview's buttons do.
+type Actions :: Type
+data Actions = Actions
+  { open :: Notification -> IO ()
+    -- ^ "Open review" or "Open issue".
+  , setDone :: Notification -> Bool -> IO ()
+    -- ^ "Mark as done" ('True') or "Move to inbox" ('False').
+  }
+
+-- | The notification's pull request or issue on the forge's website.
+webUrl :: Notification -> Text
+webUrl n = "https://" <> n.host <> "/" <> n.repo <> "/" <> path <> "/" <> T.pack (show n.number)
+  where
+    path = case (n.forge, n.kind) of
+      (_, Issue) | n.forge == Forge.GitLab -> "-/issues"
+                 | otherwise -> "issues"
+      (Forge.GitHub, _) -> "pull"
+      (Forge.GitLab, _) -> "-/merge_requests"
+      (Forge.Forgejo, _) -> "pulls"
+
 type Filter :: Type
 data Filter = All | Unread | Participating
   deriving (Eq, Enum, Bounded)
@@ -95,12 +139,12 @@ keeps f n = case f of
   Unread -> n.unread
   Participating -> n.reason `elem` map Just [ReviewRequested, Mentioned, Assigned]
 
--- | @onOpen@ runs for "Open review" or "Open issue".
--- | The selected notification stays selected when the list is updated;
--- the first one is selected when it is gone.
-new :: (Notification -> IO ()) -> [Notification] -> IO (Page Notification)
-new onOpen notifications = do
-  items <- newIORef notifications
+-- | The notifications @view@ lists, out of all of them. The selected one
+-- stays selected when the list is updated; the first one is selected when
+-- it is gone.
+new :: View -> Actions -> [Notification] -> IO (Page Notification)
+new view actions notifications = do
+  items <- newIORef (filter (lists view) notifications)
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
   previewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
@@ -108,7 +152,13 @@ new onOpen notifications = do
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeSingle
                              , #cssClasses := ["u-inbox-list"]
                              ]
-  refill list notificationRow notifications
+  empty <- GI.new Gtk.Label [ #label := emptyText
+                            , #wrap := True
+                            , #cssClasses := ["muted", "u-inbox-empty"]
+                            ]
+  -- Removing every row removes the placeholder too, so it is set again.
+  let fill shown = refill list notificationRow shown >> Gtk.listBoxSetPlaceholder list (Just empty)
+  readIORef items >>= fill
 
   selectedKey <- newIORef Nothing
   void $ GI.on list #rowSelected $ \selected -> case selected of
@@ -119,7 +169,7 @@ new onOpen notifications = do
       when (index >= 0 && fromIntegral index < length shown) $ do
         let n = shown !! fromIntegral index
         writeIORef selectedKey (Just (key n))
-        content <- preview onOpen n
+        content <- preview actions n
         GI.set previewScroll [#child := content]
 
   (filters, buttons) <- Segmented.new ["All", "Unread", "Participating"] 0
@@ -127,6 +177,10 @@ new onOpen notifications = do
                                  , #hexpand := True
                                  , #halign := Gtk.AlignEnd
                                  ]
+  -- Done has nothing to filter: everything in it is read.
+  doneNote <- GI.new Gtk.Label [ #label := "Marked done here, or read on the forge"
+                               , #cssClasses := ["muted", "count"]
+                               ]
   current <- newIORef All
   let apply f = do
         writeIORef current f
@@ -148,7 +202,7 @@ new onOpen notifications = do
   filterBar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                               , #cssClasses := ["u-filter-bar"]
                               ]
-  #append filterBar filters
+  #append filterBar =<< if view == Finished then Gtk.toWidget doneNote else Gtk.toWidget filters
   #append filterBar countLabel
 
   listScroll <- GI.new Gtk.ScrolledWindow [ #child := list
@@ -176,14 +230,19 @@ new onOpen notifications = do
   select
   pure Page
     { widget = page
-    , update = \shown -> do
+    , update = \everything -> do
+        let shown = filter (lists view) everything
         writeIORef items shown
-        refill list notificationRow shown
+        fill shown
         readIORef current >>= apply
         select
     }
   where
     key n = (n.host, n.repo, n.number)
+    emptyText = case view of
+      Finished -> "Nothing is done yet. Mark a notification done and it moves here."
+      Only _ -> "Nothing here: no notification in the inbox has this badge."
+      Everything -> "All caught up."
 
 -- | The inbox during the first sync: @note@ on top, skeleton rows and a
 -- skeleton preview until notifications arrive.
@@ -257,8 +316,8 @@ notificationRow n = do
   #append row body
   pure row
 
-preview :: (Notification -> IO ()) -> Notification -> IO Gtk.Box
-preview onOpen n = do
+preview :: Actions -> Notification -> IO Gtk.Box
+preview actions n = do
   pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #cssClasses := ["u-preview"]
@@ -311,14 +370,22 @@ preview onOpen n = do
     #append files card
     #append pane files
 
-  actions <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  buttons <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   let primary = if n.kind == Issue then "Open issue" else "Open review"
   open <- Button.new Button.defaults { Button.label = Just primary, Button.variant = Button.Primary }
-  void $ GI.on open #clicked (onOpen n)
-  #append actions open
-  Button.new Button.defaults { Button.label = Just "Mark as done" } >>= #append actions
-  Button.new Button.defaults { Button.label = Just "Open in browser" } >>= #append actions
-  #append pane actions
+  void $ GI.on open #clicked (actions.open n)
+  #append buttons open
+  let finished = lists Finished n
+  done <- Button.new Button.defaults
+    { Button.label = Just (if finished then "Move to inbox" else "Mark as done") }
+  void $ GI.on done #clicked (actions.setDone n (not finished))
+  #append buttons done
+  browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
+  void $ GI.on browser #clicked $ do
+    launcher <- Gtk.uriLauncherNew (Just (webUrl n))
+    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  #append buttons browser
+  #append pane buttons
 
   pure pane
   where
@@ -450,6 +517,7 @@ css = mconcat
   , "box.u-filter-bar { padding: 10px 12px; border-bottom: 1px solid var(--border); }"
   , "box.u-filter-bar label.count { font-size: 12px; }"
   , "list.u-inbox-list { background: var(--surface); }"
+  , "label.u-inbox-empty { padding: 32px 24px; font-size: 14px; }"
   , "list.u-inbox-list row {"
   , "  padding: 12px 16px; border-bottom: 1px solid var(--border-subtle);"
   , "  background: var(--surface); color: var(--text);"

@@ -489,7 +489,7 @@ summaryOf pr = PullRequest.Summary
 -- | The single-key shortcuts, for the footer strip and Settings.
 shortcuts :: [(Text, Text)]
 shortcuts =
-  [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
+  [("j k", "move"), ("Enter", "open"), ("e", "done"), ("o", "open in browser")]
 
 -- | @syncChip@ holds the sync state, which the window keeps current;
 -- @onSync@ runs for the refresh button.

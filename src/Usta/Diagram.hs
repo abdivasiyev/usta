@@ -23,6 +23,7 @@ import qualified Usta.Diagram.GitGraph as GitGraph
 import qualified Usta.Diagram.Journey as Journey
 import qualified Usta.Diagram.Kanban as Kanban
 import qualified Usta.Diagram.Mindmap as Mindmap
+import qualified Usta.Diagram.Packet as Packet
 import qualified Usta.Diagram.Pie as Pie
 import qualified Usta.Diagram.Quadrant as Quadrant
 import qualified Usta.Diagram.Radar as Radar
@@ -30,6 +31,7 @@ import qualified Usta.Diagram.Sankey as Sankey
 import qualified Usta.Diagram.Sequence as Sequence
 import qualified Usta.Diagram.State as State
 import qualified Usta.Diagram.Timeline as Timeline
+import qualified Usta.Diagram.Treemap as Treemap
 import qualified Usta.Diagram.XyChart as XyChart
 import Usta.Diagram.Scene
 import qualified Usta.Mermaid as Mermaid
@@ -52,6 +54,8 @@ data Kind
   | GitGraph GitGraph.GitGraph
   | Sankey Sankey.Sankey
   | Kanban Kanban.Kanban
+  | Packet Packet.Packet
+  | Treemap Treemap.Treemap
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -85,6 +89,8 @@ parse source = do
         "gitgraph" -> GitGraph <$> GitGraph.parse (T.unlines meaningful)
         w | w `elem` ["sankey", "sankey-beta"] -> Sankey <$> Sankey.parse (T.unlines meaningful)
         "kanban" -> Kanban <$> Kanban.parse (T.unlines meaningful)
+        w | w `elem` ["packet", "packet-beta"] -> Packet <$> Packet.parse (T.unlines meaningful)
+        w | w `elem` ["treemap", "treemap-beta"] -> Treemap <$> Treemap.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -122,6 +128,8 @@ draw measure d = do
     GitGraph g -> GitGraph.draw measure g
     Sankey s -> Sankey.draw measure s
     Kanban k -> Kanban.draw measure k
+    Packet p -> Packet.draw measure p
+    Treemap t -> Treemap.draw measure t
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

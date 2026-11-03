@@ -48,6 +48,7 @@ executable usta
     Usta.Diagram.Journey
     Usta.Diagram.Kanban
     Usta.Diagram.Mindmap
+    Usta.Diagram.Packet
     Usta.Diagram.Layered
     Usta.Diagram.Pie
     Usta.Diagram.Quadrant
@@ -58,6 +59,7 @@ executable usta
     Usta.Diagram.Sequence
     Usta.Diagram.State
     Usta.Diagram.Timeline
+    Usta.Diagram.Treemap
     Usta.Diagram.XyChart
     Usta.Forge
     Usta.Forge.Forgejo

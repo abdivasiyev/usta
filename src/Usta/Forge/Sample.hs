@@ -114,6 +114,8 @@ new now account = do
         , F.branches = \_ -> pure ["master"]
         , F.labels = \_ -> pure []
         , F.compare = \_ _ _ -> pure ([], [])
+        , F.tree = \_ _ -> pure []
+        , F.file = \_ _ _ -> refuse
         , F.markUnread = \thread -> do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->

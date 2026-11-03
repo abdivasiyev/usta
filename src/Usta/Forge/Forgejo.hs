@@ -100,6 +100,17 @@ forgejo manager base host token = do
     , branches = \repo -> map (.name) <$> run client
         (everyPage (\page limit -> Api.api.branches (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , labels = \repo -> map (.name) <$> repoLabels client repo
+    , tree = \repo ref -> do
+        let page n = run client $ Api.api.tree (owner repo) (shortName repo) ref
+              Api.TreeQuery {recursive = True, page = Just n, perPage = Named (Just 1000)}
+            -- Pages until every entry the forge counted has come.
+            collect n got = do
+              t <- page n
+              let now = got <> map (.entry) t.entries
+              if null t.entries || length now >= t.totalCount then pure now else collect (n + 1) now
+        collect 1 []
+    , file = \repo ref path ->
+        run client (Api.api.file (owner repo) (shortName repo) (T.splitOn "/" path) Api.RefQuery {ref = ref})
     , compare = \repo into tip -> do
         c <- run client (Api.api.compare (owner repo) (shortName repo) (Api.BaseHead into tip))
         pure (map (.commit) c.commits, c.files)

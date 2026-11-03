@@ -8,11 +8,13 @@ module Usta.Forge
   ) where
 
 import Control.Exception (Exception)
+import Data.ByteString (ByteString)
 import Data.Kind (Type)
 import Data.Text (Text)
 
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
+import Usta.Types.Tree (Entry)
 import Usta.Types.Discussion (Comment, Discussion, Merge, NewIssue, NewPull, Verdict)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
@@ -65,6 +67,10 @@ data Forge = Forge
   , compare :: RepoName -> Text -> Text -> IO ([Commit], [Text])
     -- ^ What a branch has that the base branch does not: its commits,
     -- oldest first, and the paths they change.
+  , tree :: RepoName -> Text -> IO [Entry]
+    -- ^ Every folder and file on a branch, for when there is no mirror.
+  , file :: RepoName -> Text -> Text -> IO ByteString
+    -- ^ A file's contents on a branch, by path.
   }
 
 -- | A repository's clone URLs. The forge gives them because only it knows

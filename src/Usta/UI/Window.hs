@@ -692,7 +692,10 @@ said from mirror forge = case from of
 loadInto :: IO (Either Text a) -> (a -> IO Gtk.Widget) -> IO Gtk.Widget
 loadInto load render = do
   slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
-  Skeleton.detail >>= #append slot
+  -- The skeleton shows only if loading takes longer than 300 ms.
+  placeholder <- Skeleton.detail
+  Skeleton.delayed placeholder
+  #append slot placeholder
   void $ forkIO $ do
     result <- try load
     void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
@@ -700,6 +703,7 @@ loadInto load render = do
         Right (Right a) -> render a
         Right (Left problem) -> notice problem
         Left (_ :: SomeException) -> notice "Loading failed unexpectedly."
+      Skeleton.appear widget
       replaceChild slot widget
       pure False
   Gtk.toWidget slot

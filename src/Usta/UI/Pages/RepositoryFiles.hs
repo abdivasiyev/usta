@@ -290,6 +290,7 @@ replace :: Gtk.Box -> Gtk.Widget -> IO ()
 replace box widget = do
   let clear = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear)
   clear
+  Skeleton.appear widget
   #append box widget
 
 note :: Text -> IO Gtk.Widget

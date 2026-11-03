@@ -12,6 +12,7 @@ module Usta.UI.Components.Skeleton
   , listRow
   , detail
   , delayed
+  , appear
   , css
   ) where
 
@@ -100,6 +101,11 @@ delayed widget = do
     Gtk.widgetSetVisible widget True
     pure False
 
+-- | Fades @widget@ in, for content that takes a skeleton's place, so the
+-- swap is not a jump. GTK skips it when animations are turned off.
+appear :: Gtk.IsWidget w => w -> IO ()
+appear widget = Gtk.widgetAddCssClass widget "u-appear"
+
 css :: Text
 css = mconcat
   -- A slow pulse; GTK stops it when animations are turned off.
@@ -112,4 +118,6 @@ css = mconcat
   , "box.u-skeleton.pill { border-radius: 999px; }"
   , "box.u-skeleton.block { border-radius: 8px; }"
   , "box.u-skeleton-row { padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); }"
+  , "@keyframes u-appear { from { opacity: 0; } to { opacity: 1; } }"
+  , ".u-appear { animation: u-appear 180ms ease-out; }"
   ]

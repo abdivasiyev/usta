@@ -52,6 +52,7 @@ executable usta
     Usta.Types.Commit
     Usta.Types.Count
     Usta.Types.Diff
+    Usta.Types.Discussion
     Usta.Types.ETag
     Usta.Types.Forge
     Usta.Types.Host

@@ -36,12 +36,12 @@ defaults = Config
 -- | Returns the container to place and the entry to read from.
 new :: Config -> IO (Gtk.Overlay, Gtk.SearchEntry)
 new cfg = do
-  entry <- GI.new Gtk.SearchEntry [ #placeholderText := placeholder cfg
-                                  , #widthRequest := width cfg
+  entry <- GI.new Gtk.SearchEntry [ #placeholderText := cfg.placeholder
+                                  , #widthRequest := cfg.width
                                   , #cssClasses := ["u-search"]
                                   ]
   overlay <- GI.new Gtk.Overlay [#child := entry]
-  forM_ (shortcut cfg) $ \keys -> do
+  forM_ cfg.shortcut $ \keys -> do
     hint <- Shortcut.key keys
     set hint [ #halign := Gtk.AlignEnd
              , #valign := Gtk.AlignCenter

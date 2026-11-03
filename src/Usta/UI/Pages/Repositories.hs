@@ -115,23 +115,23 @@ new onNewIssue onNewPullRequest repositories = do
 
 -- | Case-insensitive match on the name or host; @q@ is already lowercase.
 matches :: Text -> Repository -> Bool
-matches q r = q `T.isInfixOf` T.toLower (name r) || q `T.isInfixOf` T.toLower (host r)
+matches q r = q `T.isInfixOf` T.toLower r.name || q `T.isInfixOf` T.toLower r.host
 
 repositoryRow :: Repository -> IO Gtk.Box
 repositoryRow r = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
   nameLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Forge.smallDot (forge r) >>= #append nameLine
-  label (name r) ["mono", "name"] >>= #append nameLine
+  Forge.smallDot r.forge >>= #append nameLine
+  label r.name ["mono", "name"] >>= #append nameLine
   #append row nameLine
-  label (T.intercalate " · " (host r : counts r)) ["meta"] >>= #append row
+  label (T.intercalate " · " (r.host : counts r)) ["meta"] >>= #append row
   pure row
 
 -- | "1 PR", "3 issues"; nothing for zero.
 counts :: Repository -> [Text]
 counts r =
-  [ plural (pullRequests r) "PR" "PRs" | pullRequests r > 0 ]
-  <> [ plural (issues r) "issue" "issues" | issues r > 0 ]
+  [ plural r.pullRequests "PR" "PRs" | r.pullRequests > 0 ]
+  <> [ plural r.issues "issue" "issues" | r.issues > 0 ]
   where
     plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
 
@@ -147,9 +147,9 @@ overview onNewIssue onNewPullRequest r = do
                            , #spacing := 4
                            , #hexpand := True
                            ]
-  label (host r) ["muted"] >>= #append titles
-  label (name r) ["mono", "repo-name"] >>= #append titles
-  descriptionLabel <- label (description r) ["description"]
+  label r.host ["muted"] >>= #append titles
+  label r.name ["mono", "repo-name"] >>= #append titles
+  descriptionLabel <- label r.description ["description"]
   GI.set descriptionLabel [#wrap := True]
   #append titles descriptionLabel
   #append header titles
@@ -167,40 +167,40 @@ overview onNewIssue onNewPullRequest r = do
                           , #spacing := 12
                           , #homogeneous := True
                           ]
-  Card.stat Neutral "Open pull requests" (T.pack (show (pullRequests r))) >>= #append stats
-  Card.stat Neutral "Open issues" (T.pack (show (issues r))) >>= #append stats
-  branch <- Card.stat Neutral "Default branch" (defaultBranch r)
+  Card.stat Neutral "Open pull requests" (T.pack (show r.pullRequests)) >>= #append stats
+  Card.stat Neutral "Open issues" (T.pack (show r.issues)) >>= #append stats
+  branch <- Card.stat Neutral "Default branch" r.defaultBranch
   Gtk.widgetAddCssClass branch "branch"
   #append stats branch
-  let (mirrorTone, mirrorText) = mirror r
+  let (mirrorTone, mirrorText) = r.mirror
   Card.stat mirrorTone "Local mirror" mirrorText >>= #append stats
   #append pane stats
 
-  when (not (null (recentCommits r))) $ do
+  when (not (null r.recentCommits)) $ do
     section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
-    Card.sectionTitle ("Recent commits on " <> defaultBranch r) >>= #append section
+    Card.sectionTitle ("Recent commits on " <> r.defaultBranch) >>= #append section
     card <- Card.new
-    forM_ (recentCommits r) $ \c -> do
+    forM_ r.recentCommits $ \c -> do
       line <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                              , #spacing := 12
                              , #cssClasses := ["commit-row"]
                              ]
-      label (T.take 7 (hash c)) ["mono", "hash"] >>= #append line
-      messageLabel <- label (message c) []
+      label (T.take 7 c.hash) ["mono", "hash"] >>= #append line
+      messageLabel <- label c.message []
       GI.set messageLabel [#hexpand := True]
       #append line messageLabel
-      label (age c) ["muted", "age"] >>= #append line
+      label c.age ["muted", "age"] >>= #append line
       #append card line
     #append section card
     #append pane section
 
-  when (not (null (readme r))) $ do
+  when (not (null r.readme)) $ do
     section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
     Card.sectionTitle "README.md" >>= #append section
     card <- Card.new
     Gtk.widgetAddCssClass card "readme"
     GI.set card [#spacing := 16]
-    forM_ (readme r) $ \block -> blockWidget block >>= #append card
+    forM_ r.readme $ \block -> blockWidget block >>= #append card
     #append section card
     #append pane section
 

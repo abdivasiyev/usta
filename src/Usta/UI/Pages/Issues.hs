@@ -68,10 +68,10 @@ tabLabel t = case t of
 
 inTab :: Tab -> Issue -> Bool
 inTab t i = case t of
-  AssignedTab -> not (closed i) && relation i == AssignedToMe
-  CreatedTab -> not (closed i) && relation i == CreatedByMe
-  MentionedTab -> not (closed i) && relation i == MentionedMe
-  ClosedTab -> closed i
+  AssignedTab -> not i.closed && i.relation == AssignedToMe
+  CreatedTab -> not i.closed && i.relation == CreatedByMe
+  MentionedTab -> not i.closed && i.relation == MentionedMe
+  ClosedTab -> i.closed
 
 -- | @onNew@ runs for "New issue"; @onOpen@ when a row is clicked or
 -- activated with Enter.
@@ -156,7 +156,7 @@ new onNew onOpen issues = do
 issueRow :: Issue -> IO Gtk.Box
 issueRow issue = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 14]
-  icon <- Icon.toned 16 (if closed issue then Merged else Success) Icon.Issue
+  icon <- Icon.toned 16 (if issue.closed then Merged else Success) Icon.Issue
   #append row icon
 
   body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
@@ -164,17 +164,17 @@ issueRow issue = do
                          , #hexpand := True
                          ]
   titleLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  titleLabel <- label (title issue) ["title"]
+  titleLabel <- label issue.title ["title"]
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
   #append titleLine titleLabel
-  forM_ (labels issue) $ \(Label tone name) -> Badge.new tone name >>= #append titleLine
+  forM_ issue.labels $ \(Label tone name) -> Badge.new tone name >>= #append titleLine
   #append body titleLine
 
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Forge.smallDot (forge issue) >>= #append meta
-  let shortName = T.drop 1 (T.dropWhile (/= '/') (repo issue))
-  label (shortName <> " #" <> T.pack (show (number issue))) ["meta", "mono"] >>= #append meta
-  label ("· opened " <> opened issue <> " by " <> author issue) ["meta"] >>= #append meta
+  Forge.smallDot issue.forge >>= #append meta
+  let shortName = T.drop 1 (T.dropWhile (/= '/') issue.repo)
+  label (shortName <> " #" <> T.pack (show issue.number)) ["meta", "mono"] >>= #append meta
+  label ("· opened " <> issue.opened <> " by " <> issue.author) ["meta"] >>= #append meta
   #append body meta
   #append row body
 
@@ -182,8 +182,8 @@ issueRow issue = do
         l <- label text ["meta", "number"]
         GI.set l [#widthRequest := width]
         #append row l
-  column (T.pack (show (comments issue))) 32
-  column (updated issue) 72
+  column (T.pack (show issue.comments)) 32
+  column issue.updated 72
   pure row
 
 label :: Text -> [Text] -> IO Gtk.Label

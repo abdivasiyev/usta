@@ -96,7 +96,7 @@ new model selected onSelect = do
     forM pages $ \page -> do
       button <- NavItem.new NavItem.defaults
         { NavItem.label = pageTitle page
-        , NavItem.count = counts model page
+        , NavItem.count = model.counts page
         , NavItem.active = page == selected
         }
       #append group button
@@ -110,8 +110,8 @@ new model selected onSelect = do
 
   forgeGroup <- vbox 2
   Card.sectionTitle "Forges" >>= #append forgeGroup
-  forM_ (forges model) $ \(kind, host) -> do
-    let state = forgeSync model host
+  forM_ model.forges $ \(kind, host) -> do
+    let state = model.forgeSync host
     leading <- case state of
       Just ForgeSyncing -> GI.new Gtk.Spinner [#spinning := True, #cssClasses := ["sync-spinner"]]
                              >>= Gtk.toWidget
@@ -129,10 +129,10 @@ new model selected onSelect = do
     >>= #append forgeGroup
   #append sidebar forgeGroup
 
-  when (not (null (pinned model))) $ do
+  when (not (null model.pinned)) $ do
     pinnedGroup <- vbox 2
     Card.sectionTitle "Pinned repositories" >>= #append pinnedGroup
-    forM_ (pinned model) $ \repo ->
+    forM_ model.pinned $ \repo ->
       NavItem.new NavItem.defaults { NavItem.label = repo, NavItem.mono = True }
         >>= #append pinnedGroup
     #append sidebar pinnedGroup

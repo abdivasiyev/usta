@@ -93,7 +93,7 @@ new m = do
                          ]
   toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
   label "Diff computed locally" ["muted", "small"] >>= #append toolbar
-  label (range m) ["muted", "small", "mono"] >>= #append toolbar
+  label m.range ["muted", "small", "mono"] >>= #append toolbar
   #append main toolbar
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
                                       , #hexpand := True
@@ -107,15 +107,15 @@ new m = do
   entriesRef <- newIORef []
   let updateProgress = do
         entries <- readIORef entriesRef
-        seen <- length . filter id <$> mapM (\e -> Gtk.widgetHasCssClass (mark e) "done") entries
+        seen <- length . filter id <$> mapM (\e -> Gtk.widgetHasCssClass e.mark "done") entries
         GI.set progress [ #label := T.pack (show seen) <> " of " <> T.pack (show (length entries))
                                     <> " files viewed" ]
 
-  entries <- forM (files m) $ \(f, comments) -> do
+  entries <- forM m.files $ \(f, comments) -> do
     attached <- forM comments $ \c -> do
       w <- thread c >>= Gtk.toWidget
-      pure (onLine c, w)
-    markBox <- viewedMark (Diff.viewed f)
+      pure (c.onLine, w)
+    markBox <- viewedMark f.viewed
     diff <- Diff.new f attached $ \isViewed -> do
       setViewed markBox isViewed
       updateProgress
@@ -129,21 +129,21 @@ new m = do
 
   let setCurrent current =
         forM_ entries $ \e ->
-          if Diff.path (file e) == Diff.path (file current)
-            then Gtk.widgetAddCssClass (row e) "current"
-            else Gtk.widgetRemoveCssClass (row e) "current"
+          if e.file.path == current.file.path
+            then Gtk.widgetAddCssClass e.row "current"
+            else Gtk.widgetRemoveCssClass e.row "current"
       -- Where each shown diff starts inside the scrolled column.
       offsets = do
         toolbarHeight <- fromIntegral <$> Gtk.widgetGetHeight toolbar
-        shown <- filterM (Gtk.widgetGetVisible . card) entries
-        heights <- mapM (fmap fromIntegral . Gtk.widgetGetHeight . card) shown
+        shown <- filterM (Gtk.widgetGetVisible . (.card)) entries
+        heights <- mapM (fmap fromIntegral . Gtk.widgetGetHeight . (.card)) shown
         let starts = scanl (\y h -> y + h + gap) (padding + toolbarHeight + gap) heights
         pure (zip shown starts)
 
   forM_ entries $ \e ->
-    void $ GI.on (row e) #clicked $ do
+    void $ GI.on e.row #clicked $ do
       positions <- offsets
-      forM_ [y | (other, y) <- positions, Diff.path (file other) == Diff.path (file e)] $ \y ->
+      forM_ [y | (other, y) <- positions, other.file.path == e.file.path] $ \y ->
         Gtk.adjustmentSetValue adjustment (y - padding)
       setCurrent e
 
@@ -158,9 +158,9 @@ new m = do
   void $ GI.on filterEntry #searchChanged $ do
     query <- T.toLower <$> Gtk.editableGetText filterEntry
     forM_ entries $ \e -> do
-      let keep = query `T.isInfixOf` T.toLower (Diff.path (file e))
-      GI.set (row e) [#visible := keep]
-      GI.set (card e) [#visible := keep]
+      let keep = query `T.isInfixOf` T.toLower e.file.path
+      GI.set e.row [#visible := keep]
+      GI.set e.card [#visible := keep]
 
   forM_ (take 1 entries) setCurrent
   #append columns scroll
@@ -186,14 +186,14 @@ fileRow :: Diff.File -> Gtk.Box -> IO Gtk.Button
 fileRow f markBox = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   #append content markBox
-  name <- label (Diff.path f) ["mono", "small"]
+  name <- label f.path ["mono", "small"]
   GI.set name [#hexpand := True]
   #append content name
   label ("+" <> count isAdded) ["mono", "small", "added"] >>= #append content
   label ("−" <> count isRemoved) ["mono", "small", "removed"] >>= #append content
   GI.new Gtk.Button [#child := content, #hasFrame := False, #cssClasses := ["file-row"]]
   where
-    count p = T.pack (show (length (filter p (Diff.diffLines f))))
+    count p = T.pack (show (length (filter p f.diffLines)))
     isAdded (Added _ _) = True
     isAdded _ = False
     isRemoved (Removed _ _) = True
@@ -212,10 +212,10 @@ thread c = do
   #append top avatar
   text <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
   who <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-  label (author c) ["strong"] >>= #append who
-  if pending c then label "· pending" ["muted"] >>= #append who else pure ()
+  label c.author ["strong"] >>= #append who
+  if c.pending then label "· pending" ["muted"] >>= #append who else pure ()
   #append text who
-  bodyLabel <- label (body c) []
+  bodyLabel <- label c.body []
   GI.set bodyLabel [#wrap := True]
   #append text bodyLabel
   #append top text
@@ -258,13 +258,13 @@ review m = do
                       , #rightMargin := 10
                       , #cssClasses := ["editor"]
                       ] >>= #append verdict
-  let pendingCount = length [() | (_, cs) <- files m, c <- cs, pending c]
+  let pendingCount = length [() | (_, cs) <- m.files, c <- cs, c.pending]
   label (T.pack (show pendingCount) <> " pending comment" <> (if pendingCount == 1 then "" else "s"))
     ["muted", "small"] >>= #append verdict
   #append side verdict
 
   checksBox <- section "Checks"
-  forM_ (checks m) $ \(passed, name, took) -> do
+  forM_ m.checks $ \(passed, name, took) -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
     Icon.toned 14 (if passed then Success else Danger) (if passed then Icon.Check else Icon.Cross)
       >>= #append row
@@ -276,7 +276,7 @@ review m = do
   #append side checksBox
 
   reviewersBox <- section "Reviewers"
-  forM_ (reviewers m) $ \(tone, name, state) -> do
+  forM_ m.reviewers $ \(tone, name, state) -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
     Badge.dot tone >>= #append row
     label name ["small"] >>= #append row
@@ -291,12 +291,12 @@ review m = do
                            ]
   mergeButton <- Button.new Button.defaults
     { Button.label = Just "Squash and merge", Button.variant = Button.Primary }
-  GI.set mergeButton [#sensitive := approvalsNeeded m == 0]
+  GI.set mergeButton [#sensitive := m.approvalsNeeded == 0]
   #append bottom mergeButton
-  void $ if approvalsNeeded m == 0
+  void $ if m.approvalsNeeded == 0
     then pure ()
     else do
-      needs <- label ("Needs " <> T.pack (show (approvalsNeeded m)) <> " approval") ["muted", "small"]
+      needs <- label ("Needs " <> T.pack (show m.approvalsNeeded) <> " approval") ["muted", "small"]
       GI.set needs [#xalign := 0.5]
       #append bottom needs
   #append side bottom
@@ -351,12 +351,12 @@ fetching onCancel f = do
                            , #cssClasses := ["fetch-banner"]
                            ]
   GI.new Gtk.Spinner [#spinning := True] >>= #append banner
-  Progress.caption [Progress.Plain "Fetching ", Progress.Code (branchName f), Progress.Plain " into the local mirror"]
+  Progress.caption [Progress.Plain "Fetching ", Progress.Code f.branchName, Progress.Plain " into the local mirror"]
     >>= #append banner
-  progress <- Progress.bar (Progress.Percent (percent f))
+  progress <- Progress.bar (Progress.Percent f.percent)
   GI.set progress [#hexpand := False, #widthRequest := 320, #valign := Gtk.AlignCenter]
   #append banner progress
-  label (T.pack (show (round (percent f) :: Int)) <> "%") ["mono", "percent"] >>= #append banner
+  label (T.pack (show (round f.percent :: Int)) <> "%") ["mono", "percent"] >>= #append banner
   spacer <- GI.new Gtk.Box [#hexpand := True]
   #append banner spacer
   cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
@@ -371,7 +371,7 @@ fetching onCancel f = do
                          , #hexpand := False
                          , #cssClasses := ["file-list"]
                          ]
-  label (T.pack (show (fileCount f)) <> " files · list from the forge API") ["small", "muted", "list-note"]
+  label (T.pack (show f.fileCount) <> " files · list from the forge API") ["small", "muted", "list-note"]
     >>= #append side
   let entry path state current = do
         row <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
@@ -384,8 +384,8 @@ fetching onCancel f = do
         #append row name
         label state ["small", T.toLower state] >>= #append row
         #append side row
-  forM_ (zip [0 :: Int ..] (ready f)) $ \(i, file) -> entry (Diff.path file) "Ready" (i == 0)
-  forM_ (waiting f) $ \path -> entry path "Waiting" False
+  forM_ (zip [0 :: Int ..] f.ready) $ \(i, file) -> entry file.path "Ready" (i == 0)
+  forM_ f.waiting $ \path -> entry path "Waiting" False
   forM_ [190, 150, 170, 130, 160] $ \w -> do
     placeholder <- Skeleton.bar w 10
     GI.set placeholder [#marginStart := 8, #marginTop := 14]
@@ -396,7 +396,7 @@ fetching onCancel f = do
                           , #spacing := round gap
                           , #cssClasses := ["diffs"]
                           ]
-  forM_ (ready f) $ \file -> Diff.plain file >>= #append diffs
+  forM_ f.ready $ \file -> Diff.plain file >>= #append diffs
   note <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   GI.new Gtk.Spinner [#spinning := True] >>= #append note
   label "The rest renders as soon as the fetch finishes. Files you scroll to are rendered first." []

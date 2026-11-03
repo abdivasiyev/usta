@@ -145,15 +145,15 @@ section s m onAddAccount = do
 
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card"]]
   rows <- case s of
-    Accounts -> mapM accountRow (accounts m)
+    Accounts -> mapM accountRow m.accounts
     Sync -> sequence
       [ do
-          interval <- Gtk.dropDownNewFromStrings (syncIntervals m)
-          Gtk.dropDownSetSelected interval (syncInterval m)
+          interval <- Gtk.dropDownNewFromStrings m.syncIntervals
+          Gtk.dropDownSetSelected interval m.syncInterval
           setting "Check for updates" [plain "How often usta asks your forges for new activity"]
             =<< sequence [Gtk.toWidget interval]
       , setting "Local git mirrors"
-          [plain "Diffs are computed from bare clones in ", code (mirrorPath m)]
+          [plain "Diffs are computed from bare clones in ", code m.mirrorPath]
           =<< sequence [button "Show in folder" Button.Secondary, button "Prune unused" Button.Secondary]
       , setting "Offline cache" [plain "Pull requests, issues and comments stored in a local database"]
           =<< sequence [button "Clear cache" Button.Danger]
@@ -167,11 +167,11 @@ section s m onAddAccount = do
     Appearance -> sequence
       [ setting "Theme" [] =<< sequence [themeChoice]
       , do
-          layout <- Gtk.dropDownNewFromStrings (diffLayouts m)
-          Gtk.dropDownSetSelected layout (diffLayout m)
+          layout <- Gtk.dropDownNewFromStrings m.diffLayouts
+          Gtk.dropDownSetSelected layout m.diffLayout
           setting "Diff layout" [] =<< sequence [Gtk.toWidget layout]
       ]
-    Keyboard -> forM (shortcuts m) $ \(keys, action) -> do
+    Keyboard -> forM m.shortcuts $ \(keys, action) -> do
       keyLabel <- Shortcut.key keys >>= Gtk.toWidget
       setting (capitalize action) [] [keyLabel]
   forM_ rows $ #append card
@@ -217,9 +217,9 @@ description pieces = do
 
 accountRow :: Account -> IO Gtk.Widget
 accountRow a = do
-  tile <- Forge.tile (forge a)
+  tile <- Forge.tile a.forge
   status <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  if connected a
+  if a.connected
     then do
       Badge.dot Success >>= #append status
       label "Connected" ["connected"] >>= #append status
@@ -231,8 +231,8 @@ accountRow a = do
     , button "Re-authenticate" Button.Secondary
     , button "Remove" Button.Danger
     ]
-  row <- setting (host a)
-    [plain "Signed in as ", code (user a), plain (" · " <> authText (auth a))]
+  row <- setting a.host
+    [plain "Signed in as ", code a.user, plain (" · " <> authText a.auth)]
     controls
   -- The tile goes before the texts.
   box <- GI.castTo Gtk.Box row

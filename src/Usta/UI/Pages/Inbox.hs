@@ -82,8 +82,8 @@ data Filter = All | Unread | Participating
 keeps :: Filter -> Notification -> Bool
 keeps f n = case f of
   All -> True
-  Unread -> unread n
-  Participating -> reason n `elem` [ReviewRequested, Mentioned, Assigned]
+  Unread -> n.unread
+  Participating -> n.reason `elem` [ReviewRequested, Mentioned, Assigned]
 
 -- | @onOpen@ runs for "Open review" or "Open issue".
 new :: (Notification -> IO ()) -> [Notification] -> IO Gtk.Box
@@ -193,7 +193,7 @@ notificationRow :: Notification -> IO Gtk.Box
 notificationRow n = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
 
-  icon <- case kind n of
+  icon <- case n.kind of
     PullRequest -> Icon.toned 16 Success Icon.PullRequest
     MergedPullRequest -> Icon.toned 16 Merged Icon.PullRequest
     Issue -> Icon.toned 16 Neutral Icon.Issue
@@ -205,22 +205,22 @@ notificationRow n = do
                          , #hexpand := True
                          ]
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-  Forge.smallDot (forge n) >>= #append meta
-  label (repo n) ["meta", "mono"] >>= #append meta
-  label ("#" <> T.pack (show (number n))) ["meta"] >>= #append meta
-  ageLabel <- label (age n) ["meta"]
+  Forge.smallDot n.forge >>= #append meta
+  label n.repo ["meta", "mono"] >>= #append meta
+  label ("#" <> T.pack (show n.number)) ["meta"] >>= #append meta
+  ageLabel <- label n.age ["meta"]
   GI.set ageLabel [#hexpand := True, #halign := Gtk.AlignEnd]
   #append meta ageLabel
   #append body meta
 
-  titleLabel <- label (title n) (["title"] <> ["unread" | unread n])
+  titleLabel <- label n.title (["title"] <> ["unread" | n.unread])
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
   #append body titleLabel
 
   badges <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  let (tone, text) = reasonBadge (reason n)
+  let (tone, text) = reasonBadge n.reason
   Badge.new tone text >>= #append badges
-  when (unread n) $ Badge.dot Accent >>= #append badges
+  when n.unread $ Badge.dot Accent >>= #append badges
   #append body badges
 
   #append row body
@@ -235,38 +235,38 @@ preview onOpen n = do
 
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  label (repo n) ["muted", "mono"] >>= #append meta
-  label ("#" <> T.pack (show (number n))) ["muted"] >>= #append meta
+  label n.repo ["muted", "mono"] >>= #append meta
+  label ("#" <> T.pack (show n.number)) ["muted"] >>= #append meta
   stateBadge >>= #append meta
   #append header meta
-  titleLabel <- label (title n) ["preview-title"]
+  titleLabel <- label n.title ["preview-title"]
   GI.set titleLabel [#wrap := True]
   #append header titleLabel
-  forM_ (branch n) $ \(from, into) -> do
+  forM_ n.branch $ \(from, into) -> do
     line <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
     label from ["chip", "mono"] >>= #append line
     label "into" ["muted"] >>= #append line
     label into ["chip", "mono"] >>= #append line
-    label ("· " <> opened n) ["muted"] >>= #append line
+    label ("· " <> n.opened) ["muted"] >>= #append line
     #append header line
-  when (branch n == Nothing) $ label (opened n) ["muted"] >>= #append header
+  when (n.branch == Nothing) $ label n.opened ["muted"] >>= #append header
   #append pane header
 
-  when (isJust (checks n) || isJust (review n) || not (null (changes n))) $ do
+  when (isJust n.checks || isJust n.review || not (null n.changes)) $ do
     stats <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #spacing := 12
                             , #homogeneous := True
                             ]
-    forM_ (checks n) $ \(tone, text) -> Card.stat tone "Checks" text >>= #append stats
-    when (not (null (changes n))) $ changesCard (changes n) >>= #append stats
-    forM_ (review n) $ \(tone, text) -> Card.stat tone "Your review" text >>= #append stats
+    forM_ n.checks $ \(tone, text) -> Card.stat tone "Checks" text >>= #append stats
+    when (not (null n.changes)) $ changesCard n.changes >>= #append stats
+    forM_ n.review $ \(tone, text) -> Card.stat tone "Your review" text >>= #append stats
     #append pane stats
 
-  when (not (null (changes n))) $ do
+  when (not (null n.changes)) $ do
     files <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
     Card.sectionTitle "Files" >>= #append files
     card <- Card.new
-    forM_ (changes n) $ \(Change path added removed) -> do
+    forM_ n.changes $ \(Change path added removed) -> do
       fileRow <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                                 , #spacing := 6
                                 , #cssClasses := ["file-row"]
@@ -281,7 +281,7 @@ preview onOpen n = do
     #append pane files
 
   actions <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  let primary = if kind n == Issue then "Open issue" else "Open review"
+  let primary = if n.kind == Issue then "Open issue" else "Open review"
   open <- Button.new Button.defaults { Button.label = Just primary, Button.variant = Button.Primary }
   void $ GI.on open #clicked (onOpen n)
   #append actions open
@@ -291,7 +291,7 @@ preview onOpen n = do
 
   pure pane
   where
-    stateBadge = case kind n of
+    stateBadge = case n.kind of
       PullRequest -> Badge.new Success "Open"
       MergedPullRequest -> Badge.new Merged "Merged"
       Issue -> Badge.new Success "Open"

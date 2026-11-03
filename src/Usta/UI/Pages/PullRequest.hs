@@ -105,13 +105,13 @@ header s backLabel onBack = do
                            , #valign := Gtk.AlignCenter
                            ]
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Forge.smallDot (forge s) >>= #append meta
-  label (host s <> "/" <> repo s) ["meta", "mono"] >>= #append meta
-  label ("#" <> T.pack (show (number s))) ["meta"] >>= #append meta
-  let (tone, text) = stateBadge (state s)
+  Forge.smallDot s.forge >>= #append meta
+  label (s.host <> "/" <> s.repo) ["meta", "mono"] >>= #append meta
+  label ("#" <> T.pack (show s.number)) ["meta"] >>= #append meta
+  let (tone, text) = stateBadge s.state
   Badge.new tone text >>= #append meta
   #append titles meta
-  titleLabel <- label (title s) ["pr-title"]
+  titleLabel <- label s.title ["pr-title"]
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
   #append titles titleLabel
   #append bar titles
@@ -130,7 +130,7 @@ tabBar s onSelect = do
   buttons <- forM [minBound .. maxBound] $ \tab -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
     label (T.pack (show tab)) [] >>= #append row
-    case (tab, checks s) of
+    case (tab, s.checks) of
       (Checks, Just (tone, text)) -> label text ["tab-count", toneClass tone] >>= #append row
       (Checks, Nothing) -> pure ()
       _ -> label (T.pack (show (count tab))) ["tab-count"] >>= #append row
@@ -149,9 +149,9 @@ tabBar s onSelect = do
   pure bar
   where
     count tab = case tab of
-      Conversation -> comments s
-      Files -> files s
-      Commits -> commits s
+      Conversation -> s.comments
+      Files -> s.files
+      Commits -> s.commits
       Checks -> 0
 
 label :: Text -> [Text] -> IO Gtk.Label

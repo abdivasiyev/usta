@@ -77,12 +77,12 @@ new backLabel onBack m = do
                          , #spacing := 16
                          , #cssClasses := ["main"]
                          ]
-  forM_ (comments m) $ \c -> commentCard c >>= #append main
+  forM_ m.comments $ \c -> commentCard c >>= #append main
   timeline <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                              , #spacing := 10
                              , #cssClasses := ["timeline"]
                              ]
-  forM_ (events m) $ \e -> eventRow e >>= #append timeline
+  forM_ m.events $ \e -> eventRow e >>= #append timeline
   #append main timeline
   replyBox m >>= #append main
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
@@ -114,12 +114,12 @@ header m backLabel onBack = do
                            , #valign := Gtk.AlignCenter
                            ]
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Forge.smallDot (forge m) >>= #append meta
-  label (host m <> "/" <> repo m) ["meta", "mono"] >>= #append meta
-  label ("#" <> T.pack (show (number m))) ["meta"] >>= #append meta
-  (if closed m then Badge.new Merged "Closed" else Badge.new Success "Open") >>= #append meta
+  Forge.smallDot m.forge >>= #append meta
+  label (m.host <> "/" <> m.repo) ["meta", "mono"] >>= #append meta
+  label ("#" <> T.pack (show m.number)) ["meta"] >>= #append meta
+  (if m.closed then Badge.new Merged "Closed" else Badge.new Success "Open") >>= #append meta
   #append titles meta
-  titleLabel <- label (title m) ["issue-title"]
+  titleLabel <- label m.title ["issue-title"]
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
   #append titles titleLabel
   #append bar titles
@@ -134,11 +134,11 @@ commentCard c = do
                         , #spacing := 10
                         , #cssClasses := ["card-header"]
                         ]
-  Avatar.new 24 (initials c) >>= #append top
-  label (author c) ["strong"] >>= #append top
-  label (when' c) ["muted"] >>= #append top
+  Avatar.new 24 c.initials >>= #append top
+  label c.author ["strong"] >>= #append top
+  label c.when' ["muted"] >>= #append top
   #append card top
-  text <- label (body c) ["card-body"]
+  text <- label c.body ["card-body"]
   GI.set text [#wrap := True, #selectable := True]
   #append card text
   pure card
@@ -167,7 +167,7 @@ replyBox m = do
                             , #halign := Gtk.AlignEnd
                             ]
   Button.new Button.defaults
-    { Button.label = Just (if closed m then "Reopen issue" else "Close issue") }
+    { Button.label = Just (if m.closed then "Reopen issue" else "Close issue") }
     >>= #append buttons
   Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
     >>= #append buttons
@@ -183,19 +183,19 @@ details m = do
                          , #cssClasses := ["details"]
                          ]
   section side "Assignees" $ \box ->
-    forM_ (assignees m) $ \(short, name) -> do
+    forM_ m.assignees $ \(short, name) -> do
       row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
       Avatar.new 22 short >>= #append row
       label name [] >>= #append row
       #append box row
   section side "Labels" $ \box -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-    forM_ (labels m) $ \(tone, name) -> Badge.new tone name >>= #append row
+    forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
     #append box row
   section side "Milestone" $ \box ->
-    label (maybe "None" id (milestone m)) [] >>= #append box
+    label (maybe "None" id m.milestone) [] >>= #append box
   section side "Linked pull requests" $ \box ->
-    forM_ (linkedPullRequests m) $ \pr -> label pr ["link"] >>= #append box
+    forM_ m.linkedPullRequests $ \pr -> label pr ["link"] >>= #append box
   GI.new Gtk.CheckButton [#label := "Notify me about activity", #active := True] >>= #append side
   pure side
   where

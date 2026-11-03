@@ -72,9 +72,9 @@ new onCancel m = do
                          ]
   branches m >>= #append main
   mergeStatus m >>= #append main
-  titleEntry <- GI.new Gtk.Entry [#text := title m, #cssClasses := ["title-entry"]]
+  titleEntry <- GI.new Gtk.Entry [#text := m.title, #cssClasses := ["title-entry"]]
   Gtk.toWidget titleEntry >>= field "Title" >>= #append main
-  editor (description m) >>= #append main
+  editor m.description >>= #append main
   contents m >>= #append main
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
                                       , #hexpand := True
@@ -88,24 +88,24 @@ new onCancel m = do
 branches :: Model -> IO Gtk.Box
 branches m = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
-  repo <- Gtk.dropDownNewFromStrings (repositories m)
+  repo <- Gtk.dropDownNewFromStrings m.repositories
   GI.set repo [#cssClasses := ["mono"]]
   repoField <- Gtk.toWidget repo >>= field "Repository"
   GI.set repoField [#hexpand := True]
   #append row repoField
-  into <- Gtk.dropDownNewFromStrings (targets m)
+  into <- Gtk.dropDownNewFromStrings m.targets
   Gtk.toWidget into >>= field "Into" >>= #append row
   arrow <- label "←" ["muted", "arrow"]
   GI.set arrow [#valign := Gtk.AlignEnd]
   #append row arrow
-  from <- Gtk.dropDownNewFromStrings (sources m)
+  from <- Gtk.dropDownNewFromStrings m.sources
   Gtk.toWidget from >>= field "From" >>= #append row
   pure row
 
 mergeStatus :: Model -> IO Gtk.Box
 mergeStatus m = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  if canMerge m
+  if m.canMerge
     then do
       Icon.toned 14 Success Icon.Check >>= #append row
       label "Can merge cleanly · branch pushed to origin" ["small", "ok"] >>= #append row
@@ -157,21 +157,21 @@ editor text = do
 contents :: Model -> IO Gtk.Box
 contents m = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
-  let summary = count (length (commits m)) "commit" <> " · " <> count (length (changedFiles m)) "file"
+  let summary = count (length m.commits) "commit" <> " · " <> count (length m.changedFiles) "file"
                 <> " changed"
   Card.sectionTitle summary >>= #append box
   card <- Card.new
-  forM_ (commits m) $ \(short, subject) -> do
+  forM_ m.commits $ \(short, subject) -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["content-row"]]
     label short ["mono", "hash"] >>= #append row
     label subject [] >>= #append row
     #append card row
   files <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["content-row"]]
-  names <- label (T.intercalate " · " (changedFiles m)) ["mono"]
+  names <- label (T.intercalate " · " m.changedFiles) ["mono"]
   GI.set names [#hexpand := True]
   #append files names
-  label ("+" <> T.pack (show (added m))) ["mono", "added"] >>= #append files
-  label ("−" <> T.pack (show (removed m))) ["mono", "removed"] >>= #append files
+  label ("+" <> T.pack (show m.added)) ["mono", "added"] >>= #append files
+  label ("−" <> T.pack (show m.removed)) ["mono", "removed"] >>= #append files
   #append card files
   #append box card
   pure box
@@ -188,7 +188,7 @@ options m = do
                          ]
   reviewersEntry <- GI.new Gtk.Entry [#placeholderText := "Add people"]
   Gtk.toWidget reviewersEntry >>= field "Reviewers" >>= #append side
-  labelsEntry <- GI.new Gtk.Entry [#text := labels m]
+  labelsEntry <- GI.new Gtk.Entry [#text := m.labels]
   Gtk.toWidget labelsEntry >>= field "Labels" >>= #append side
   GI.new Gtk.CheckButton [#label := "Allow edits from maintainers"] >>= #append side
   bottom <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical

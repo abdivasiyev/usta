@@ -75,17 +75,17 @@ sectionName k = case k of
 -- for a query without a prefix.
 sections :: Maybe Kind -> Query -> Model -> [(Text, [Item])]
 sections chosen (Query typed term) m = case (typed <|> chosen, T.null term) of
-  (Nothing, True) -> nonEmpty [("Recent", recent m), ("Commands", ofKind Command (items m))]
+  (Nothing, True) -> nonEmpty [("Recent", m.recent), ("Commands", ofKind Command m.items)]
   (only, _) -> nonEmpty
-    [ (sectionName k, ofKind k (filter (matches term) (items m)))
+    [ (sectionName k, ofKind k (filter (matches term) m.items))
     | k <- [minBound ..], maybe True (== k) only
     ]
   where
-    ofKind k = filter ((== k) . kind)
+    ofKind k = filter ((== k) . (.kind))
     nonEmpty = filter (not . null . snd)
 
 matches :: Text -> Item -> Bool
-matches term i = T.toLower term `T.isInfixOf` T.toLower (title i <> " " <> detail i)
+matches term i = T.toLower term `T.isInfixOf` T.toLower (i.title <> " " <> i.detail)
 
 -- | Wraps @content@ in an overlay that can show the palette. Returns the
 -- overlay to place instead of @content@, and an action that opens the
@@ -200,7 +200,7 @@ new content model = do
 
       runRow row = do
         rows <- readIORef shown
-        forM_ (lookup row rows) $ \item -> close >> run item
+        forM_ (lookup row rows) $ \item -> close >> item.run
 
       open = do
         model >>= writeIORef current
@@ -260,7 +260,7 @@ chip name typed = do
 itemRow :: Item -> IO Gtk.Box
 itemRow item = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
-  let (glyph, glyphClass) = case kind item of
+  let (glyph, glyphClass) = case item.kind of
         PullRequest -> ("PR", "pr")
         Issue -> ("#", "issue")
         Repository -> ("R", "repo")
@@ -269,9 +269,9 @@ itemRow item = do
                    , #widthRequest := 28
                    , #cssClasses := ["mono", "glyph", glyphClass]
                    ] >>= #append row
-  GI.new Gtk.Label [#label := title item, #xalign := 0, #hexpand := True, #cssClasses := ["title"]]
+  GI.new Gtk.Label [#label := item.title, #xalign := 0, #hexpand := True, #cssClasses := ["title"]]
     >>= #append row
-  GI.new Gtk.Label [#label := detail item, #cssClasses := ["mono", "detail"]] >>= #append row
+  GI.new Gtk.Label [#label := item.detail, #cssClasses := ["mono", "detail"]] >>= #append row
   pure row
 
 css :: Text

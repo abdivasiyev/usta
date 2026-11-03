@@ -6,6 +6,7 @@
 module Usta.UI.Pages.PullRequest.Files
   ( Comment (..)
   , Model (..)
+  , Actions (..)
   , fromFileDiff
   , fromFileDiffs
   , sample
@@ -16,7 +17,8 @@ module Usta.UI.Pages.PullRequest.Files
   , css
   ) where
 
-import Control.Monad (filterM, forM, forM_, void, when)
+import Control.Concurrent (forkIO)
+import Control.Monad (filterM, forM, forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
@@ -24,6 +26,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -31,6 +34,7 @@ import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Diff as Diff
 import Usta.UI.Components.Diff (Line (..))
 import qualified Usta.UI.Components.Icon as Icon
@@ -38,6 +42,7 @@ import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Types.Diff as D
+import Usta.Types.Discussion (Verdict (..))
 
 -- | A review comment attached to a line of a file's diff.
 type Comment :: Type
@@ -64,6 +69,17 @@ data Model = Model
   , approvalsNeeded :: Int
   }
 
+-- | What the review panel does. Both run off the main thread; a 'Left' is
+-- said in the panel.
+type Actions :: Type
+data Actions = Actions
+  { review :: Verdict -> Text -> IO (Either Text ())
+    -- ^ Submits the review; the panel then says so and empties.
+  , merge :: IO (Either Text ())
+    -- ^ Squash and merge; 'refresh' runs after.
+  , refresh :: IO ()
+  }
+
 -- | One changed file as shown in both columns.
 type Entry :: Type
 data Entry = Entry
@@ -78,8 +94,8 @@ padding, gap :: Double
 padding = 16
 gap = 16
 
-new :: Model -> IO Gtk.Widget
-new m = do
+new :: Actions -> Model -> IO Gtk.Widget
+new actions m = do
   columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #cssClasses := ["u-files"]
                             ]
@@ -170,7 +186,7 @@ new m = do
 
   forM_ (take 1 entries) setCurrent
   #append columns scroll
-  review m >>= #append columns
+  review actions m >>= #append columns
   Gtk.toWidget columns
 
 -- | The square in the file list: empty, or checked once viewed.
@@ -237,8 +253,8 @@ thread c = do
   #append card reply
   pure card
 
-review :: Model -> IO Gtk.Box
-review m = do
+review :: Actions -> Model -> IO Gtk.Box
+review actions m = do
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #widthRequest := 280
@@ -256,18 +272,53 @@ review m = do
     [] -> pure ()
   forM_ radios (#append verdict)
   label "Summary" ["soft", "small"] >>= #append verdict
-  GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
-                      , #heightRequest := 72
-                      , #topMargin := 8
-                      , #bottomMargin := 8
-                      , #leftMargin := 10
-                      , #rightMargin := 10
-                      , #cssClasses := ["editor"]
-                      ] >>= #append verdict
+  summary <- GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
+                                 , #heightRequest := 72
+                                 , #topMargin := 8
+                                 , #bottomMargin := 8
+                                 , #leftMargin := 10
+                                 , #rightMargin := 10
+                                 , #cssClasses := ["editor"]
+                                 ]
+  #append verdict summary
   let pendingCount = length [() | (_, cs) <- m.files, c <- cs, c.pending]
-  label (T.pack (show pendingCount) <> " pending comment" <> (if pendingCount == 1 then "" else "s"))
-    ["muted", "small"] >>= #append verdict
+  unless (pendingCount == 0) $
+    label (T.pack (show pendingCount) <> " pending comment" <> (if pendingCount == 1 then "" else "s"))
+      ["muted", "small"] >>= #append verdict
+  submit <- Button.new Button.defaults { Button.label = Just "Submit review", Button.variant = Button.Primary }
+  #append verdict submit
+  said <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["small"]]
+  #append verdict said
   #append side verdict
+
+  -- Buttons wait for the forge, so a second click sends nothing twice.
+  let run button act done = do
+        GI.set button [#sensitive := False]
+        GI.set said [#visible := False]
+        void $ forkIO $ do
+          result <- act
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            GI.set button [#sensitive := True]
+            case result of
+              Right () -> done
+              Left text -> GI.set said [#label := text, #visible := True, #cssClasses := ["small", "problem"]]
+            pure False
+      -- In the order of the radios.
+      verdicts = [CommentOnly, Approve, RequestChanges]
+      send = do
+        chosen <- filterM (`GI.get` #active) radios
+        let pick = [v | (v, r) <- zip verdicts radios, r `elem` chosen]
+        buffer <- Gtk.textViewGetBuffer summary
+        text <- maybe "" id <$> GI.get buffer #text
+        -- A comment-only review needs words; the forge refuses an empty one.
+        forM_ (take 1 pick) $ \v -> unless (v == CommentOnly && T.null (T.strip text)) $
+          run submit (actions.review v text) $ do
+            Gtk.textBufferSetText buffer "" (-1)
+            GI.set said [#label := "Review submitted.", #visible := True, #cssClasses := ["small", "muted"]]
+  void $ GI.on submit #clicked send
+  keys <- GI.new Gtk.ShortcutController []
+  shortcut keys "<Primary>Return" send
+  Gtk.widgetAddController summary keys
 
   checksBox <- section "Checks"
   forM_ m.checks $ \(passed, name, took) -> do
@@ -279,7 +330,8 @@ review m = do
     #append row nameLabel
     label took ["muted", "small"] >>= #append row
     #append checksBox row
-  #append side checksBox
+  -- Usta has no checks or reviewers here yet; empty sections are hidden.
+  unless (null m.checks) $ #append side checksBox
 
   reviewersBox <- section "Reviewers"
   forM_ m.reviewers $ \(tone, name, state) -> do
@@ -288,7 +340,7 @@ review m = do
     label name ["small"] >>= #append row
     label ("· " <> state) ["muted", "small"] >>= #append row
     #append reviewersBox row
-  #append side reviewersBox
+  unless (null m.reviewers) $ #append side reviewersBox
 
   bottom <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                            , #spacing := 8
@@ -298,6 +350,7 @@ review m = do
   mergeButton <- Button.new Button.defaults
     { Button.label = Just "Squash and merge", Button.variant = Button.Primary }
   GI.set mergeButton [#sensitive := m.approvalsNeeded == 0]
+  void $ GI.on mergeButton #clicked $ run mergeButton actions.merge actions.refresh
   #append bottom mergeButton
   void $ if m.approvalsNeeded == 0
     then pure ()
@@ -531,6 +584,7 @@ css = mconcat
   , "box.u-files box.diffs { padding: 16px; }"
   , "box.u-files box.thread-body { padding: 12px; }"
   , "box.u-files box.thread-reply { padding: 10px 12px; border-top: 1px solid var(--border-subtle); }"
+  , "box.u-files label.problem { color: var(--danger); }"
   , "box.u-files box.review {"
   , "  padding: 16px; background: var(--surface); border-left: 1px solid var(--border);"
   , "}"

@@ -23,7 +23,7 @@ module Usta.UI.Pages.Inbox
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM_, join, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -148,6 +148,8 @@ data Actions = Actions
     -- ^ "Mark as done" ('True') or "Move to inbox" ('False').
   , details :: Notification -> IO (Either Text Details)
     -- ^ What the preview loads from the forge; runs off the main thread.
+  , setAllDone :: [Notification] -> Bool -> IO ()
+    -- ^ "Mark all done" ('True'), and its Undo ('False').
   }
 
 -- | A comment as the preview shows it.
@@ -258,6 +260,8 @@ new view actions notifications = do
   shortcut keys "k" (step (-1))
   shortcut keys "e" (selectedOne >>= mapM_ (\n -> actions.setDone n (not (lists Finished n))))
   shortcut keys "o" (selectedOne >>= mapM_ openInBrowser)
+  markAllRef <- newIORef (pure ())
+  shortcut keys "<Shift>e" (join (readIORef markAllRef))
   Gtk.widgetAddController list keys
   void $ GI.on list #rowActivated $ \_ -> selectedOne >>= mapM_ actions.open
 
@@ -293,18 +297,63 @@ new view actions notifications = do
                               ]
   #append filterBar =<< if view == Finished then Gtk.toWidget doneNote else Gtk.toWidget filters
   #append filterBar countLabel
+  markAll <- Button.new Button.defaults
+    { Button.label = Just "Mark all done", Button.icon = Just "object-select-symbolic", Button.tooltip = Just "Everything in this view (Shift E)" }
+  Gtk.widgetAddCssClass markAll "mark-all"
+  unless (view == Finished) $ #append filterBar markAll
+
+  -- After Mark all done: how many, and Undo, for a few seconds.
+  toastText <- label "" []
+  undo <- GI.new Gtk.Button [#label := "Undo", #cssClasses := ["flat", "undo"]]
+  toastBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["toast"]]
+  GI.set toastText [#hexpand := True]
+  #append toastBox toastText
+  #append toastBox undo
+  toast <- GI.new Gtk.Revealer [ #child := toastBox
+                               , #revealChild := False
+                               , #transitionType := Gtk.RevealerTransitionTypeSlideUp
+                               , #valign := Gtk.AlignEnd
+                               , #halign := Gtk.AlignFill
+                               , #canTarget := True
+                               ]
+  pending <- newIORef (pure ())
+  shownAt <- newIORef (0 :: Int)
+  void $ GI.on undo #clicked $ do
+    GI.set toast [#revealChild := False]
+    join (readIORef pending)
+    writeIORef pending (pure ())
+  let markEverything = do
+        f <- readIORef current
+        these <- filter (keeps f) <$> readIORef items
+        unless (null these) $ do
+          actions.setAllDone these True
+          let n = length these
+          GI.set toastText [#label := T.pack (show n) <> (if n == 1 then " notification" else " notifications") <> " marked done"]
+          writeIORef pending (actions.setAllDone these False)
+          GI.set toast [#revealChild := True]
+          -- Each toast hides itself unless a newer one took its place.
+          shown' <- (+ 1) <$> readIORef shownAt
+          writeIORef shownAt shown'
+          void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 6 $ do
+            latest <- readIORef shownAt
+            when (latest == shown') $ GI.set toast [#revealChild := False] >> writeIORef pending (pure ())
+            pure False
+  writeIORef markAllRef markEverything
+  void $ GI.on markAll #clicked markEverything
 
   listScroll <- GI.new Gtk.ScrolledWindow [ #child := list
                                           , #vexpand := True
                                           , #hscrollbarPolicy := Gtk.PolicyTypeNever
                                           ]
+  listOverlay <- GI.new Gtk.Overlay [#child := listScroll, #vexpand := True]
+  Gtk.overlayAddOverlay listOverlay toast
   listPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                              , #widthRequest := 460
                              , #hexpand := False
                              , #cssClasses := ["u-inbox-pane"]
                              ]
   #append listPane filterBar
-  #append listPane listScroll
+  #append listPane listOverlay
 
   #append page listPane
   #append page previewScroll
@@ -694,6 +743,9 @@ css = mconcat
   , "  background: var(--neutral-bg); color: var(--text); padding: 1px 6px; border-radius: 4px;"
   , "}"
   , "box.u-preview label.hint { margin-top: -12px; }"
+  , "box.u-filter-bar button.mark-all { min-height: 30px; padding: 0 10px; margin-left: 8px; font-size: 13px; }"
+  , "revealer box.toast { margin: 12px; padding: 10px 14px; border-radius: 8px; background: var(--text); color: var(--window); }"
+  , "revealer box.toast button.undo { color: var(--window); font-weight: 700; min-height: 24px; padding: 0 6px; }"
   , "box.u-preview box.more { padding-top: 20px; border-top: 1px solid var(--border); }"
   , "box.u-preview box.why { padding: 10px 12px; border-radius: 8px; background: var(--accent-bg); color: var(--accent-soft); }"
   , "box.u-preview box.u-card.new { box-shadow: inset 3px 0 0 var(--accent); }"

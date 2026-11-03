@@ -287,7 +287,18 @@ buildAt start given app = do
             , files = either (const []) id changed
             }
       change f = Inbox.Change f.path (length [() | Changes.Insertion {} <- f.lines]) (length [() | Changes.Deletion {} <- f.lines])
-      inboxActions = Inbox.Actions {open = openNotification, setDone = setDone, details = previewDetails}
+      -- All in one go off the main thread; the inbox redraws once.
+      setAllDone ns done = do
+        anchor <- Gtk.toWidget screens
+        void $ forkIO $ do
+          results <- mapM (\n -> source.setDone n done) ns
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            case [problem | Left problem <- results] of
+              problem : _ -> Settings.notice anchor (if done then "Not all were marked done" else "Not all moved back to the inbox") problem
+              [] -> pure ()
+            join (readIORef inboxRef)
+            pure False
+      inboxActions = Inbox.Actions {open = openNotification, setDone = setDone, details = previewDetails, setAllDone = setAllDone}
   initial <- source.inbox
   inboxPages <- forM inboxViews $ \(page, view) -> (,) page <$> Inbox.new view inboxActions initial
   -- Each reload tells the desktop about what is new since the last one,
@@ -684,7 +695,7 @@ summaryOf pr = PullRequest.Summary
 -- | The single-key shortcuts, for the footer strip and Settings.
 shortcuts :: [(Text, Text)]
 shortcuts =
-  [("j k", "move"), ("Enter", "open"), ("e", "done"), ("o", "open in browser")]
+  [("j k", "move"), ("Enter", "open"), ("e", "done"), ("Shift E", "all done"), ("o", "open in browser")]
 
 -- | @syncChip@ holds the sync state, which the window keeps current;
 -- @onSync@ runs for the refresh button.

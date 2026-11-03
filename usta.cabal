@@ -47,6 +47,7 @@ executable usta
     Usta.Git
     Usta.Git.Credential
     Usta.Keyring
+    Usta.Mermaid
     Usta.Mirrors
     Usta.Preferences
     Usta.Sync

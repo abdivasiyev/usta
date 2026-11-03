@@ -93,6 +93,7 @@ executable usta
     Usta.UI.Pages.Welcome
     Usta.UI.Platform
     Usta.UI.Sidebar
+    Usta.UI.Source
     Usta.UI.Style
     Usta.UI.Window
 

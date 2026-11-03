@@ -57,8 +57,10 @@ import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
 import Usta.Details (From (..))
-import Usta.Types.Parse (parse)
-import Usta.UI.Format (Clock, ago, clock)
+import Usta.Types.Parse (parse, unparse)
+-- For the commits' fields.
+import qualified Usta.Types.Commit as C
+import Usta.UI.Format (Clock, ago, clock, short)
 import qualified Usta.Forge as Forge
 import qualified Usta.Sync as Sync
 import Data.Containers.ListUtils (nubOrd)
@@ -147,8 +149,24 @@ buildAt start source app = do
         when (either (const False) (const True) answered) $
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (join (readIORef pageRef) >> pure False)
         pure answered
-  repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest) chooseMirror
-    (\r -> source.mirrorOrigins r.host r.name)
+  let loadContents r = do
+        c <- clock
+        commits <- source.recentCommits r.host r.name r.defaultBranch
+        readme <- source.readme r.host r.name r.defaultBranch
+        pure $ do
+          (_, cs) <- commits
+          (_, file) <- readme
+          pure Repositories.Contents
+            { commits = [Repositories.Commit {hash = unparse x.sha, message = x.subject, age = short c x.authoredAt} | x <- cs]
+            , readme = fmap (\(name, text) -> (name, Repositories.readmeBlocks text)) file
+            }
+  repositoryPage <- source.repositories >>= Repositories.new Repositories.Actions
+    { newIssue = const openNewIssue
+    , newPullRequest = const openNewPullRequest
+    , chooseMirror = chooseMirror
+    , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
+    , loadContents = loadContents
+    }
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
   source.onMirrorStatus (source.repositories >>= repositoryPage.update)
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
@@ -358,10 +376,10 @@ notificationSummary n = PullRequest.Summary
   , PullRequest.files = length n.changes
   , PullRequest.commits = 1
   -- The tab has room for a word, not the card's "1 of 1 passed".
-  , PullRequest.checks = fmap (\(tone, _) -> (tone, short tone)) n.checks
+  , PullRequest.checks = fmap (\(tone, _) -> (tone, word tone)) n.checks
   }
   where
-    short tone = case tone of
+    word tone = case tone of
       Success -> "passed"
       Danger -> "failed"
       Warning -> "running"

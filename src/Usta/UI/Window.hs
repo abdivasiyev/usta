@@ -313,12 +313,13 @@ buildAt start given app = do
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
     , loadContents = loadContents
-    , files = \r -> RepositoryFiles.new RepositoryFiles.Actions
+    , files = \r opening -> RepositoryFiles.new RepositoryFiles.Actions
         { loadTree = fmap (\(from, es) -> (said from "From the local mirror" "From the forge's API", es))
             <$> source.tree r.host r.name r.defaultBranch
         , loadFile = \p -> fmap snd <$> source.file r.host r.name r.defaultBranch p
         }
         RepositoryFiles.Place {forge = r.forge, host = r.host, repo = r.name, branch = r.defaultBranch}
+        opening
     }
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
   source.onMirrorStatus (source.repositories >>= repositoryPage.update)

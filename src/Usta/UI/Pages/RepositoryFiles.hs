@@ -8,14 +8,15 @@ module Usta.UI.Pages.RepositoryFiles
   , Actions (..)
   , Content (..)
   , contentOf
+  , relativeTo
   , new
   , css
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (foldM, forM_, unless, void, when)
 import qualified Data.ByteString as B
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
@@ -81,8 +82,27 @@ contentOf path bytes
     extension = map lower (takeExtension (T.unpack path))
     lower c = if c >= 'A' && c <= 'Z' then toEnum (fromEnum c + 32) else c
 
-new :: Actions -> Place -> IO Gtk.Widget
-new actions place = do
+-- | Where a link in the file at @from@ points: "../b.md" from "docs/a.md"
+-- is "b.md", and "/x" starts at the top. 'Nothing' for a link to the
+-- file's own headings, or one that climbs out of the repository.
+relativeTo :: Text -> Text -> Maybe Text
+relativeTo from link
+  | T.null target = Nothing
+  | otherwise = T.intercalate "/" <$> foldM step base (T.splitOn "/" target)
+  where
+    target = T.takeWhile (\c -> c /= '#' && c /= '?') link
+    base = if "/" `T.isPrefixOf` target then [] else dropLast (T.splitOn "/" from)
+    dropLast xs = take (length xs - 1) xs
+    step acc part = case part of
+      "" -> Just acc
+      "." -> Just acc
+      ".." -> if null acc then Nothing else Just (dropLast acc)
+      p -> Just (acc <> [p])
+
+-- | The tree and a file viewer; @start@ is the file or folder to open
+-- first, the README otherwise.
+new :: Actions -> Place -> Maybe Text -> IO Gtk.Widget
+new actions place start = do
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True, #cssClasses := ["u-files-tab"]]
 
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
@@ -129,9 +149,23 @@ new actions place = do
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
             widget <- case loaded of
               Left problem -> note problem
-              Right bytes -> fileView place e bytes
+              Right bytes -> fileView (mapM_ reveal . relativeTo e.path) place e bytes
             replace viewer widget
             pure False
+      -- Opens a file, or a folder in the tree, as a link to it does.
+      reveal path = do
+        es <- readIORef entries
+        case [e | e <- es, e.path == path] of
+          e : _ -> do
+            modifyIORef' open (\s -> foldr Set.insert s (parents path <> [path | e.kind == Tree.Folder]))
+            Gtk.editableSetText find ""
+            writeIORef query ""
+            redraw
+            rows <- shownRows
+            forM_ (lookup path (zip (map (.path) rows) [0 ..])) $ \i ->
+              Gtk.listBoxGetRowAtIndex list i >>= Gtk.listBoxSelectRow list
+            when (e.kind == Tree.File) (showFile e)
+          [] -> note ("There is no " <> path <> " on " <> place.branch <> ".") >>= replace viewer
   void $ GI.on list #rowActivated $ \row -> do
     index <- fromIntegral <$> Gtk.listBoxRowGetIndex row
     rows <- shownRows
@@ -156,10 +190,11 @@ new actions place = do
         Right (_, es) -> do
           writeIORef entries (ordered es)
           redraw
-          -- The README first, as the forge's page does.
-          case [e | e <- es, e.kind == Tree.File, T.toLower e.path `elem` ["readme.md", "readme", "readme.txt"]] of
-            e : _ -> showFile e
-            [] -> note "Choose a file on the left." >>= replace viewer
+          -- What was asked for, or the README, as the forge's page does.
+          case (start, [e | e <- es, e.kind == Tree.File, T.toLower e.path `elem` ["readme.md", "readme", "readme.txt"]]) of
+            (Just path, _) -> reveal path
+            (Nothing, e : _) -> showFile e
+            (Nothing, []) -> note "Choose a file on the left." >>= replace viewer
       pure False
   Gtk.toWidget page
   where
@@ -198,8 +233,8 @@ treeRow flat expanded e = do
   pure row
 
 -- | The header and the content for one file.
-fileView :: Place -> Entry -> B.ByteString -> IO Gtk.Widget
-fileView place e bytes = do
+fileView :: Markdown.Follow -> Place -> Entry -> B.ByteString -> IO Gtk.Widget
+fileView follow place e bytes = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12]
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["file-header"]]
   let (folder, name) = T.breakOnEnd "/" e.path
@@ -239,7 +274,7 @@ fileView place e bytes = do
   body <- case content of
     Text text | markdown -> do
       stack <- GI.new Gtk.Stack []
-      rendered <- Markdown.new text
+      rendered <- Markdown.newIn follow text
       Gtk.widgetAddCssClass rendered "rendered"
       void $ Gtk.stackAddNamed stack rendered (Just "rendered")
       source <- CodeView.new e.path text

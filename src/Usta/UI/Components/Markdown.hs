@@ -3,13 +3,17 @@
 
 -- | Markdown as native widgets: GitHub-flavored (tables, strikethrough,
 -- autolinks, task lists) through cmark-gfm. Code blocks are highlighted
--- like files; links open in the browser.
+-- like files; links with a scheme open in the browser.
 module Usta.UI.Components.Markdown
-  ( new
+  ( Follow
+  , new
+  , newIn
   , css
   ) where
 
 import Control.Monad (forM_, void)
+import Data.Char (isAlphaNum)
+import Data.Kind (Type)
 import CMarkGFM (ListAttributes (..), ListType (..), Node (..), NodeType (..), TableCellAlignment (..), commonmarkToNode, extAutolink, extStrikethrough, extTable)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -21,44 +25,54 @@ import qualified GI.Gtk as Gtk
 import qualified Usta.UI.Components.Mermaid as Mermaid
 import qualified Usta.UI.Highlight as Highlight
 
--- | @text@ rendered, for a README, a description or a comment.
+-- | What a link without a scheme, such as "docs/a.md" or "#usage",
+-- opens: it means something only where the text came from.
+type Follow :: Type
+type Follow = Text -> IO ()
+
+-- | @text@ rendered, for a description or a comment; links without a
+-- scheme do nothing.
 new :: Text -> IO Gtk.Widget
-new text = do
-  w <- block (commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text)
+new = newIn (const (pure ()))
+
+-- | @text@ rendered, with links without a scheme going to @follow@, as a
+-- file's links to the files beside it.
+newIn :: Follow -> Text -> IO Gtk.Widget
+newIn follow text = do
+  w <- block follow (commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text)
   Gtk.widgetAddCssClass w "u-markdown"
   pure w
 
-block :: Node -> IO Gtk.Widget
-block (Node _ kind children) = case kind of
-  DOCUMENT -> column 12 children
-  PARAGRAPH -> paragraph ["paragraph"] children
-  HEADING level -> paragraph ["heading", "h" <> T.pack (show (min 6 level))] children
+block :: Follow -> Node -> IO Gtk.Widget
+block follow (Node _ kind children) = case kind of
+  DOCUMENT -> column follow 12 children
+  PARAGRAPH -> paragraph follow ["paragraph"] children
+  HEADING level -> paragraph follow ["heading", "h" <> T.pack (show (min 6 level))] children
   BLOCK_QUOTE -> do
-    w <- column 8 children
+    w <- column follow 8 children
     Gtk.widgetAddCssClass w "quote"
     pure w
   THEMATIC_BREAK -> GI.new Gtk.Separator [#orientation := Gtk.OrientationHorizontal] >>= Gtk.toWidget
   CODE_BLOCK info code
     | T.toLower (T.strip info) == "mermaid" -> Mermaid.new code
     | otherwise -> codeBlock (T.takeWhile (/= ' ') (T.strip info)) code
-  HTML_BLOCK raw -> text' (Highlight.plain (T.stripEnd raw)) ["mono"]
-  LIST attributes -> list attributes children
-  TABLE alignments -> table alignments children
-  _ -> column 8 children
+  HTML_BLOCK raw -> text' follow (Highlight.plain (T.stripEnd raw)) ["mono"]
+  LIST attributes -> list follow attributes children
+  TABLE alignments -> table follow alignments children
+  _ -> column follow 8 children
 
-column :: Int -> [Node] -> IO Gtk.Widget
-column gap children = do
+column :: Follow -> Int -> [Node] -> IO Gtk.Widget
+column follow gap children = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := fromIntegral gap]
-  forM_ children $ \c -> block c >>= #append box
+  forM_ children $ \c -> block follow c >>= #append box
   Gtk.toWidget box
 
-paragraph :: [Text] -> [Node] -> IO Gtk.Widget
-paragraph classes children = text' (foldMap inline children) classes
+paragraph :: Follow -> [Text] -> [Node] -> IO Gtk.Widget
+paragraph follow classes children = text' follow (foldMap inline children) classes
 
--- | Selectable, wrapping text from Pango markup; its links open in the
--- browser, as GTK does for a label's links.
-text' :: Text -> [Text] -> IO Gtk.Widget
-text' markup classes = do
+-- | Selectable, wrapping text from Pango markup.
+text' :: Follow -> Text -> [Text] -> IO Gtk.Widget
+text' follow markup classes = do
   l <- GI.new Gtk.Label [ #xalign := 0
                         , #wrap := True
                         , #selectable := True
@@ -66,7 +80,17 @@ text' markup classes = do
                         , #label := markup
                         , #cssClasses := classes
                         ]
+  links follow l
   Gtk.toWidget l
+
+-- | A label's links with a scheme (https:, mailto:) open as GTK opens
+-- them; the others go to @follow@.
+links :: Follow -> Gtk.Label -> IO ()
+links follow l = void $ GI.on l #activateLink $ \uri ->
+  if hasScheme uri then pure False else follow uri >> pure True
+  where
+    hasScheme u = case T.breakOn ":" u of
+      (s, rest) -> not (T.null s) && not (T.null rest) && T.all (\c -> isAlphaNum c || c `elem` ("+-." :: String)) s
 
 inline :: Node -> Text
 inline (Node _ kind children) = case kind of
@@ -86,8 +110,8 @@ inline (Node _ kind children) = case kind of
 
 -- | Bullets or numbers; an item starting "[ ]" or "[x]" is a task with a
 -- check box.
-list :: ListAttributes -> [Node] -> IO Gtk.Widget
-list attributes items = do
+list :: Follow -> ListAttributes -> [Node] -> IO Gtk.Widget
+list follow attributes items = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #cssClasses := ["list"]]
   forM_ (zip [attributes.listStart ..] items) $ \(n, Node p _ content) -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
@@ -101,7 +125,7 @@ list attributes items = do
                               ]
         Gtk.toWidget l
     #append row marker
-    body <- block (Node p DOCUMENT rest)
+    body <- block follow (Node p DOCUMENT rest)
     GI.set body [#hexpand := True]
     #append row body
     #append box row
@@ -113,8 +137,8 @@ list attributes items = do
         | "[x] " `T.isPrefixOf` T.toLower t -> (Just True, Node p PARAGRAPH (Node q (TEXT (T.drop 4 t)) more : others) : blocks)
       _ -> (Nothing, content)
 
-table :: [TableCellAlignment] -> [Node] -> IO Gtk.Widget
-table alignments rows = do
+table :: Follow -> [TableCellAlignment] -> [Node] -> IO Gtk.Widget
+table follow alignments rows = do
   grid <- GI.new Gtk.Grid [#cssClasses := ["table"], #halign := Gtk.AlignStart]
   forM_ (zip [0 ..] rows) $ \(r, Node _ _ cells) ->
     forM_ (zip3 [0 ..] cells (alignments <> repeat NoAlignment)) $ \(c, Node _ _ content, alignment) -> do
@@ -127,6 +151,7 @@ table alignments rows = do
                                    _ -> 0
                                , #cssClasses := ["cell"] <> ["header" | r == (0 :: Int)]
                                ]
+      links follow cell
       Gtk.gridAttach grid cell c (fromIntegral r) 1 1
   Gtk.toWidget grid
 

@@ -12,6 +12,7 @@ module Usta.Forge.Forgejo
   , whoAmI
   ) where
 
+import Control.Exception (throwIO)
 import Data.ByteString (ByteString)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Kind (Type)
@@ -25,9 +26,10 @@ import qualified Network.HTTP.Client as HTTP
 import Servant.Client (BaseUrl, ClientM)
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Fetched (..), Forge (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
+import Usta.Types.Diff (parseDiff)
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
@@ -58,6 +60,19 @@ forgejo manager base host token = do
     , cloneUrls = \repo -> do
         r <- run client (Api.api.repository (owner repo) (shortName repo))
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}
+    , pullDiff = \repo n -> do
+        text <- run client (Api.api.pullDiff (owner repo) (shortName repo) (Api.DiffOf n))
+        either (throwIO . Refused) pure (parseDiff text)
+    , pullCommits = \repo n -> map (.commit) <$> run client
+        (everyPage (\page limit -> Api.api.pullCommits (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
+    , recentCommits = \repo branch -> map (.commit) <$> run client
+        (Api.api.commits (owner repo) (shortName repo)
+          Api.CommitsQuery {sha = branch, limit = 10, stat = False, verification = False, files = False})
+    , readme = \repo branch -> do
+        entries <- run client (Api.api.contents (owner repo) (shortName repo) Api.RefQuery {ref = branch})
+        case [e.name | e <- entries, e.kind == "file", T.toLower (T.takeWhile (/= '.') e.name) == "readme"] of
+          name : _ -> Just . (,) name <$> run client (Api.api.raw (owner repo) (shortName repo) name Api.RefQuery {ref = branch})
+          [] -> pure Nothing
     }
 
 -- | Who @token@ signs in as; throws 'Usta.Forge.SignedOut' when Forgejo

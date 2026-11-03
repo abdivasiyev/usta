@@ -11,9 +11,12 @@ import Control.Exception (Exception)
 import Data.Kind (Type)
 import Data.Text (Text)
 
+import Usta.Types.Commit (Commit)
+import Usta.Types.Diff (FileDiff)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Notification (Notification)
+import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (PullRequest)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Repository (Repository)
@@ -31,6 +34,14 @@ data Forge = Forge
   , markRead :: ThreadId -> IO ()
   , cloneUrls :: RepoName -> IO CloneUrls
     -- ^ Where a mirror of the repository fetches from, as the forge says.
+  , pullDiff :: RepoName -> Number -> IO [FileDiff]
+    -- ^ What a pull request changes, for when the repository has no mirror.
+  , pullCommits :: RepoName -> Number -> IO [Commit]
+    -- ^ Its commits, oldest first.
+  , recentCommits :: RepoName -> Text -> IO [Commit]
+    -- ^ The last commits on a branch, newest first.
+  , readme :: RepoName -> Text -> IO (Maybe (Text, Text))
+    -- ^ The README at the top of a branch, with its file name.
   }
 
 -- | A repository's clone URLs. The forge gives them because only it knows

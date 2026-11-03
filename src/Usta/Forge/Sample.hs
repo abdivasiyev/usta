@@ -76,6 +76,11 @@ new now account = do
             { F.https = "https://" <> unparse account.host <> "/" <> unparse repo <> ".git"
             , F.ssh = Just ("git@" <> unparse account.host <> ":" <> unparse repo <> ".git")
             }
+        -- The sample has no code: its pull requests change nothing.
+        , F.pullDiff = \_ _ -> pure []
+        , F.pullCommits = \_ _ -> pure []
+        , F.recentCommits = \_ _ -> pure []
+        , F.readme = \_ _ -> pure Nothing
         , F.markRead = \thread -> do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->

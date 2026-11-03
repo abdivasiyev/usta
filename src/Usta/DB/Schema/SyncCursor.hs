@@ -1,9 +1,7 @@
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE NoFieldSelectors #-}
 
 -- | The @sync_cursors@ table: where each account's sync of each resource
 -- stopped, so the next sync asks the forge only for what changed.

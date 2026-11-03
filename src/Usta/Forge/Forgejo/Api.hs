@@ -14,6 +14,12 @@ module Usta.Forge.Forgejo.Api
   , CommitDiffOf (..)
   , Entry (..)
   , ApiCommit (..)
+  , IssueDetail (..)
+  , ApiComment (..)
+  , NewComment (..)
+  , IssueEdit (..)
+  , MergeOption (..)
+  , NewReview (..)
   , NotificationQuery (..)
   , ThreadQuery (..)
   , ThreadState (..)
@@ -33,7 +39,7 @@ module Usta.Forge.Forgejo.Api
   , CombinedStatus (..)
   ) where
 
-import Data.Aeson (FromJSON (..), Value, withObject, (.!=), (.:), (.:?))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.!=), (.:), (.:?), (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Aeson.Types (Parser)
@@ -50,8 +56,10 @@ import Servant.API
 import Servant.Client (AsClientT, ClientM, client)
 
 import Usta.Types.Commit (Commit (..), Sha)
+import Usta.Types.Discussion (Comment (..), Merge (..), Verdict (..))
 import Usta.Types.Count (Count)
 import Usta.Types.Label (Color)
+import qualified Usta.Types.Label as L
 import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
 import Usta.Types.Parse (parseM)
@@ -97,6 +105,26 @@ data Routes mode = Routes
   , commitDiff
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "git" :> "commits"
            :> Capture "sha" CommitDiffOf :> Get '[RawText] Text
+  , issue
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> Get '[JSON] IssueDetail
+    -- ^ Pull requests are issues here too.
+  , issueComments
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "comments" :> Get '[JSON] [ApiComment]
+    -- ^ Every comment at once; Forgejo does not page them.
+  , postComment
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "comments" :> ReqBody '[JSON] NewComment :> Verb 'POST 201 '[JSON] ApiComment
+  , editIssue
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> ReqBody '[JSON] IssueEdit :> Verb 'PATCH 201 '[JSON] NoContent
+  , merge
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "merge" :> ReqBody '[JSON] MergeOption :> Post '[JSON] NoContent
+  , review
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "reviews" :> ReqBody '[JSON] NewReview :> Post '[JSON] NoContent
   }
   deriving stock (Generic)
 
@@ -231,6 +259,87 @@ instance FromJSON ApiCommit where
     date <- author .: "date"
     let (subject, rest) = T.breakOn "\n" message
     pure (ApiCommit Commit {sha = sha, author = name, authoredAt = date, subject = T.strip subject, body = T.strip rest})
+
+-- | One issue or pull request, with its description and side details.
+type IssueDetail :: Type
+data IssueDetail = IssueDetail
+  { opening :: Comment
+  , closed :: Bool
+  , assignees :: [Login]
+  , labels :: [L.Label]
+  , milestone :: Maybe Text
+  }
+
+instance FromJSON IssueDetail where
+  parseJSON = withObject "Issue" $ \o -> do
+    user <- o .: "user"
+    body <- o .:? "body" .!= ""
+    createdAt <- o .: "created_at"
+    state <- o .: "state" :: Parser Text
+    assignees <- o .:? "assignees" .!= []
+    labels <- o .:? "labels" .!= []
+    milestone <- o .:? "milestone"
+    title <- traverse (.: "title") milestone
+    pure IssueDetail
+      { opening = Comment {author = (user :: User).login, body = body, createdAt = createdAt}
+      , closed = state == "closed"
+      , assignees = map (\(User login) -> login) assignees
+      , labels = [L.Label {name = l.name, color = l.color} | l <- labels :: [Label]]
+      , milestone = title
+      }
+
+type ApiComment :: Type
+newtype ApiComment = ApiComment {comment :: Comment}
+
+instance FromJSON ApiComment where
+  parseJSON = withObject "Comment" $ \o -> do
+    user <- o .: "user"
+    body <- o .: "body"
+    createdAt <- o .: "created_at"
+    pure (ApiComment Comment {author = (user :: User).login, body = body, createdAt = createdAt})
+
+type NewComment :: Type
+newtype NewComment = NewComment {body :: Text}
+
+instance ToJSON NewComment where
+  toJSON c = object ["body" .= c.body]
+
+-- | Closes or reopens an issue or pull request.
+type IssueEdit :: Type
+newtype IssueEdit = IssueEdit {closed :: Bool}
+
+instance ToJSON IssueEdit where
+  toJSON e = object ["state" .= (if e.closed then "closed" else "open" :: Text)]
+
+type MergeOption :: Type
+data MergeOption = MergeOption
+  { how :: Merge
+  , deleteBranch :: Bool
+  }
+
+instance ToJSON MergeOption where
+  toJSON m = object
+    [ "Do" .= case m.how of
+        Squash -> "squash" :: Text
+        MergeCommit -> "merge"
+        Rebase -> "rebase"
+    , "delete_branch_after_merge" .= m.deleteBranch
+    ]
+
+type NewReview :: Type
+data NewReview = NewReview
+  { verdict :: Verdict
+  , body :: Text
+  }
+
+instance ToJSON NewReview where
+  toJSON r = object
+    [ "event" .= case r.verdict of
+        Approve -> "APPROVED" :: Text
+        RequestChanges -> "REQUEST_CHANGES"
+        CommentOnly -> "COMMENT"
+    , "body" .= r.body
+    ]
 
 type IssueType :: Type
 data IssueType = Issues | Pulls

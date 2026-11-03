@@ -16,6 +16,7 @@ executable usta
     src
 
   other-modules:
+    Usta.Bus
     Usta.DB
     Usta.DB.Account
     Usta.DB.Issue
@@ -124,4 +125,4 @@ executable usta
     DuplicateRecordFields
     NoFieldSelectors
     OverloadedRecordDot
-  ghc-options: -Wall
+  ghc-options: -Wall -threaded

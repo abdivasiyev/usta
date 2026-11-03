@@ -56,7 +56,8 @@ forgejo manager base host token = do
     , pullRequests = const (Fetched Nothing <$> pullRequestsOf client details host)
     , issues = const (Fetched Nothing <$> issuesOf client host)
     , repositories = const (Fetched Nothing <$> repositoriesOf client host)
-    , markRead = \thread -> () <$ run client (Api.api.markRead thread)
+    , markRead = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Read)))
+    , markUnread = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Unread)))
     , cloneUrls = \repo -> do
         r <- run client (Api.api.repository (owner repo) (shortName repo))
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}

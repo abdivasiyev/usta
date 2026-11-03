@@ -86,6 +86,10 @@ new now account = do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->
               (bumped s s {notifications = [n {N.unread = n.unread && n.threadId /= thread} | n <- s.notifications]}, ())
+        , F.markUnread = \thread -> do
+            failIfTold ref
+            atomicModifyIORef' ref $ \s ->
+              (bumped s s {notifications = [n {N.unread = n.unread || n.threadId == thread} | n <- s.notifications]}, ())
         }
     , advance = \time -> atomicModifyIORef' ref $ \s -> case s.script of
         [] -> (s, False)

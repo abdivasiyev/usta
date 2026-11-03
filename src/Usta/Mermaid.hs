@@ -13,6 +13,8 @@ module Usta.Mermaid
   , Group (..)
   , Flowchart (..)
   , parse
+  , node
+  , chain
   ) where
 
 import Data.Char (isAlphaNum, isSpace)
@@ -135,6 +137,7 @@ statement line
   where
     skipped = ["classDef ", "class ", "style ", "linkStyle ", "click ", "subgraph", "end", "direction "]
 
+-- | Nodes and the edges between them, such as @A --> B -->|yes| C & D@.
 chain :: Text -> Either Text ([Node], [Edge])
 chain text = do
   (first, rest) <- group text
@@ -159,6 +162,7 @@ group text = do
       pure (n : ns, after)
     _ -> pure ([n], rest)
 
+-- | One node, such as @A@ or @db[("Store")]@, and the text after it.
 node :: Text -> Either Text (Node, Text)
 node text
   | T.null id' = Left ("usta could not read \"" <> T.take 40 text <> "\".")

@@ -39,6 +39,7 @@ executable usta
     Usta.DB.Schema.SyncCursor
     Usta.DB.SyncCursor
     Usta.Details
+    Usta.Diagram
     Usta.Diagram.Flowchart
     Usta.Diagram.Layered
     Usta.Diagram.Scene

@@ -15,8 +15,7 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
-import qualified Usta.Diagram.Flowchart as Flowchart
-import qualified Usta.Mermaid as Mermaid
+import qualified Usta.Diagram as Diagram
 import qualified Usta.UI.Components.DiagramView as DiagramView
 
 new :: Text -> IO Gtk.Widget
@@ -44,10 +43,10 @@ new source = do
         Gtk.boxAppend figure problem
         GI.set toggle [#visible := False]
         Gtk.stackSetVisibleChildName stack "source"
-  case Mermaid.parse source of
+  case Diagram.parse source of
     Left reason -> fallBack reason
     -- Drawn by usta; the theme's colors come in when it is painted.
-    Right chart -> DiagramView.new (\measure -> Flowchart.draw measure chart) >>= #append diagram
+    Right d -> DiagramView.new (\measure -> Diagram.draw measure d) >>= #append diagram
   Gtk.toWidget figure
 
 css :: Text

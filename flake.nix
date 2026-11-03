@@ -42,6 +42,7 @@
           gi-glib
           gi-gtk4
           gi-pango
+          gi-pangocairo
           gi-poppler
           haskell-gi-base
           http-api-data

@@ -34,6 +34,7 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
@@ -171,6 +172,33 @@ new view actions notifications = do
         writeIORef selectedKey (Just (key n))
         content <- preview actions n
         GI.set previewScroll [#child := content]
+
+  -- With the list focused: j and k move, e marks done (or moves back to
+  -- the inbox), o opens the forge's page, and Enter opens it here.
+  let selectedOne = do
+        selected <- Gtk.listBoxGetSelectedRow list
+        index <- maybe (pure (-1)) Gtk.listBoxRowGetIndex selected
+        shown <- readIORef items
+        pure [n | (i, n) <- zip [0 ..] shown, i == index]
+      step by = do
+        selected <- Gtk.listBoxGetSelectedRow list
+        from <- maybe (pure (-1)) Gtk.listBoxRowGetIndex selected
+        -- Rows the filter hides are skipped.
+        let go at = when (at >= 0) $ do
+              row <- Gtk.listBoxGetRowAtIndex list at
+              forM_ row $ \r -> do
+                visible <- Gtk.widgetGetChildVisible r
+                if visible
+                  then Gtk.listBoxSelectRow list (Just r) >> void (Gtk.widgetGrabFocus r)
+                  else go (at + by)
+        go (from + by)
+  keys <- GI.new Gtk.ShortcutController []
+  shortcut keys "j" (step 1)
+  shortcut keys "k" (step (-1))
+  shortcut keys "e" (selectedOne >>= mapM_ (\n -> actions.setDone n (not (lists Finished n))))
+  shortcut keys "o" (selectedOne >>= mapM_ openInBrowser)
+  Gtk.widgetAddController list keys
+  void $ GI.on list #rowActivated $ \_ -> selectedOne >>= mapM_ actions.open
 
   (filters, buttons) <- Segmented.new ["All", "Unread", "Participating"] 0
   countLabel <- GI.new Gtk.Label [ #cssClasses := ["muted", "count"]
@@ -381,9 +409,7 @@ preview actions n = do
   void $ GI.on done #clicked (actions.setDone n (not finished))
   #append buttons done
   browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
-  void $ GI.on browser #clicked $ do
-    launcher <- Gtk.uriLauncherNew (Just (webUrl n))
-    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  void $ GI.on browser #clicked (openInBrowser n)
   #append buttons browser
   #append pane buttons
 
@@ -393,6 +419,11 @@ preview actions n = do
       PullRequest -> Badge.new Success "Open"
       MergedPullRequest -> Badge.new Merged "Merged"
       Issue -> Badge.new Success "Open"
+
+openInBrowser :: Notification -> IO ()
+openInBrowser n = do
+  launcher <- Gtk.uriLauncherNew (Just (webUrl n))
+  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
 
 changesCard :: [Change] -> IO Gtk.Box
 changesCard cs = do

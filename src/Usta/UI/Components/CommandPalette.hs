@@ -8,6 +8,7 @@ module Usta.UI.Components.CommandPalette
   , Item (..)
   , Model (..)
   , new
+  , shortcut
   , css
   ) where
 

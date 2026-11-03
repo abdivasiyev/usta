@@ -5,23 +5,32 @@
 -- selected commit's message and changes on the right.
 module Usta.UI.Pages.PullRequest.Commits
   ( Commit (..)
+  , fromCommit
+  , LoadChanges
   , sample
   , new
   , css
   ) where
 
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Diff as Diff
 import Usta.UI.Components.Diff (Line (..))
+import qualified Usta.UI.Components.Skeleton as Skeleton
+import Usta.UI.Format (Clock, ago)
+import qualified Usta.Types.Commit as C
+import Usta.Types.Parse (unparse)
 
 type Commit :: Type
 data Commit = Commit
@@ -36,8 +45,27 @@ data Commit = Commit
   , changes :: [Diff.File]
   }
 
-new :: [Commit] -> IO Gtk.Widget
-new commits = do
+-- | A commit as the tab lists it; its changes are loaded when it is shown.
+fromCommit :: Clock -> C.Commit -> Commit
+fromCommit c commit = Commit
+  { hash = unparse commit.sha
+  , subject = commit.subject
+  , message = commit.body
+  , author = commit.author
+  , initials = T.toUpper (T.take 2 commit.author)
+  , age = ago c commit.authoredAt
+  , changes = []
+  }
+
+-- | A commit's changes, for when it is selected; 'Left' says why they
+-- could not be loaded. Runs off the GTK main thread.
+type LoadChanges :: Type
+type LoadChanges = Commit -> IO (Either Text [Diff.File])
+
+-- | @source@ says where the commits came from, as "History from the local
+-- mirror".
+new :: Text -> LoadChanges -> [Commit] -> IO Gtk.Widget
+new source loadChanges commits = do
   columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #cssClasses := ["u-commits"]
                             ]
@@ -46,7 +74,7 @@ new commits = do
                          , #hexpand := False
                          , #cssClasses := ["commit-list"]
                          ]
-  count <- label (T.pack (show (length commits)) <> plural (length commits)) ["muted", "small", "count"]
+  count <- label (T.pack (show (length commits)) <> plural (length commits) <> " · " <> source) ["muted", "small", "count"]
   #append side count
   #append columns side
 
@@ -62,7 +90,7 @@ new commits = do
           if other.hash == c.hash
             then Gtk.widgetAddCssClass button "selected"
             else Gtk.widgetRemoveCssClass button "selected"
-        content <- detail c
+        content <- detail loadChanges c
         GI.set detailScroll [#child := content]
   forM_ rows $ \(c, button) -> void $ GI.on button #clicked (select c)
   forM_ (take 1 commits) select
@@ -94,8 +122,8 @@ commitRow c = do
   where
     age' = "committed " <> c.age
 
-detail :: Commit -> IO Gtk.Box
-detail c = do
+detail :: LoadChanges -> Commit -> IO Gtk.Box
+detail loadChanges c = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 16, #cssClasses := ["commit-detail"]]
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
   title <- label c.subject ["commit-title"]
@@ -116,8 +144,21 @@ detail c = do
   #append meta fullHash
   #append header meta
   #append box header
-  forM_ c.changes $ \f -> Diff.plain f >>= #append box
+  changes <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 16]
+  Skeleton.block 160 >>= #append changes
+  #append box changes
+  void $ forkIO $ do
+    loaded <- try (loadChanges c)
+    let result = either (\(_ :: SomeException) -> Left "Loading the changes failed unexpectedly.") id loaded
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      clear changes
+      case result of
+        Right files -> forM_ files $ \f -> Diff.plain f >>= #append changes
+        Left message -> label message ["muted"] >>= #append changes
+      pure False
   pure box
+  where
+    clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]

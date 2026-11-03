@@ -32,6 +32,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Pages.Issues (labelTone)
@@ -204,9 +205,9 @@ commentCard c = do
   label c.when' ["muted"] >>= #append top
   #append card top
   text <- if T.null (T.strip c.body)
-    then label "No description." ["card-body", "muted"]
-    else label c.body ["card-body"]
-  GI.set text [#wrap := True, #selectable := True]
+    then label "No description." ["card-body", "muted"] >>= Gtk.toWidget
+    else Markdown.new c.body
+  Gtk.widgetAddCssClass text "card-body"
   #append card text
   pure card
 
@@ -313,7 +314,7 @@ css = mconcat
   , "  padding: 10px 14px; border-bottom: 1px solid var(--border-subtle);"
   , "  background: var(--window); border-radius: 8px 8px 0 0; font-size: 13px;"
   , "}"
-  , "box.u-issue label.card-body { padding: 14px 16px; }"
+  , "box.u-issue .card-body { padding: 14px 16px; }"
   , "box.u-issue box.timeline {"
   , "  margin-left: 12px; padding-left: 14px; border-left: 2px solid var(--border); font-size: 13px;"
   , "}"

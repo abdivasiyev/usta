@@ -5,7 +5,6 @@
 -- selected repository's overview on the right.
 module Usta.UI.Pages.Repositories
   ( Commit (..)
-  , Block (..)
   , Repository (..)
   , fromRepository
   , Actions (..)
@@ -14,7 +13,6 @@ module Usta.UI.Pages.Repositories
   , LookUpOrigins
   , Contents (..)
   , LoadContents
-  , readmeBlocks
   , sample
   , new
   , css
@@ -36,6 +34,7 @@ import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Skeleton as Skeleton
@@ -55,8 +54,6 @@ data Commit = Commit
   }
 
 -- | The README, already parsed from Markdown into the blocks we show.
-type Block :: Type
-data Block = Heading Text | Paragraph Text | Code Text
 
 type Repository :: Type
 data Repository = Repository
@@ -76,7 +73,8 @@ data Repository = Repository
     -- ^ Offers "Mirror…": the repository has no mirror yet, or its mirror
     -- failed.
   , recentCommits :: [Commit]
-  , readme :: [Block]
+  , readme :: Text
+    -- ^ The README's Markdown; empty when there is none, or until loaded.
   }
 
 -- | @onNewIssue@ and @onNewPullRequest@ run for the header buttons, with the
@@ -106,7 +104,8 @@ type LookUpOrigins = Repository -> IO (Either Text Origins)
 type Contents :: Type
 data Contents = Contents
   { commits :: [Commit]
-  , readme :: Maybe (Text, [Block])
+  , readme :: Maybe (Text, Text)
+    -- ^ The README's file name and text.
     -- ^ The README's file name and blocks.
   }
 
@@ -312,7 +311,7 @@ overview actions r = do
   -- The sample carries its contents; a synced repository loads them.
   contents <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 20]
   #append pane contents
-  if not (null r.recentCommits && null r.readme)
+  if not (null r.recentCommits && T.null r.readme)
     then sections r Contents {commits = r.recentCommits, readme = Just ("README.md", r.readme)} contents
     else do
       Skeleton.block 120 >>= #append contents
@@ -350,46 +349,21 @@ sections r c into = do
     #append section card
     #append into section
   case c.readme of
-    Just (name, blocks) | not (null blocks) -> do
+    Just (name, text) | not (T.null (T.strip text)) -> do
       section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
       Card.sectionTitle name >>= #append section
       card <- Card.new
       Gtk.widgetAddCssClass card "readme"
-      GI.set card [#spacing := 16]
-      forM_ blocks $ \block -> blockWidget block >>= #append card
+      -- A README in Markdown is rendered; any other is shown as written.
+      body <- if any (`T.isSuffixOf` T.toLower name) [".md", ".markdown"] || T.toLower name == "readme"
+        then Markdown.new text
+        else label text ["mono"] >>= \l -> GI.set l [#wrap := True, #selectable := True] >> Gtk.toWidget l
+      #append card body
       #append section card
       #append into section
     _ -> pure ()
-  when (null c.commits && maybe True (null . snd) c.readme) $
+  when (null c.commits && maybe True (T.null . T.strip . snd) c.readme) $
     label "No commits or README to show yet." ["muted"] >>= #append into
-
--- | A README's Markdown as the page's blocks: headings, fenced code, and
--- paragraphs between blank lines. Other Markdown shows as written.
-readmeBlocks :: Text -> [Block]
-readmeBlocks = go . T.lines
-  where
-    go [] = []
-    go (l : rest)
-      | T.null (T.strip l) = go rest
-      | "```" `T.isPrefixOf` T.strip l =
-          let (code, after) = break (("```" `T.isPrefixOf`) . T.strip) rest
-           in Code (T.intercalate "\n" code) : go (drop 1 after)
-      | "#" `T.isPrefixOf` l = Heading (T.strip (T.dropWhile (== '#') l)) : go rest
-      | otherwise =
-          let (para, after) = break (\x -> T.null (T.strip x) || "#" `T.isPrefixOf` x || "```" `T.isPrefixOf` T.strip x) (l : rest)
-           in Paragraph (T.unwords (map T.strip para)) : go after
-
-blockWidget :: Block -> IO Gtk.Widget
-blockWidget block = case block of
-  Heading text -> label text ["heading"] >>= Gtk.toWidget
-  Paragraph text -> do
-    l <- label text []
-    GI.set l [#wrap := True]
-    Gtk.toWidget l
-  Code text -> do
-    l <- label text ["mono", "code"]
-    GI.set l [#selectable := True]
-    Gtk.toWidget l
 
 -- | Asks whether to mirror @r@, and how, as the add-account dialog asks
 -- for an account. Its "Don't mirror" is kept, so the question is not asked
@@ -575,7 +549,7 @@ fromRepository forge r = Repository
   , mirrorDetail = Nothing
   , canMirror = False
   , recentCommits = []
-  , readme = []
+  , readme = ""
   }
 
 sample :: [Repository]
@@ -585,24 +559,21 @@ sample =
       [ Commit "a41f0c2" "feat: scaffold Nix flake and Hello world app" "3h"
       , Commit "8427b36" "Initial commit" "2 days"
       ]
-      [ Heading "usta"
-      , Paragraph "A desktop client to connect with your forge."
-      , Code "nix run"
-      ]
+      "# usta\n\nA desktop client to connect with your forge.\n\n```sh\nnix run\n```\n"
   , Repository Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab"
       "NixOS configuration for the home server" 2 0 "master" (Success, "Up to date") Nothing False
       [Commit "5c2e91d" "feat(cache): serve the binary cache over HTTPS" "1d"]
-      [Heading "homelab", Paragraph "NixOS configuration for the home server.", Code "nix run .#deploy"]
+      "# homelab\n\nNixOS configuration for the home server.\n\n```sh\nnix run .#deploy\n```\n"
   , Repository Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix"
       "Nix configurations for my machines" 0 1 "master" (Warning, "2 behind") Nothing False
       [Commit "e03b7aa" "fix: restart nix-daemon after substituter changes" "3d"]
-      []
+      ""
   , Repository Forge.Forgejo "git.azizovich.uz" "abdivasiyev/cartoons"
       "Cartoons made with Remotion" 0 0 "main" (Success, "Up to date") Nothing False
-      [] []
+      [] ""
   , Repository Forge.GitHub "github.com" "abdivasiyev/dotfiles"
       "Shell and editor settings" 0 0 "master" (Neutral, "Not mirrored") Nothing True
-      [] []
+      [] ""
   ]
 
 css :: Text
@@ -667,8 +638,4 @@ css = mconcat
   , "box.u-repo label.hash { color: var(--accent); }"
   , "box.u-repo label.age { font-size: 13px; }"
   , "box.u-repo box.readme { padding: 20px; }"
-  , "box.u-repo box.readme label.heading { font-size: 20px; font-weight: 600; }"
-  , "box.u-repo box.readme label.code {"
-  , "  padding: 12px; border-radius: 6px; background: var(--neutral-bg); color: var(--text);"
-  , "}"
   ]

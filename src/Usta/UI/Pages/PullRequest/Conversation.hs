@@ -32,6 +32,7 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.Markdown as Markdown
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Pages.Issue (Comment (..))
 import Usta.UI.Pages.Issues (labelTone)
@@ -178,9 +179,9 @@ commentCard x = do
   label x.when' ["muted"] >>= #append top
   #append card top
   text <- if T.null (T.strip x.body)
-    then label "No description." ["card-body", "muted"]
-    else label x.body ["card-body"]
-  GI.set text [#wrap := True, #selectable := True]
+    then label "No description." ["card-body", "muted"] >>= Gtk.toWidget
+    else Markdown.new x.body
+  Gtk.widgetAddCssClass text "card-body"
   #append card text
   pure card
 

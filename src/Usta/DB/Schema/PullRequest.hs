@@ -1,9 +1,7 @@
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE NoFieldSelectors #-}
 
 -- | The @pull_requests@ table: the pull requests each account has synced.
 -- The host comes from the account.

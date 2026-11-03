@@ -82,7 +82,8 @@ cache = do
       , mirrors = mirrors
       , forgejoApi = \host -> apiUrl host "/api/v1"
       }
-    let source = Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync)
+    let source = Source.withMirrors pool accounts mirrors mirrorStatuses
+          (Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync))
         start = if null saved then Window.FirstRun else Window.Ready
     runApp (void . Window.buildAt start source)
 

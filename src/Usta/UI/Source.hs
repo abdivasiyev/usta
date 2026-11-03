@@ -10,10 +10,11 @@ module Usta.UI.Source
   , fromDatabase
   , samples
   , withAccounts
+  , withMirrors
   ) where
 
 import Data.Kind (Type)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Text (Text)
 import Database.Persist.Sql (ConnectionPool, toSqlKey)
 
@@ -22,24 +23,31 @@ import qualified Usta.Accounts as Accounts
 import Usta.Bus (Bus, Change (..), subscribe)
 import Usta.DB (run)
 import Usta.DB.Account (listAccounts)
+import Usta.DB.Mirror (choiceFor)
 import Usta.DB.Schema.Account (AccountId)
 import qualified Usta.DB.Issue as DB
 import qualified Usta.DB.Notification as DB
 import qualified Usta.DB.PullRequest as DB
 import qualified Usta.DB.Repository as DB
+import Usta.Mirrors (Mirrors (..))
+import qualified Usta.Mirrors as Mirrors
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Host (Host)
+import Usta.Types.Mirror (Choice (..))
+-- For the repositories' fields.
+import qualified Usta.Types.Repository as R
 import Usta.Types.Parse (unparse)
 import Usta.Types.Resource (Resource)
 import Usta.Types.Token (Token)
-import Usta.UI.Format (clock)
+import Usta.UI.Format (ago, clock)
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Pages.Issues as Issues
 import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Pages.Repositories as Repositories
 import Usta.UI.Sidebar (Model (..))
+import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Sidebar as Sidebar
 
 type Source :: Type
@@ -59,6 +67,11 @@ data Source = Source
   , signIn :: Kind -> Host -> Token -> IO (Either Text ())
     -- ^ 'Left' says, for the user, why it did not work.
   , remove :: AccountId -> IO (Either Text ())
+  , mirror :: Text -> Text -> Choice -> IO (Either Text ())
+    -- ^ The user's mirror answer for the repository on a host, by name.
+  , onMirrorStatus :: IO () -> IO ()
+    -- ^ Runs the action on the GTK main thread whenever a mirror's state
+    -- changes.
   }
 
 -- | A signed-in account, as the window names it.
@@ -100,11 +113,17 @@ fromDatabase pool changes statuses sync = Source
   , syncNow = sync.syncNow
   , signIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
+  , mirror = \_ _ _ -> pure (Left unavailable)
+  , onMirrorStatus = const (pure ())
   }
   where
-    kinds = do
-      accounts <- run pool listAccounts
-      pure (\key -> (.forge) <$> lookup key accounts)
+    kinds = kindsIn pool
+
+-- | Each account's kind of forge.
+kindsIn :: ConnectionPool -> IO (AccountId -> Maybe Kind)
+kindsIn pool = do
+  accounts <- run pool listAccounts
+  pure (\key -> (.forge) <$> lookup key accounts)
 
 -- | The mock lists, which never change.
 samples :: Source
@@ -119,6 +138,8 @@ samples = Source
   , syncNow = pure ()
   , signIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
+  , mirror = \_ _ _ -> pure (Left unavailable)
+  , onMirrorStatus = const (pure ())
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -131,3 +152,43 @@ withAccounts accounts source = source
   { signIn = \kind host token -> either (Left . describe) (const (Right ())) <$> accounts.signIn kind host token
   , remove = \key -> either (Left . describe) Right <$> accounts.remove key
   }
+
+-- | The repositories with their mirrors' state, choosing a mirror through
+-- @accounts@, and word of each mirror's progress from @statuses@.
+withMirrors :: ConnectionPool -> Accounts -> Mirrors -> Bus Mirrors.Status -> Source -> Source
+withMirrors pool accounts mirrors statuses source = source
+  { repositories = do
+      c <- clock
+      kindOf <- kindsIn pool
+      rows <- run pool DB.repositories
+      latest <- mirrors.latest
+      sequence
+        [ do
+            choice <- run pool (choiceFor key r.name)
+            let state = [s.state | s <- latest, s.accountId == key, s.repo == r.name]
+            pure (withState c choice (listToMaybe (reverse state)) (Repositories.fromRepository kind r))
+        | (key, r) <- rows, Just kind <- [kindOf key]
+        ]
+  , mirror = \host name choice -> do
+      rows <- run pool DB.repositories
+      case [(key, r.name) | (key, r) <- rows, unparse r.host == host, unparse r.name == name] of
+        (key, repo) : _ -> either (Left . describe) Right <$> accounts.mirror key repo choice
+        [] -> pure (Left "That repository is not in the cache any more.")
+  , onMirrorStatus = \act -> subscribe statuses (const act)
+  }
+  where
+    withState c choice state view = case (choice, state) of
+      (Nothing, _) -> view {Repositories.canMirror = True}
+      (Just Declined, _) -> view
+        { Repositories.mirror = (Neutral, "API only")
+        , Repositories.mirrorDetail = Just "Not mirrored, as you chose: diffs and history come from the forge's API."
+        , Repositories.canMirror = True
+        }
+      (Just (Mirrored _ _), Just Mirrors.Cloning) -> view {Repositories.mirror = (Accent, "Cloning…")}
+      (Just (Mirrored _ _), Just Mirrors.Fetching) -> view {Repositories.mirror = (Accent, "Fetching…")}
+      (Just (Mirrored _ _), Just (Mirrors.Ready at)) ->
+        view {Repositories.mirror = (Success, "Up to date"), Repositories.mirrorDetail = Just ("Fetched " <> ago c at)}
+      -- A failed mirror can be chosen again: another transport, or the API.
+      (Just (Mirrored _ _), Just (Mirrors.Failed message)) ->
+        view {Repositories.mirror = (Danger, "Failed"), Repositories.mirrorDetail = Just message, Repositories.canMirror = True}
+      (Just (Mirrored _ _), Nothing) -> view {Repositories.mirror = (Neutral, "Waiting to fetch")}

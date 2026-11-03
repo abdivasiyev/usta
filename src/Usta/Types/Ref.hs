@@ -1,4 +1,3 @@
-{-# LANGUAGE DerivingStrategies #-}
 
 -- | Where a pull request or issue lives.
 module Usta.Types.Ref

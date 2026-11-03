@@ -1,4 +1,3 @@
-{-# LANGUAGE DerivingStrategies #-}
 
 -- | A repository, as the Repositories page shows it.
 module Usta.Types.Repository

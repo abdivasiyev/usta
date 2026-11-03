@@ -1,4 +1,3 @@
-{-# LANGUAGE DerivingStrategies #-}
 
 -- | An issue, as the Issues page and the issue screen use it.
 module Usta.Types.Issue

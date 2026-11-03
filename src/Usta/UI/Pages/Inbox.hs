@@ -8,6 +8,7 @@ module Usta.UI.Pages.Inbox
   , Reason (..)
   , Change (..)
   , Notification (..)
+  , fromNotification
   , sample
   , new
   , syncing
@@ -32,7 +33,11 @@ import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import Usta.UI.Format (Clock, ago, short)
 import Usta.UI.Style (Tone (..))
+import qualified Usta.Types.Notification as N
+import Usta.Types.Parse (unparse)
+import qualified Usta.Types.PullRequest as P
 
 type Kind :: Type
 data Kind = PullRequest | MergedPullRequest | Issue
@@ -64,7 +69,8 @@ data Notification = Notification
   , repo :: Text
   , number :: Int
   , title :: Text
-  , reason :: Reason
+  , reason :: Maybe Reason
+    -- ^ 'Nothing' when the forge's reason has no badge, or it gives none.
   , unread :: Bool
   , age :: Text
   , branch :: Maybe (Text, Text)
@@ -83,7 +89,7 @@ keeps :: Filter -> Notification -> Bool
 keeps f n = case f of
   All -> True
   Unread -> n.unread
-  Participating -> n.reason `elem` [ReviewRequested, Mentioned, Assigned]
+  Participating -> n.reason `elem` map Just [ReviewRequested, Mentioned, Assigned]
 
 -- | @onOpen@ runs for "Open review" or "Open issue".
 new :: (Notification -> IO ()) -> [Notification] -> IO Gtk.Box
@@ -218,8 +224,8 @@ notificationRow n = do
   #append body titleLabel
 
   badges <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  let (tone, text) = reasonBadge n.reason
-  Badge.new tone text >>= #append badges
+  forM_ n.reason $ \reason ->
+    let (tone, text) = reasonBadge reason in Badge.new tone text >>= #append badges
   when n.unread $ Badge.dot Accent >>= #append badges
   #append body badges
 
@@ -314,6 +320,59 @@ changesCard cs = do
   #append card value
   pure card
 
+-- | The inbox row for a forge's notification, with the pull request it is
+-- about when that is synced. 'Nothing' for a release, commit or discussion,
+-- which the inbox does not show yet.
+fromNotification :: Clock -> Forge.Kind -> N.Notification -> Maybe P.PullRequest -> Maybe Notification
+fromNotification c forge n pr = do
+  kind <- case n.subject of
+    N.PullRequestSubject _
+      | fmap (.state) pr == Just P.Merged -> Just MergedPullRequest
+      | otherwise -> Just PullRequest
+    N.IssueSubject _ -> Just Issue
+    N.OtherSubject -> Nothing
+  number <- case n.subject of
+    N.PullRequestSubject num -> Just num
+    N.IssueSubject num -> Just num
+    N.OtherSubject -> Nothing
+  pure Notification
+    { kind = kind
+    , forge = forge
+    , host = unparse n.host
+    , repo = unparse n.repo
+    , number = unparse number
+    , title = n.title
+    , reason = badge kind
+    , unread = n.unread
+    , age = short c n.updatedAt
+    , branch = fmap (\p -> (p.headBranch, p.baseBranch)) pr
+    , opened = case pr of
+        Just p | kind == PullRequest -> "opened " <> ago c p.createdAt
+        _ -> "updated " <> ago c n.updatedAt
+    , checks = fmap checks (pr >>= (.checks))
+    , review = fmap review (pr >>= (.review))
+    , changes = []
+      -- Per-file changes come from the local mirror, which is not built yet.
+    }
+  where
+    badge kind
+      | kind == MergedPullRequest = Just WasMerged
+      | otherwise = case n.reason of
+          Just N.ReviewRequested -> Just ReviewRequested
+          Just N.Mentioned -> Just Mentioned
+          Just N.TeamMentioned -> Just Mentioned
+          Just N.Assigned -> Just Assigned
+          _ | (pr >>= (.checks)) == Just P.ChecksFailed -> Just ChecksFailed
+            | otherwise -> Nothing
+    checks state = case state of
+      P.ChecksPassed -> (Success, "Passed")
+      P.ChecksFailed -> (Danger, "Failed")
+      P.ChecksRunning -> (Warning, "Running")
+    review state = case state of
+      P.AwaitingReview -> (Warning, "Requested")
+      P.Approved -> (Success, "Approved")
+      P.ChangesRequested -> (Danger, "Changes requested")
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
@@ -337,12 +396,12 @@ sample =
   , issue Forge.GitHub "abdivasiyev/usta" 4 "Support GitLab merge request discussions" Assigned False "Mon"
   ]
   where
-    pr f r num t why new' ago br op ch rv cs =
-      Notification PullRequest f (hostOf f) r num t why new' ago (Just br) op ch rv cs
-    merged f r num t ago =
-      Notification MergedPullRequest f (hostOf f) r num t WasMerged False ago Nothing ("merged " <> ago <> " ago") Nothing Nothing []
-    issue f r num t why new' ago =
-      Notification Issue f (hostOf f) r num t why new' ago Nothing ("opened " <> ago <> " ago") Nothing Nothing []
+    pr f r num t why new' age br op ch rv cs =
+      Notification PullRequest f (hostOf f) r num t (Just why) new' age (Just br) op ch rv cs
+    merged f r num t age =
+      Notification MergedPullRequest f (hostOf f) r num t (Just WasMerged) False age Nothing ("merged " <> age <> " ago") Nothing Nothing []
+    issue f r num t why new' age =
+      Notification Issue f (hostOf f) r num t (Just why) new' age Nothing ("opened " <> age <> " ago") Nothing Nothing []
     hostOf f = case f of
       Forge.GitHub -> "github.com"
       Forge.GitLab -> "gitlab.com"

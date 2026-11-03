@@ -1,19 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Times as the pages show them: "5 min ago" for the last week, then the
--- date.
+-- | Times as the pages show them: "5 min ago" in sentences, "5m" in list
+-- columns; the date once they are a week old.
 module Usta.UI.Format
   ( Clock (..)
   , clock
   , ago
+  , short
   ) where
 
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time
-  ( TimeZone
+  ( Day
+  , TimeZone
   , UTCTime
+  , addDays
   , defaultTimeLocale
   , diffUTCTime
   , formatTime
@@ -42,14 +45,39 @@ ago c time
   | minutes < 60 = count minutes "min" "min"
   | hours < 24 = count hours "hour" "hours"
   | days < 7 = count days "day" "days"
-  | year time == year c.now = date "%b %-d"
-  | otherwise = date "%b %-d, %Y"
+  | otherwise = date c time
   where
-    seconds = floor (diffUTCTime c.now time) :: Int
-    minutes = seconds `div` 60
-    hours = minutes `div` 60
-    days = hours `div` 24
+    (minutes, hours, days) = elapsed c time
     count n one many = T.pack (show n) <> " " <> (if n == 1 then one else many) <> " ago"
-    year t = let (y, _, _) = toGregorian (local t) in y
-    local t = localDay (utcToLocalTime c.zone t)
-    date format = T.pack (formatTime defaultTimeLocale format (utcToLocalTime c.zone time))
+
+-- | 'ago' for a list column: "5m", "3h", "Yesterday", "Mon", then the date.
+short :: Clock -> UTCTime -> Text
+short c time
+  | minutes < 1 = "now"
+  | minutes < 60 = T.pack (show minutes) <> "m"
+  | hours < 24 = T.pack (show hours) <> "h"
+  | day c time == addDays (-1) (day c c.now) = "Yesterday"
+  | days < 7 = local c "%a" time
+  | otherwise = date c time
+  where
+    (minutes, hours, days) = elapsed c time
+
+-- | Whole minutes, hours and days from a time to the clock.
+elapsed :: Clock -> UTCTime -> (Int, Int, Int)
+elapsed c time = (minutes, minutes `div` 60, minutes `div` (60 * 24))
+  where
+    minutes = floor (diffUTCTime c.now time) `div` 60
+
+-- | "Oct 29", with the year when it is not the clock's.
+date :: Clock -> UTCTime -> Text
+date c time
+  | year time == year c.now = local c "%b %-d" time
+  | otherwise = local c "%b %-d, %Y" time
+  where
+    year t = let (y, _, _) = toGregorian (day c t) in y
+
+day :: Clock -> UTCTime -> Day
+day c t = localDay (utcToLocalTime c.zone t)
+
+local :: Clock -> String -> UTCTime -> Text
+local c format t = T.pack (formatTime defaultTimeLocale format (utcToLocalTime c.zone t))

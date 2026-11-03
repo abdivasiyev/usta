@@ -35,6 +35,7 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Markdown as Markdown
+import Usta.UI.Pages.RepositoryFiles (relativeTo)
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Skeleton as Skeleton
@@ -121,8 +122,9 @@ data Actions = Actions
   , chooseMirror :: ChooseMirror
   , lookUpOrigins :: LookUpOrigins
   , loadContents :: LoadContents
-  , files :: Repository -> IO Gtk.Widget
-    -- ^ The Files tab, built the first time it is chosen.
+  , files :: Repository -> Maybe Text -> IO Gtk.Widget
+    -- ^ The Files tab, built the first time it is chosen, or again to
+    -- open a file or folder a README links to.
   }
 
 new :: Actions -> [Repository] -> IO (Page Repository)
@@ -205,7 +207,6 @@ new actions repositories = do
     }
   where
     key r = (r.host, r.name)
-    clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
 
 -- | The Overview and Files tabs over the one chosen; @onFiles@ runs with
 -- whether Files is the tab shown.
@@ -219,7 +220,9 @@ repositoryDetail actions r onFiles = do
                             , #transitionDuration := 150
                             ]
   overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
-  overview actions r >>= \o -> GI.set overviewScroll [#child := o]
+  -- The README's links to files open them in the Files tab, once it exists.
+  openFiles <- newIORef (const (pure ()))
+  overview actions r (\path -> readIORef openFiles >>= ($ path)) >>= \o -> GI.set overviewScroll [#child := o]
   void $ Gtk.stackAddNamed stack overviewScroll (Just "overview")
   filesSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
   void $ Gtk.stackAddNamed stack filesSlot (Just "files")
@@ -233,7 +236,7 @@ repositoryDetail actions r onFiles = do
           done <- readIORef built
           when (not done) $ do
             writeIORef built True
-            actions.files r >>= #append filesSlot
+            actions.files r Nothing >>= #append filesSlot
         onFiles (name == "files")
         Gtk.stackSetVisibleChildName stack name
     #append tabs b
@@ -241,9 +244,18 @@ repositoryDetail actions r onFiles = do
   case buttons of
     first : rest -> forM_ rest $ \b -> GI.set b [#group := first]
     [] -> pure ()
+  writeIORef openFiles $ \path -> do
+    clear filesSlot
+    writeIORef built True
+    actions.files r (Just path) >>= #append filesSlot
+    forM_ (drop 1 buttons) $ \b -> GI.set b [#active := True]
   #append box tabs
   #append box stack
   pure box
+
+-- | Removes everything in @box@.
+clear :: Gtk.Box -> IO ()
+clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
 
 -- | Case-insensitive match on the name or host; @q@ is already lowercase.
 matches :: Text -> Repository -> Bool
@@ -267,8 +279,9 @@ counts r =
   where
     plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
 
-overview :: Actions -> Repository -> IO Gtk.Box
-overview actions r = do
+-- | @follow@ opens a path the README links to.
+overview :: Actions -> Repository -> (Text -> IO ()) -> IO Gtk.Box
+overview actions r follow = do
   pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #cssClasses := ["u-repo"]
@@ -320,7 +333,7 @@ overview actions r = do
   contents <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 20]
   #append pane contents
   if not (null r.recentCommits && T.null r.readme)
-    then sections r Contents {commits = r.recentCommits, readme = Just ("README.md", r.readme)} contents
+    then sections r follow Contents {commits = r.recentCommits, readme = Just ("README.md", r.readme)} contents
     else do
       Skeleton.block 120 >>= #append contents
       void $ forkIO $ do
@@ -330,16 +343,15 @@ overview actions r = do
           clear contents
           Skeleton.appear contents
           case result of
-            Right c -> sections r c contents
+            Right c -> sections r follow c contents
             Left message -> label message ["muted"] >>= #append contents
           pure False
   pure pane
   where
-    clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
 
 -- | The recent commits and README sections, into @into@.
-sections :: Repository -> Contents -> Gtk.Box -> IO ()
-sections r c into = do
+sections :: Repository -> (Text -> IO ()) -> Contents -> Gtk.Box -> IO ()
+sections r follow c into = do
   when (not (null c.commits)) $ do
     section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
     Card.sectionTitle ("Recent commits on " <> r.defaultBranch) >>= #append section
@@ -365,7 +377,7 @@ sections r c into = do
       Gtk.widgetAddCssClass card "readme"
       -- A README in Markdown is rendered; any other is shown as written.
       body <- if any (`T.isSuffixOf` T.toLower name) [".md", ".markdown"] || T.toLower name == "readme"
-        then Markdown.new text
+        then Markdown.newIn (mapM_ follow . relativeTo name) text
         else label text ["mono"] >>= \l -> GI.set l [#wrap := True, #selectable := True] >> Gtk.toWidget l
       #append card body
       #append section card

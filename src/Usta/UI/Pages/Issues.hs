@@ -29,6 +29,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
+import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Format (Clock, ago, short)
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Involvement (Involvement (..))
@@ -84,8 +85,9 @@ inTab t i = case t of
 
 -- | @onNew@ runs for "New issue"; @onOpen@ when a row is clicked or
 -- activated with Enter.
-new :: IO () -> (Issue -> IO ()) -> [Issue] -> IO Gtk.Box
+new :: IO () -> (Issue -> IO ()) -> [Issue] -> IO (Page Issue)
 new onNew onOpen issues = do
+  items <- newIORef issues
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 14
                          , #hexpand := True
@@ -105,10 +107,10 @@ new onNew onOpen issues = do
   #append heading newButton
   #append page heading
 
-  let tabText t = case length (filter (inTab t) issues) of
+  let tabText shown t = case length (filter (inTab t) shown) of
         n | n > 0 && t /= ClosedTab -> tabLabel t <> "  " <> T.pack (show n)
         _ -> tabLabel t
-  (tabs, tabButtons) <- Segmented.new (map tabText [minBound ..]) 0
+  (tabs, tabButtons) <- Segmented.new (map (tabText issues) [minBound ..]) 0
   Gtk.widgetAddCssClass tabs "tabs"
 
   filters <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
@@ -128,22 +130,20 @@ new onNew onOpen issues = do
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeNone
                              , #cssClasses := ["u-issue-list"]
                              ]
-  forM_ issues $ \issue -> do
-    row <- GI.new Gtk.ListBoxRow [#activatable := True]
-    content <- issueRow issue
-    GI.set row [#child := content]
-    #append list row
+  refill list issueRow issues
   empty <- GI.new Gtk.Label [#label := "Nothing here", #cssClasses := ["muted", "empty"]]
   Gtk.listBoxSetPlaceholder list (Just empty)
   void $ GI.on list #rowActivated $ \row -> do
     index <- Gtk.listBoxRowGetIndex row
-    onOpen (issues !! fromIntegral index)
+    shown <- readIORef items
+    onOpen (shown !! fromIntegral index)
 
   current <- newIORef AssignedTab
   Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
     tab <- readIORef current
     index <- Gtk.listBoxRowGetIndex row
-    pure (inTab tab (issues !! fromIntegral index))
+    shown <- readIORef items
+    pure (inTab tab (shown !! fromIntegral index))
   forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
     void $ GI.on button #toggled $ do
       active <- GI.get button #active
@@ -160,7 +160,14 @@ new onNew onOpen issues = do
                                       , #valign := Gtk.AlignStart
                                       ]
   #append page scroll
-  pure page
+  pure Page
+    { widget = page
+    , update = \shown -> do
+        writeIORef items shown
+        refill list issueRow shown
+        forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
+          GI.set button [#label := tabText shown tab]
+    }
 
 issueRow :: Issue -> IO Gtk.Box
 issueRow issue = do

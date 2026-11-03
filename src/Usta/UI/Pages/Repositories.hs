@@ -13,7 +13,7 @@ module Usta.UI.Pages.Repositories
   , css
   ) where
 
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -27,6 +27,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
+import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Parse (unparse)
 import qualified Usta.Types.Repository as R
@@ -60,8 +61,11 @@ data Repository = Repository
 
 -- | @onNewIssue@ and @onNewPullRequest@ run for the header buttons, with the
 -- repository shown.
-new :: (Repository -> IO ()) -> (Repository -> IO ()) -> [Repository] -> IO Gtk.Box
+-- | The selected repository stays selected when the list is updated; the
+-- first one is selected when it is gone.
+new :: (Repository -> IO ()) -> (Repository -> IO ()) -> [Repository] -> IO (Page Repository)
 new onNewIssue onNewPullRequest repositories = do
+  items <- newIORef repositories
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
   overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
@@ -69,16 +73,18 @@ new onNewIssue onNewPullRequest repositories = do
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeSingle
                              , #cssClasses := ["u-repo-list"]
                              ]
-  rows <- forM repositories $ \r -> do
-    row <- GI.new Gtk.ListBoxRow [#child GI.:=> repositoryRow r]
-    #append list row
-    pure row
+  refill list repositoryRow repositories
 
-  void $ GI.on list #rowSelected $ \selected ->
-    forM_ selected $ \row -> do
+  selectedKey <- newIORef Nothing
+  void $ GI.on list #rowSelected $ \selected -> case selected of
+    Nothing -> Gtk.scrolledWindowSetChild overviewScroll (Nothing :: Maybe Gtk.Widget)
+    Just row -> do
       index <- Gtk.listBoxRowGetIndex row
-      when (index >= 0 && fromIntegral index < length repositories) $ do
-        content <- overview onNewIssue onNewPullRequest (repositories !! fromIntegral index)
+      shown <- readIORef items
+      when (index >= 0 && fromIntegral index < length shown) $ do
+        let r = shown !! fromIntegral index
+        writeIORef selectedKey (Just (key r))
+        content <- overview onNewIssue onNewPullRequest r
         GI.set overviewScroll [#child := content]
 
   (search, entry) <- SearchField.new SearchField.defaults
@@ -90,7 +96,8 @@ new onNewIssue onNewPullRequest repositories = do
   Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
     q <- readIORef query
     index <- Gtk.listBoxRowGetIndex row
-    pure (matches q (repositories !! fromIntegral index))
+    shown <- readIORef items
+    pure (matches q (shown !! fromIntegral index))
   void $ GI.on entry #searchChanged $ do
     text <- Gtk.editableGetText entry
     writeIORef query (T.toLower text)
@@ -114,8 +121,23 @@ new onNewIssue onNewPullRequest repositories = do
   #append page listPane
   #append page overviewScroll
 
-  forM_ (take 1 rows) $ Gtk.listBoxSelectRow list . Just
-  pure page
+  let select = do
+        shown <- readIORef items
+        wanted <- readIORef selectedKey
+        let index = maybe 0 (\k -> length (takeWhile ((/= k) . key) shown)) wanted
+            at = if index < length shown then index else 0
+        row <- Gtk.listBoxGetRowAtIndex list (fromIntegral at)
+        Gtk.listBoxSelectRow list row
+  select
+  pure Page
+    { widget = page
+    , update = \shown -> do
+        writeIORef items shown
+        refill list repositoryRow shown
+        select
+    }
+  where
+    key r = (r.host, r.name)
 
 -- | Case-insensitive match on the name or host; @q@ is already lowercase.
 matches :: Text -> Repository -> Bool

@@ -210,6 +210,41 @@ Dark screens use the same layouts with the dark token values.
 
     ![New issue](design/new-issue.png)
 
+### Writing and discussing
+
+15. **Markdown editor.** Every Markdown box (comments, descriptions,
+    replies, review summaries) has Write and Preview and a toolbar:
+    heading, bold, italic, code, link, quote, lists, task list, code
+    block, Mermaid block, emoji and attach. Each button wraps the
+    selection, or inserts a placeholder and selects it. The emoji picker
+    (`Ctrl .`) searches, groups by category and keeps recently used ones;
+    typing `:` and two letters offers shortcodes as you type (`:smile:`
+    becomes 😄). Pasted, dropped or attached images upload to the forge
+    with their progress under the text. Unsent text is kept as a draft per
+    issue, pull request and review, through refreshes and restarts.
+
+    ![Markdown editor](design/markdown-editor.png)
+
+16. **Diagrams.** Mermaid diagrams show zoom out, percentage, zoom in, fit
+    and fullscreen on hover or focus. `Ctrl` + scroll and pinch zoom
+    around the pointer; dragging pans. Fullscreen fits the diagram to the
+    window with a minimap, and `←` / `→` move to the document's other
+    diagrams; `Esc` closes.
+
+    ![Diagram zoom and fullscreen](design/diagram-tools.png)
+
+17. **Editing, reactions and timeline.** Your own comments and
+    descriptions have Edit, Quote reply, Copy link and Delete in their
+    ⋯ menu; an edit happens in place, and edited comments say so. Titles
+    edit in place with the pencil. Reactions sit under each comment and
+    toggle with one click. Timeline events (labels, assignments,
+    references, renames, closes) sit between the comments, and linked
+    pull requests or issues show in the sidebar. **Subscribed** in the
+    header switches between every activity, only when participating, and
+    muted.
+
+    ![Editing, reactions and timeline](design/conversation-editing.png)
+
 ## Loading states
 
 Cached data always shows first. Loading UI appears only when there is

@@ -92,13 +92,14 @@ new now account = do
         , F.discussion = \repo n -> do
             failIfTold ref
             s <- readIORef ref
-            let opened = [(i.author, i.createdAt, i.closedAt /= Nothing) | i <- s.issues, i.ref.repo == repo, i.ref.number == n]
-                  <> [(p.author, p.createdAt, p.state `elem` [P.Merged, P.Closed]) | p <- s.pullRequests, p.ref.repo == repo, p.ref.number == n]
+            let opened = [(i.author, i.createdAt, i.closedAt /= Nothing, False) | i <- s.issues, i.ref.repo == repo, i.ref.number == n]
+                  <> [(p.author, p.createdAt, p.state `elem` [P.Merged, P.Closed], p.state == P.Merged) | p <- s.pullRequests, p.ref.repo == repo, p.ref.number == n]
             case opened of
-              (author, at, closed) : _ -> pure D.Discussion
+              (author, at, closed, merged) : _ -> pure D.Discussion
                 { D.opening = D.Comment {D.author = author, D.body = "", D.createdAt = at}
                 , D.comments = []
                 , D.closed = closed
+                , D.merged = merged
                 , D.assignees = []
                 , D.labels = []
                 , D.milestone = Nothing

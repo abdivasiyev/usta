@@ -40,6 +40,7 @@ executable usta
     Usta.DB.SyncCursor
     Usta.Details
     Usta.Diagram
+    Usta.Diagram.C4
     Usta.Diagram.Class
     Usta.Diagram.Entity
     Usta.Diagram.Flowchart

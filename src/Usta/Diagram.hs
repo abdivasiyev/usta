@@ -15,6 +15,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 
+import qualified Usta.Diagram.C4 as C4
 import qualified Usta.Diagram.Class as Class
 import qualified Usta.Diagram.Entity as Entity
 import qualified Usta.Diagram.Flowchart as Flowchart
@@ -58,6 +59,7 @@ data Kind
   | Packet Packet.Packet
   | Treemap Treemap.Treemap
   | Requirement Requirement.Requirements
+  | C4 C4.C4
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -94,6 +96,7 @@ parse source = do
         w | w `elem` ["packet", "packet-beta"] -> Packet <$> Packet.parse (T.unlines meaningful)
         w | w `elem` ["treemap", "treemap-beta"] -> Treemap <$> Treemap.parse (T.unlines meaningful)
         "requirementdiagram" -> Requirement <$> Requirement.parse (T.unlines meaningful)
+        w | w `elem` ["c4context", "c4container", "c4component", "c4dynamic", "c4deployment"] -> C4 <$> C4.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -134,6 +137,7 @@ draw measure d = do
     Packet p -> Packet.draw measure p
     Treemap t -> Treemap.draw measure t
     Requirement r -> Requirement.draw measure r
+    C4 c -> C4.draw measure c
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

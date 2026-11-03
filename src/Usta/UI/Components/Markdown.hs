@@ -4,6 +4,11 @@
 -- | Markdown as native widgets: GitHub-flavored (tables, strikethrough,
 -- autolinks, task lists) through cmark-gfm. Code blocks are highlighted
 -- like files; links with a scheme open in the browser.
+--
+-- Raw HTML is shown as forges show it, within the safe part they allow:
+-- inline styling (b, i, s, u, sub, sup, small, mark, code, kbd, br, a,
+-- img), and blocks (details with a summary, centred p and div, h1 to h6,
+-- hr). Other tags are left out, never shown as text.
 module Usta.UI.Components.Markdown
   ( Follow
   , new
@@ -11,8 +16,9 @@ module Usta.UI.Components.Markdown
   , css
   ) where
 
-import Control.Monad (forM_, void)
-import Data.Char (isAlphaNum)
+import Control.Exception (SomeException, try)
+import Control.Monad (forM_, void, when)
+import Data.Char (isAlphaNum, isSpace)
 import Data.Kind (Type)
 import CMarkGFM (ListAttributes (..), ListType (..), Node (..), NodeType (..), TableCellAlignment (..), commonmarkToNode, extAutolink, extStrikethrough, extTable)
 import qualified Data.GI.Base as GI
@@ -21,6 +27,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gdk as Gdk
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Mermaid as Mermaid
 import qualified Usta.UI.Highlight as Highlight
@@ -56,28 +63,87 @@ block follow (Node _ kind children) = case kind of
   CODE_BLOCK info code
     | T.toLower (T.strip info) == "mermaid" -> Mermaid.new code
     | otherwise -> codeBlock (T.takeWhile (/= ' ') (T.strip info)) code
-  HTML_BLOCK raw -> text' follow (Highlight.plain (T.stripEnd raw)) ["mono"]
+  HTML_BLOCK raw -> htmlBlock follow raw
   LIST attributes -> list follow attributes children
   TABLE alignments -> table follow alignments children
   _ -> column follow 8 children
 
+-- | The blocks one under another; a <details> opened in one HTML block and
+-- closed in a later one holds the blocks between.
 column :: Follow -> Int -> [Node] -> IO Gtk.Widget
 column follow gap children = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := fromIntegral gap]
-  forM_ children $ \c -> block follow c >>= #append box
+  let go nodes = case nodes of
+        [] -> pure ()
+        Node _ (HTML_BLOCK raw) _ : rest | opens "details" raw && not (closes "details" raw) -> do
+          let (inside, after) = untilClosed (1 :: Int) rest
+          details follow raw inside >>= #append box
+          go after
+        n : rest -> block follow n >>= #append box >> go rest
+      untilClosed depth nodes = case nodes of
+        [] -> ([], [])
+        n@(Node _ (HTML_BLOCK raw) _) : rest
+          | closes "details" raw && depth == 1 -> ([], rest)
+          | closes "details" raw -> first' n (untilClosed (depth - 1) rest)
+          | opens "details" raw -> first' n (untilClosed (depth + 1) rest)
+        n : rest -> first' n (untilClosed depth rest)
+      first' n (a, b) = (n : a, b)
+  go children
   Gtk.toWidget box
+
+-- | A collapsible section: the summary from @raw@, which opened it, and
+-- @inside@ under it.
+details :: Follow -> Text -> [Node] -> IO Gtk.Widget
+details follow raw inside = do
+  let summary = T.strip (fst (T.breakOn "</summary>" (snd (T.breakOn ">" (snd (T.breakOn "<summary" raw))))))
+      title = if T.null summary then "Details" else T.drop 1 summary
+      rest = T.strip (snd (T.breakOn "</summary>" raw))
+  body <- column follow 8 ([Node Nothing (HTML_BLOCK (T.drop 10 rest)) [] | T.length rest > 10] <> inside)
+  GI.set body [#marginStart := 20, #marginTop := 6]
+  expander <- GI.new Gtk.Expander [#useMarkup := True, #label := htmlMarkup title, #child := body, #cssClasses := ["details"]]
+  Gtk.toWidget expander
+
+opens, closes :: Text -> Text -> Bool
+opens tag raw = ("<" <> tag) `T.isInfixOf` T.toLower raw
+closes tag raw = ("</" <> tag <> ">") `T.isInfixOf` T.toLower raw
+
+-- | An HTML block as a paragraph of its inline markup: a heading for h1
+-- to h6, centred when it asks, a rule for hr, nothing for a comment.
+htmlBlock :: Follow -> Text -> IO Gtk.Widget
+htmlBlock follow raw
+  | opens "details" raw = details follow raw []
+  | all isRule ps && any isHr ps = GI.new Gtk.Separator [#orientation := Gtk.OrientationHorizontal] >>= Gtk.toWidget
+  | T.null (T.strip (htmlMarkup raw)) = GI.new Gtk.Box [] >>= Gtk.toWidget
+  | otherwise = do
+      w <- text' follow (htmlMarkup raw) (heading <> ["paragraph"])
+      when centred $ GI.set w [#halign := Gtk.AlignCenter]
+      pure w
+  where
+    ps = pieces raw
+    isHr p = case p of
+      Tag {name = "hr"} -> True
+      _ -> False
+    isRule p = case p of
+      Words w -> T.null (T.strip w)
+      _ -> True
+    heading = concat (take 1 [["heading", n] | Tag {name = n, closing = False} <- ps, n `elem` ["h1", "h2", "h3", "h4", "h5", "h6"]])
+    centred = or [n == "center" || lookup "align" a == Just "center" | Tag {name = n, closing = False, attributes = a} <- ps]
 
 paragraph :: Follow -> [Text] -> [Node] -> IO Gtk.Widget
 paragraph follow classes children = text' follow (foldMap inline children) classes
 
--- | Selectable, wrapping text from Pango markup.
+-- | Selectable, wrapping text from Pango markup; markup that does not
+-- parse, as from HTML left unclosed, shows as its plain text.
 text' :: Follow -> Text -> [Text] -> IO Gtk.Widget
 text' follow markup classes = do
+  -- Links are the label's own markup, which Pango's parser does not know.
+  parsed <- try (Pango.parseMarkup (withoutLinks markup) (-1) '\0')
+  let shown = either (\(_ :: SomeException) -> Highlight.plain (plainOf markup)) (const markup) parsed
   l <- GI.new Gtk.Label [ #xalign := 0
                         , #wrap := True
                         , #selectable := True
                         , #useMarkup := True
-                        , #label := markup
+                        , #label := shown
                         , #cssClasses := classes
                         ]
   links follow l
@@ -103,10 +169,73 @@ inline (Node _ kind children) = case kind of
   STRIKETHROUGH -> "<s>" <> inner <> "</s>"
   LINK url _ -> "<a href=\"" <> Highlight.plain url <> "\">" <> inner <> "</a>"
   IMAGE url _ -> "<a href=\"" <> Highlight.plain url <> "\">" <> (if T.null inner then "image" else inner) <> "</a>"
-  HTML_INLINE raw -> Highlight.plain raw
+  HTML_INLINE raw -> htmlMarkup raw
   _ -> inner
   where
     inner = foldMap inline children
+
+-- | A piece of raw HTML: a tag, with its name in lower case, or the words
+-- between tags.
+type Piece :: Type
+data Piece
+  = Tag {name :: Text, closing :: Bool, attributes :: [(Text, Text)]}
+  | Words Text
+
+pieces :: Text -> [Piece]
+pieces t
+  | T.null t = []
+  | "<!--" `T.isPrefixOf` t = pieces (T.drop 3 (snd (T.breakOn "-->" t)))
+  | "<" `T.isPrefixOf` t = case T.breakOn ">" (T.drop 1 t) of
+      (inner, after) | not (T.null after), Just tag <- tagOf inner -> tag : pieces (T.drop 1 after)
+      _ -> Words "<" : pieces (T.drop 1 t)
+  | otherwise = let (words', rest) = T.breakOn "<" t in Words words' : pieces rest
+  where
+    tagOf inner =
+      let body = T.dropWhileEnd (== '/') (T.strip inner)
+          closing = "/" `T.isPrefixOf` body
+          rest = if closing then T.drop 1 body else body
+          name = T.toLower (T.takeWhile isAlphaNum rest)
+       in if T.null name then Nothing else Just Tag {name = name, closing = closing, attributes = attributesOf (T.drop (T.length name) rest)}
+    attributesOf a = case T.breakOn "=" a of
+      (k, v) | not (T.null v) ->
+        let key = T.toLower (T.takeWhileEnd (not . isSpace) (T.stripEnd k))
+            after = T.stripStart (T.drop 1 v)
+            (value, more) = case T.uncons after of
+              Just (q, r) | q == '"' || q == '\'' -> let (x, y) = T.breakOn (T.singleton q) r in (x, T.drop 1 y)
+              _ -> T.break isSpace after
+         in (key, value) : attributesOf more
+      _ -> []
+
+-- | Raw HTML as Pango markup, keeping the tags forges allow.
+htmlMarkup :: Text -> Text
+htmlMarkup = foldMap one . pieces
+  where
+    one p = case p of
+      Words w -> Highlight.plain (entities w)
+      Tag {name = n, closing = c, attributes = a} -> case n of
+        "br" -> "\n"
+        _ | Just pango <- lookup n simple -> (if c then "</" else "<") <> pango <> ">"
+          | n `elem` ["code", "tt", "samp", "kbd"] -> if c then "</span>" else "<span font_family=\"monospace\" background=\"#8080a0\" bgalpha=\"18%\">"
+          | n == "mark" -> if c then "</span>" else "<span background=\"#FFE58A\" bgalpha=\"70%\">"
+          | n == "a" -> if c then "</a>" else "<a href=\"" <> Highlight.plain (maybe "#" entities (lookup "href" a)) <> "\">"
+          | n == "img" -> "<a href=\"" <> Highlight.plain (maybe "#" entities (lookup "src" a)) <> "\">" <> Highlight.plain (maybe "image" entities (lookup "alt" a)) <> "</a>"
+          | otherwise -> ""
+    simple = [("b", "b"), ("strong", "b"), ("i", "i"), ("em", "i"), ("s", "s"), ("del", "s"), ("strike", "s"), ("u", "u"), ("ins", "u"), ("sub", "sub"), ("sup", "sup"), ("small", "small"), ("big", "big")]
+    entities = T.replace "&nbsp;" "\x00A0" . T.replace "&quot;" "\"" . T.replace "&#39;" "'" . T.replace "&lt;" "<" . T.replace "&gt;" ">" . T.replace "&amp;" "&"
+
+-- | Markup with its <a> tags taken out, the rest as it was.
+withoutLinks :: Text -> Text
+withoutLinks t = case T.breakOn "<a " t of
+  (before, rest) | not (T.null rest) -> T.replace "</a>" "" before <> withoutLinks (T.drop 1 (snd (T.breakOn ">" rest)))
+  _ -> T.replace "</a>" "" t
+
+-- | The text of Pango markup without its tags.
+plainOf :: Text -> Text
+plainOf markup = foldMap one (pieces markup)
+  where
+    one p = case p of
+      Words w -> T.replace "&lt;" "<" (T.replace "&gt;" ">" (T.replace "&amp;" "&" w))
+      Tag {} -> ""
 
 -- | Bullets or numbers; an item starting "[ ]" or "[x]" is a task with a
 -- check box.
@@ -194,4 +323,5 @@ css = mconcat
   , ".u-markdown box.code-bar { padding: 4px 6px 4px 12px; background: var(--window); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }"
   , ".u-markdown box.code-bar button.copy { min-height: 26px; padding: 0 10px; font-size: 12px; }"
   , ".u-markdown label.code { padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }"
+  , ".u-markdown expander.details > title { font-weight: 600; }"
   ]

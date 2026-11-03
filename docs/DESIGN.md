@@ -107,10 +107,29 @@ Dark screens use the same layouts with the dark token values.
 4. **Inbox.** Notifications from all forges with filters All, Unread,
    Participating. Each row: forge dot, repository and number, title,
    reason badge (review requested, checks failed, mentioned, assigned,
-   merged), time. Unread rows are bold. A preview pane shows the selected
-   item with **Open review**, **Mark as done**, **Open in browser**.
+   merged), time. Unread rows are bold. **Mark all done** in the list's
+   toolbar (`Shift E`) marks everything in the current view and filter as
+   done, here and on the forge; a toast offers Undo instead of asking
+   first.
 
    ![Inbox](design/inbox.png)
+
+   Clicking a row, or `j` / `k`, only selects it; `Enter`, a double-click
+   or the Open button opens the page. The preview pane shows, under
+   **Open review**, **Mark as done** and **Open in browser**:
+
+   - why it is in the inbox ("requested your review", "mentioned you"),
+   - the description, rendered as Markdown,
+   - the latest comments, new ones marked, mentions of you highlighted,
+   - for pull requests, the changed files.
+
+   Issues show their labels, comments, assignees and milestone instead of
+   checks and changes. Commits preview their message and files; releases
+   their notes.
+
+   ![Inbox: a pull request selected](design/inbox-preview.png)
+
+   ![Inbox: an issue selected](design/inbox-preview-issue.png)
 
 5. **Search and commands (`Ctrl K`).** One box for everything. Prefixes:
    `pr:`, `is:`, `repo:`, `>` for commands. Shows recent items and commands
@@ -206,7 +225,7 @@ as soon as they are available, and the ones in view render first.
 | Where | Keys |
 |---|---|
 | Everywhere | `Ctrl K` search and commands, `Ctrl R` sync now |
-| Inbox | `j` / `k` move, `Enter` open, `e` done, `s` star, `o` open in browser |
+| Inbox | `j` / `k` move, `Enter` open, `e` done, `Shift E` all done, `s` star, `o` open in browser |
 | Pull request files | `n` / `p` next / previous file, `c` comment on line, `v` mark viewed, `Ctrl Enter` submit review |
 | Palette | `↑` / `↓` move, `Enter` open, `Ctrl Enter` open in browser, `Esc` close |
 | Creating | `Ctrl Shift P` new pull request, `Ctrl Shift I` new issue |

@@ -16,9 +16,11 @@ module Usta.UI.Source
 import Data.Kind (Type)
 import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Database.Persist.Sql (ConnectionPool, toSqlKey)
+import System.Directory (getHomeDirectory)
 
-import Usta.Accounts (Accounts, describe)
+import Usta.Accounts (Accounts, Origins (..), describe)
 import qualified Usta.Accounts as Accounts
 import Usta.Bus (Bus, Change (..), subscribe)
 import Usta.DB (run)
@@ -72,6 +74,9 @@ data Source = Source
   , onMirrorStatus :: IO () -> IO ()
     -- ^ Runs the action on the GTK main thread whenever a mirror's state
     -- changes.
+  , mirrorOrigins :: Text -> Text -> IO (Either Text Repositories.Origins)
+    -- ^ Where a mirror of the repository on a host, by name, would clone
+    -- from; for the mirror dialog.
   }
 
 -- | A signed-in account, as the window names it.
@@ -115,6 +120,7 @@ fromDatabase pool changes statuses sync = Source
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
   , onMirrorStatus = const (pure ())
+  , mirrorOrigins = \_ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -140,6 +146,7 @@ samples = Source
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
   , onMirrorStatus = const (pure ())
+  , mirrorOrigins = \_ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -170,13 +177,35 @@ withMirrors pool accounts mirrors statuses source = source
         | (key, r) <- rows, Just kind <- [kindOf key]
         ]
   , mirror = \host name choice -> do
-      rows <- run pool DB.repositories
-      case [(key, r.name) | (key, r) <- rows, unparse r.host == host, unparse r.name == name] of
-        (key, repo) : _ -> either (Left . describe) Right <$> accounts.mirror key repo choice
-        [] -> pure (Left "That repository is not in the cache any more.")
+      found <- repoOf host name
+      case found of
+        Just (key, repo) -> either (Left . describe) Right <$> accounts.mirror key repo choice
+        Nothing -> pure (Left gone)
+  , mirrorOrigins = \host name -> do
+      found <- repoOf host name
+      case found of
+        Nothing -> pure (Left gone)
+        Just (key, repo) -> do
+          home <- getHomeDirectory
+          root <- Mirrors.defaultRoot
+          let keptIn = maybe (T.pack root) ("~" <>) (T.stripPrefix (T.pack home) (T.pack root))
+          asked <- accounts.origins key repo
+          pure $ case asked of
+            Left problem -> Left (describe problem)
+            Right o -> Right Repositories.Origins
+              { https = either (Left . describe) Right o.https
+              , ssh = either (Left . describe) Right o.ssh
+              , keptIn = keptIn
+              }
   , onMirrorStatus = \act -> subscribe statuses (const act)
   }
   where
+    repoOf host name = do
+      rows <- run pool DB.repositories
+      pure $ case [(key, r.name) | (key, r) <- rows, unparse r.host == host, unparse r.name == name] of
+        found : _ -> Just found
+        [] -> Nothing
+    gone = "That repository is not in the cache any more."
     withState c choice state view = case (choice, state) of
       (Nothing, _) -> view {Repositories.canMirror = True}
       (Just Declined, _) -> view

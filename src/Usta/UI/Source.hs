@@ -16,6 +16,7 @@ module Usta.UI.Source
   ) where
 
 import Control.Exception (IOException, SomeException, displayException, try)
+import Control.Monad (when)
 import Data.ByteString (ByteString)
 import Data.Kind (Type)
 import Data.Maybe (listToMaybe, mapMaybe)
@@ -202,8 +203,11 @@ fromDatabase pool changes statuses sync = Source
   , preferences = Preferences.file >>= Preferences.load
   , setPreferences = \p -> do
       path <- Preferences.file
+      before <- Preferences.load path
       Preferences.save path p
-      sync.setEvery (Preferences.seconds p.interval)
+      -- A new interval makes every account sync at once; a theme or
+      -- notification change is no reason to.
+      when (before.interval /= p.interval) $ sync.setEvery (Preferences.seconds p.interval)
   , setDone = \_ _ -> pure (Left unavailable)
   , signIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)

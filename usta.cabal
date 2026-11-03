@@ -20,6 +20,7 @@ executable usta
     Usta.Bus
     Usta.DB
     Usta.DB.Account
+    Usta.DB.Cache
     Usta.DB.Issue
     Usta.DB.Mirror
     Usta.DB.Notification

@@ -40,6 +40,7 @@
           gi-gdk4
           gi-gio
           gi-glib
+          gi-graphene
           gi-gtk4
           gi-pango
           gi-pangocairo

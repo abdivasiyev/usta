@@ -43,6 +43,7 @@ executable usta
     Usta.Diagram.Flowchart
     Usta.Diagram.Layered
     Usta.Diagram.Scene
+    Usta.Diagram.Sequence
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api

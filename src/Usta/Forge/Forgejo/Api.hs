@@ -519,12 +519,13 @@ instance ToHttpApiData IssueType where
     Pulls -> "pulls"
 
 type IssueState :: Type
-data IssueState = Open | Closed
+data IssueState = Open | Closed | AnyState
 
 instance ToHttpApiData IssueState where
   toQueryParam s = case s of
     Open -> "open"
     Closed -> "closed"
+    AnyState -> "all"
 
 type User :: Type
 newtype User = User {login :: Login}

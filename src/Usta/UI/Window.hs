@@ -99,7 +99,8 @@ buildAt start source app = do
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
       openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
       openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
-      openAddAccount = Gtk.toWidget screens >>= \anchor -> AddAccount.open anchor AddAccount.sample (pure ())
+      openAddAccount = Gtk.toWidget screens >>= \anchor ->
+        AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn (pure ())
       openSettings = Settings.new backToMain openAddAccount (Settings.sample shortcuts) >>= showDetail
 
   -- The palette wraps the whole window, so it exists only further down.
@@ -117,12 +118,14 @@ buildAt start source app = do
   -- The forms open with sample fields until they take the repository.
   repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest)
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
-  accounts <- source.accounts
   states <- newIORef []
   shownPage <- newIORef Sidebar.Inbox
   sidebarSlot <- GI.new Gtk.Box []
+  footerSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  -- Accounts are read at each redraw: signing in or out changes them.
   let liveModel = do
         known <- readIORef states
+        accounts <- source.accounts
         notifications <- source.inbox
         prs <- source.pullRequests
         issues <- source.issues
@@ -156,6 +159,7 @@ buildAt start source app = do
           >>= Gtk.toWidget >>= replaceChild sidebarSlot
       drawSyncChip = do
         known <- readIORef states
+        accounts <- source.accounts
         c <- clock
         let hostOf key = maybe "" (.host) (find ((== key) . (.accountId)) accounts)
             state
@@ -173,10 +177,23 @@ buildAt start source app = do
           Resource.Repositories -> source.repositories >>= repositoryPage.update
         drawSidebar
   source.onChange reload
+  let drawFooter = do
+        footer <- if start == FirstSync
+          then do
+            bar <- Shortcut.bar [] (Just "Fetched 128 notifications")
+            note <- GI.new Gtk.Label [#label := "You can keep working: items open as soon as they are cached."]
+            Gtk.boxPrepend bar note
+            pure bar
+          else do
+            accounts <- source.accounts
+            Shortcut.bar shortcuts (Just (plural (length (nubOrd [a.host | a <- accounts])) "forge" "forges"
+                                            <> " · " <> plural (length accounts) "account" "accounts"))
+        Gtk.toWidget footer >>= replaceChild footerSlot
   source.onStatus $ \status -> do
     modifyIORef' states (\known -> (status.accountId, status.state) : filter ((/= status.accountId) . fst) known)
     drawSyncChip
     drawSidebar
+    drawFooter
   void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $
     mapM_ reload [minBound .. maxBound] >> drawSyncChip >> pure True
   drawSyncChip
@@ -202,19 +219,12 @@ buildAt start source app = do
   #append body pages
   void $ Gtk.stackAddNamed screens body (Just "main")
 
-  footer <- if start == FirstSync
-    then do
-      bar <- Shortcut.bar [] (Just "Fetched 128 notifications")
-      note <- GI.new Gtk.Label [#label := "You can keep working: items open as soon as they are cached."]
-      Gtk.boxPrepend bar note
-      pure bar
-    else Shortcut.bar shortcuts (Just (plural (length (nubOrd [a.host | a <- accounts])) "forge" "forges"
-                                       <> " · " <> plural (length accounts) "account" "accounts"))
+  drawFooter
 
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
   #append root screens
-  #append root footer
+  #append root footerSlot
 
   -- GTK hides the titlebar widget in fullscreen, and ours holds search and
   -- sync. So the header lives in the content, and an empty hidden titlebar
@@ -255,7 +265,7 @@ buildAt start source app = do
   void $ Gtk.stackAddNamed top withPalette (Just "app")
   when (start == FirstRun) $ do
     let connect kind = Gtk.toWidget top >>= \anchor ->
-          AddAccount.open anchor (AddAccount.for kind) (Gtk.stackSetVisibleChildName top "app")
+          AddAccount.open anchor (AddAccount.for kind) source.signIn (Gtk.stackSetVisibleChildName top "app")
     welcome <- Welcome.new connect
     void $ Gtk.stackAddNamed top welcome (Just "welcome")
     Gtk.stackSetVisibleChildName top "welcome"

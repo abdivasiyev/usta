@@ -1,11 +1,15 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Where the window gets what it shows: the lists, as the pages show
 -- them, and word of what changed. 'fromDatabase' reads the cache; 'samples'
--- serves the mock lists, for the first-run previews.
+-- serves the mock lists, for the first-run previews. Neither signs in until
+-- 'withAccounts' gives it the accounts.
 module Usta.UI.Source
   ( Source (..)
   , Connected (..)
   , fromDatabase
   , samples
+  , withAccounts
   ) where
 
 import Data.Kind (Type)
@@ -13,6 +17,8 @@ import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Database.Persist.Sql (ConnectionPool, toSqlKey)
 
+import Usta.Accounts (Accounts, describe)
+import qualified Usta.Accounts as Accounts
 import Usta.Bus (Bus, Change (..), subscribe)
 import Usta.DB (run)
 import Usta.DB.Account (listAccounts)
@@ -24,8 +30,10 @@ import qualified Usta.DB.Repository as DB
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
+import Usta.Types.Host (Host)
 import Usta.Types.Parse (unparse)
 import Usta.Types.Resource (Resource)
+import Usta.Types.Token (Token)
 import Usta.UI.Format (clock)
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Pages.Issues as Issues
@@ -48,6 +56,9 @@ data Source = Source
     -- ^ Likewise for each account's sync state, starting with the last
     -- one each account reported before.
   , syncNow :: IO ()
+  , signIn :: Kind -> Host -> Token -> IO (Either Text ())
+    -- ^ 'Left' says, for the user, why it did not work.
+  , remove :: AccountId -> IO (Either Text ())
   }
 
 -- | A signed-in account, as the window names it.
@@ -86,6 +97,8 @@ fromDatabase pool changes statuses sync = Source
   , onChange = \act -> subscribe changes (act . (.resource))
   , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
   , syncNow = sync.syncNow
+  , signIn = \_ _ _ -> pure (Left unavailable)
+  , remove = \_ -> pure (Left unavailable)
   }
   where
     kinds = do
@@ -103,4 +116,17 @@ samples = Source
   , onChange = const (pure ())
   , onStatus = const (pure ())
   , syncNow = pure ()
+  , signIn = \_ _ _ -> pure (Left unavailable)
+  , remove = \_ -> pure (Left unavailable)
+  }
+
+-- | For the previews and @usta --sample@, which never touch the keyring.
+unavailable :: Text
+unavailable = "Signing in is not available here."
+
+-- | Signs in and out through @accounts@.
+withAccounts :: Accounts -> Source -> Source
+withAccounts accounts source = source
+  { signIn = \kind host token -> either (Left . describe) (const (Right ())) <$> accounts.signIn kind host token
+  , remove = \key -> either (Left . describe) Right <$> accounts.remove key
   }

@@ -37,6 +37,7 @@ executable usta
     Usta.DB.Schema.Repository
     Usta.DB.Schema.SyncCursor
     Usta.DB.SyncCursor
+    Usta.Details
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api

@@ -73,21 +73,22 @@ new image = do
 -- added or deleted image) is left out.
 pair :: Maybe Gdk.Texture -> Maybe Gdk.Texture -> IO Gtk.Widget
 pair before after = do
-  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #homogeneous := True, #cssClasses := ["u-image-pair"]]
+  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #homogeneous := True, #hexpand := True, #cssClasses := ["u-image-pair"]]
   forM_ [(before, "Before", "before"), (after, "After", "after")] $ \(side, caption, kind) ->
     forM_ side $ \image -> do
       column <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["side", "checker"]]
       picture <- GI.new Gtk.Picture [ #paintable := image
                                     , #contentFit := Gtk.ContentFitScaleDown
                                     , #canShrink := True
-                                    , #heightRequest := 200
+                                    , #halign := Gtk.AlignCenter
+                                    , #valign := Gtk.AlignStart
                                     , #cssClasses := ["picture", kind]
                                     ]
       #append column picture
       (w, h) <- size image
       GI.new Gtk.Label [ #label := caption <> " · " <> T.pack (show w) <> " × " <> T.pack (show h)
                        , #xalign := 0
-                       , #halign := Gtk.AlignStart
+                       , #halign := Gtk.AlignCenter
                        , #cssClasses := ["caption", kind]
                        ] >>= #append column
       #append box column

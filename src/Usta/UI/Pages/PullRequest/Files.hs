@@ -23,7 +23,9 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.ByteString (ByteString)
 import Data.Kind (Type)
+import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.GLib as GLib
@@ -38,6 +40,7 @@ import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Diff as Diff
 import Usta.UI.Components.Diff (Line (..))
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.ImageView as ImageView
 import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
@@ -67,6 +70,9 @@ data Model = Model
   , reviewers :: [(Tone, Text, Text)]
     -- ^ Status, name, state.
   , approvalsNeeded :: Int
+  , images :: [(Text, (Maybe Text, Maybe Text))]
+    -- ^ By shown path, the image files changed: their path before (none
+    -- when added) and after (none when deleted).
   }
 
 -- | What the review panel does. Both run off the main thread; a 'Left' is
@@ -77,6 +83,8 @@ data Actions = Actions
     -- ^ Submits the review; the panel then says so and empties.
   , merge :: IO (Either Text ())
     -- ^ Squash and merge; 'refresh' runs after.
+  , version :: Bool -> Text -> IO (Either Text ByteString)
+    -- ^ A file as it was before the pull request ('True') or is in it.
   , refresh :: IO ()
   }
 
@@ -137,8 +145,25 @@ new actions m = do
     attached <- forM comments $ \c -> do
       w <- thread c >>= Gtk.toWidget
       pure (c.onLine, w)
+    -- An image shows before and after under its "Binary file" line.
+    pictures <- forM (lookup f.path m.images) $ \(before, after) -> do
+      slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+      Skeleton.block 120 >>= #append slot
+      void $ forkIO $ do
+        let load old = maybe (pure Nothing) (fmap (either (const Nothing) Just) . actions.version old)
+        olds <- load True before
+        news <- load False after
+        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+          old <- maybe (pure Nothing) ImageView.texture olds
+          new' <- maybe (pure Nothing) ImageView.texture news
+          Gtk.widgetGetFirstChild slot >>= mapM_ (Gtk.boxRemove slot)
+          if isNothing old && isNothing new'
+            then label "The image could not be loaded." ["muted", "small"] >>= #append slot
+            else ImageView.pair old new' >>= #append slot
+          pure False
+      (,) 0 <$> Gtk.toWidget slot
     markBox <- viewedMark f.viewed
-    diff <- Diff.new f attached $ \isViewed -> do
+    diff <- Diff.new f (attached <> maybe [] pure pictures) $ \isViewed -> do
       setViewed markBox isViewed
       updateProgress
     #append main diff
@@ -523,7 +548,20 @@ fromFileDiffs source changes = Model
   , checks = []
   , reviewers = []
   , approvalsNeeded = 0
+  , images =
+      [ ((fromFileDiff f).path, (before f, after f))
+      | f <- changes, f.binary, isImage f.path
+      ]
   }
+  where
+    before f = case f.change of
+      D.Added -> Nothing
+      D.Renamed {from = old} -> Just old
+      _ -> Just f.path
+    after f = case f.change of
+      D.Deleted -> Nothing
+      _ -> Just f.path
+    isImage path = any (`T.isSuffixOf` T.toLower path) [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg"]
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
@@ -560,6 +598,7 @@ sample = Model
   , checks = [(True, "nix build", "3m 24s")]
   , reviewers = [(Warning, "abdivasiyev", "awaiting")]
   , approvalsNeeded = 1
+  , images = []
   }
 
 css :: Text

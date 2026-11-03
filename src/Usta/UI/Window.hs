@@ -85,6 +85,7 @@ buildAt start source app = do
   -- Two screens: "main" (sidebar and pages) and "detail" (a full-width
   -- screen such as one pull request or the new pull request form).
   screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
+  states <- newIORef []
   let backToMain = Gtk.stackSetVisibleChildName screens "main"
       showDetail :: Gtk.Widget -> IO ()
       showDetail widget = do
@@ -99,9 +100,28 @@ buildAt start source app = do
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
       openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
       openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
-      openAddAccount = Gtk.toWidget screens >>= \anchor ->
-        AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn (pure ())
-      openSettings = Settings.new backToMain openAddAccount (Settings.sample shortcuts) >>= showDetail
+      addAccountThen after = Gtk.toWidget screens >>= \anchor ->
+        AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn after
+      openAddAccount = addAccountThen (pure ())
+      -- The accounts are real; the other sections are sample settings for now.
+      openSettings = do
+        known <- readIORef states
+        accounts <- source.accounts
+        anchor <- Gtk.toWidget screens
+        let row a = Settings.Account
+              { Settings.forge = a.forge
+              , Settings.host = a.host
+              , Settings.user = a.login
+              , Settings.auth = Settings.AccessToken
+              , Settings.connected = lookup a.accountId known /= Just (Sync.Failed Forge.SignedOut)
+              , Settings.onRemove = source.remove a.accountId
+                  >>= either (Settings.notice anchor "The account was not removed") (const openSettings)
+              , Settings.onReauthenticate =
+                  AddAccount.open anchor (AddAccount.for a.forge) {AddAccount.server = "https://" <> a.host}
+                    source.signIn openSettings
+              }
+            model = (Settings.sample shortcuts) {Settings.accounts = map row accounts}
+        Settings.new backToMain (addAccountThen openSettings) model >>= showDetail
 
   -- The palette wraps the whole window, so it exists only further down.
   paletteOpener <- newIORef (pure ())
@@ -118,7 +138,6 @@ buildAt start source app = do
   -- The forms open with sample fields until they take the repository.
   repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest)
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
-  states <- newIORef []
   shownPage <- newIORef Sidebar.Inbox
   sidebarSlot <- GI.new Gtk.Box []
   footerSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
@@ -161,10 +180,11 @@ buildAt start source app = do
         known <- readIORef states
         accounts <- source.accounts
         c <- clock
-        let hostOf key = maybe "" (.host) (find ((== key) . (.accountId)) accounts)
+        -- A removed account's last status no longer counts.
+        let hostOf key = (.host) <$> find ((== key) . (.accountId)) accounts
             state
               | start == FirstSync = SyncStatus.Syncing "github.com"
-              | otherwise = headline c [(hostOf key, s) | (key, s) <- known]
+              | otherwise = headline c [(host, s) | (key, s) <- known, Just host <- [hostOf key]]
         SyncStatus.new state source.syncNow >>= Gtk.toWidget >>= replaceChild syncChip
       reload resource = do
         case resource of
@@ -176,7 +196,6 @@ buildAt start source app = do
           Resource.Issues -> source.issues >>= issuePage.update
           Resource.Repositories -> source.repositories >>= repositoryPage.update
         drawSidebar
-  source.onChange reload
   let drawFooter = do
         footer <- if start == FirstSync
           then do
@@ -189,6 +208,8 @@ buildAt start source app = do
             Shortcut.bar shortcuts (Just (plural (length (nubOrd [a.host | a <- accounts])) "forge" "forges"
                                             <> " · " <> plural (length accounts) "account" "accounts"))
         Gtk.toWidget footer >>= replaceChild footerSlot
+  -- Signing in or out changes the lists and the accounts at once.
+  source.onChange $ \resource -> reload resource >> drawSyncChip >> drawFooter
   source.onStatus $ \status -> do
     modifyIORef' states (\known -> (status.accountId, status.state) : filter ((/= status.accountId) . fst) known)
     drawSyncChip

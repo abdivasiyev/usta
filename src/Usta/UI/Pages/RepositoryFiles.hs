@@ -180,10 +180,14 @@ treeRow :: Bool -> Bool -> Entry -> IO Gtk.Box
 treeRow flat expanded e = do
   let depth = if flat then 0 else length (T.splitOn "/" e.path) - 1
       name = if flat then e.path else last (T.splitOn "/" e.path)
-  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6, #marginStart := fromIntegral (12 + 16 * depth)]
-  icon <- GI.new Gtk.Image [ #iconName := case e.kind of
-                               Tree.Folder -> if expanded then "folder-open-symbolic" else "folder-symbolic"
-                               Tree.File -> "text-x-generic-symbolic"
+  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6, #marginStart := fromIntegral (8 + 16 * depth)]
+  -- A folder's chevron says whether it is open; files line up after it.
+  chevron <- GI.new Gtk.Image [ #iconName := if expanded then "pan-down-symbolic" else "pan-end-symbolic"
+                              , #opacity := if e.kind == Tree.Folder && not flat then 1 else 0
+                              , #cssClasses := ["chevron"]
+                              ]
+  #append row chevron
+  icon <- GI.new Gtk.Image [ #iconName := if e.kind == Tree.Folder then "folder-symbolic" else "text-x-generic-symbolic"
                            , #cssClasses := [if e.kind == Tree.Folder then "folder" else "file"]
                            ]
   #append row icon
@@ -199,7 +203,10 @@ fileView place e bytes = do
       content = contentOf e.path bytes
   unless (T.null folder) $ label folder ["mono", "muted"] >>= #append header
   label name ["mono", "strong"] >>= #append header
-  forM_ (Highlight.languageFor (T.unpack e.path)) $ \l -> label (Highlight.languageName l) ["language"] >>= #append header
+  forM_ (Highlight.languageFor (T.unpack e.path)) $ \l -> do
+    badge <- label (Highlight.languageName l) ["language"]
+    GI.set badge [#valign := Gtk.AlignCenter]
+    #append header badge
   facts <- label (T.intercalate " · " (linesOf content <> [size (B.length bytes)])) ["muted"]
   GI.set facts [#hexpand := True]
   #append header facts
@@ -278,6 +285,8 @@ css = mconcat
   , "box.u-files-tab box.viewer { padding: 20px 24px; }"
   , "box.u-files-tab box.file-header { font-size: 13px; }"
   , "box.u-files-tab label.strong { font-weight: 600; }"
+  , "box.u-files-tab image.chevron { color: var(--text-muted); }"
+  , "box.u-files-tab box.file-header > * { margin-top: 0; }"
   , "box.u-files-tab label.language {"
   , "  background: var(--accent-bg); color: var(--accent-soft); padding: 1px 8px; border-radius: 10px; font-size: 12px;"
   , "}"

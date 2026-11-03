@@ -22,7 +22,7 @@ module Usta.UI.Pages.Repositories
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -122,6 +122,8 @@ data Actions = Actions
   , chooseMirror :: ChooseMirror
   , lookUpOrigins :: LookUpOrigins
   , loadContents :: LoadContents
+  , files :: Repository -> IO Gtk.Widget
+    -- ^ The Files tab, built the first time it is chosen.
   }
 
 new :: Actions -> [Repository] -> IO (Page Repository)
@@ -129,24 +131,30 @@ new actions repositories = do
   items <- newIORef repositories
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
-  overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
+  detail <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
 
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeSingle
                              , #cssClasses := ["u-repo-list"]
                              ]
   refill list repositoryRow repositories
 
+  listPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                             , #widthRequest := 288
+                             , #hexpand := False
+                             , #cssClasses := ["u-repo-pane"]
+                             ]
   selectedKey <- newIORef Nothing
   void $ GI.on list #rowSelected $ \selected -> case selected of
-    Nothing -> Gtk.scrolledWindowSetChild overviewScroll (Nothing :: Maybe Gtk.Widget)
+    Nothing -> clear detail
     Just row -> do
       index <- Gtk.listBoxRowGetIndex row
       shown <- readIORef items
       when (index >= 0 && fromIntegral index < length shown) $ do
         let r = shown !! fromIntegral index
         writeIORef selectedKey (Just (key r))
-        content <- overview actions r
-        GI.set overviewScroll [#child := content]
+        clear detail
+        -- The Files tab takes the list's room, as the design draws it.
+        repositoryDetail actions r (\inFiles -> GI.set listPane [#visible := not inFiles]) >>= #append detail
 
   (search, entry) <- SearchField.new SearchField.defaults
     { SearchField.placeholder = "Filter repositories"
@@ -171,16 +179,11 @@ new actions repositories = do
                                           , #vexpand := True
                                           , #hscrollbarPolicy := Gtk.PolicyTypeNever
                                           ]
-  listPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                             , #widthRequest := 288
-                             , #hexpand := False
-                             , #cssClasses := ["u-repo-pane"]
-                             ]
   #append listPane searchBar
   #append listPane listScroll
 
   #append page listPane
-  #append page overviewScroll
+  #append page detail
 
   let select = do
         shown <- readIORef items
@@ -199,6 +202,41 @@ new actions repositories = do
     }
   where
     key r = (r.host, r.name)
+    clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
+
+-- | The Overview and Files tabs over the one chosen; @onFiles@ runs with
+-- whether Files is the tab shown.
+repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO Gtk.Box
+repositoryDetail actions r onFiles = do
+  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+  tabs <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
+  stack <- GI.new Gtk.Stack [#vexpand := True, #hexpand := True]
+  overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
+  overview actions r >>= \o -> GI.set overviewScroll [#child := o]
+  void $ Gtk.stackAddNamed stack overviewScroll (Just "overview")
+  filesSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
+  void $ Gtk.stackAddNamed stack filesSlot (Just "files")
+  built <- newIORef False
+  buttons <- forM [("Overview", "overview"), ("Files", "files")] $ \(text, name) -> do
+    b <- GI.new Gtk.ToggleButton [#label := text, #active := name == "overview"]
+    void $ GI.on b #toggled $ do
+      active <- GI.get b #active
+      when active $ do
+        when (name == "files") $ do
+          done <- readIORef built
+          when (not done) $ do
+            writeIORef built True
+            actions.files r >>= #append filesSlot
+        onFiles (name == "files")
+        Gtk.stackSetVisibleChildName stack name
+    #append tabs b
+    pure b
+  case buttons of
+    first : rest -> forM_ rest $ \b -> GI.set b [#group := first]
+    [] -> pure ()
+  #append box tabs
+  #append box stack
+  pure box
 
 -- | Case-insensitive match on the name or host; @q@ is already lowercase.
 matches :: Text -> Repository -> Bool
@@ -569,8 +607,15 @@ sample =
 
 css :: Text
 css = mconcat
+  -- Underlined tabs, as on a pull request.
+  [ "box.repo-tabs { padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--border); }"
+  , "box.repo-tabs button {"
+  , "  min-height: 44px; padding: 0 12px; border: none; border-radius: 0; background: none;"
+  , "  box-shadow: none; color: var(--text-soft);"
+  , "}"
+  , "box.repo-tabs button:checked { color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }"
   -- The add-account dialog's look, which this one follows.
-  [ "window.u-mirror headerbar {"
+  , "window.u-mirror headerbar {"
   , "  background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: none;"
   , "}"
   , "window.u-mirror headerbar label.title { font-size: 15px; font-weight: 600; }"

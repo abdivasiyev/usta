@@ -53,6 +53,8 @@ import qualified Usta.UI.Pages.PullRequest.Files as Files
 import qualified Usta.UI.Components.Diff as Diff
 import qualified Usta.UI.Pages.PullRequests as PullRequests
 import qualified Usta.UI.Pages.Repositories as Repositories
+import qualified Usta.UI.Pages.RepositoryFiles as RepositoryFiles
+import qualified Usta.UI.Components.CodeView as CodeView
 import qualified Usta.UI.Pages.Settings as Settings
 import qualified Usta.UI.Pages.Welcome as Welcome
 import qualified Usta.UI.Platform as Platform
@@ -273,6 +275,12 @@ buildAt start source app = do
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
     , loadContents = loadContents
+    , files = \r -> RepositoryFiles.new RepositoryFiles.Actions
+        { loadTree = fmap (\(from, es) -> (said from "From the local mirror" "From the forge's API", es))
+            <$> source.tree r.host r.name r.defaultBranch
+        , loadFile = \p -> fmap snd <$> source.file r.host r.name r.defaultBranch p
+        }
+        RepositoryFiles.Place {forge = r.forge, host = r.host, repo = r.name, branch = r.defaultBranch}
     }
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
   source.onMirrorStatus (source.repositories >>= repositoryPage.update)
@@ -707,7 +715,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

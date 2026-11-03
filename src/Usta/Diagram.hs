@@ -16,12 +16,14 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import qualified Usta.Diagram.Flowchart as Flowchart
+import qualified Usta.Diagram.Sequence as Sequence
 import Usta.Diagram.Scene
 import qualified Usta.Mermaid as Mermaid
 
 type Kind :: Type
 data Kind
   = Flowchart Mermaid.Flowchart
+  | Sequence Sequence.Sequence
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -40,6 +42,7 @@ parse source = do
       let word = T.toLower (T.takeWhile (\c -> c /= ' ' && c /= ';') (T.strip header))
       kind <- case word of
         w | w `elem` ["graph", "flowchart"] -> Flowchart <$> Mermaid.parse (T.unlines meaningful)
+        "sequencediagram" -> Sequence <$> Sequence.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -62,6 +65,7 @@ draw :: Monad m => Measure m -> Diagram -> m Scene
 draw measure d = do
   body <- case d.kind of
     Flowchart chart -> Flowchart.draw measure chart
+    Sequence s -> Sequence.draw measure s
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

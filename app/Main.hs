@@ -66,7 +66,7 @@ cache = do
     changes <- newBus
     statuses <- newBus
     sync <- Sync.start Sync.Settings {pool = pool, changes = changes, statuses = statuses, every = 60} []
-    _ <- Accounts.connect Accounts.Settings
+    accounts <- Accounts.connect Accounts.Settings
       { manager = manager
       , keyring = Keyring.system
       , pool = pool
@@ -74,7 +74,7 @@ cache = do
       , sync = sync
       , forgejoApi = \host -> apiUrl host "/api/v1"
       }
-    let source = Source.fromDatabase pool changes statuses sync
+    let source = Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync)
         start = if null saved then Window.FirstRun else Window.Ready
     runApp (void . Window.buildAt start source)
 

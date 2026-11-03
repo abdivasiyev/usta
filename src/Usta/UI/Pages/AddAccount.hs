@@ -9,10 +9,13 @@ module Usta.UI.Pages.AddAccount
   , for
   , Server (..)
   , parseServer
+  , SignIn
   , open
   , css
   ) where
 
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -20,6 +23,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Button as Button
@@ -28,6 +32,9 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Platform as Platform
 import Usta.UI.Style (Tone (..))
+import Usta.Types.Host (Host)
+import Usta.Types.Parse (parse)
+import Usta.Types.Token (Token)
 
 type Model :: Type
 data Model = Model
@@ -45,11 +52,13 @@ sample = Model
   , reachable = ["github.com", "gitlab.com", "git.azizovich.uz"]
   }
 
--- | The dialog with @kind@ selected and its usual server filled in.
+-- | The dialog with @kind@ selected and its usual server filled in;
+-- Forgejo servers have none, so that one starts empty.
 for :: Forge.Kind -> Model
-for kind = sample
+for kind = Model
   { forge = kind
-  , server = if kind == Forge.Forgejo then sample.server else defaultServer kind
+  , server = defaultServer kind
+  , reachable = []
   }
 
 -- | A forge server, parsed from what was typed.
@@ -90,10 +99,15 @@ scopes kind = case kind of
   Forge.GitLab -> ["api", "read_user"]
   Forge.Forgejo -> ["read:user", "read:repository", "write:issue", "read:notification"]
 
--- | Opens the dialog over the window that @anchor@ is in; @onAdded@ runs
--- after "Add account".
-open :: Gtk.Widget -> Model -> IO () -> IO ()
-open anchor m onAdded = do
+-- | Signs in with a token: 'Left' says why it did not work. Runs off the
+-- GTK main thread, since it asks the forge.
+type SignIn :: Type
+type SignIn = Forge.Kind -> Host -> Token -> IO (Either Text ())
+
+-- | Opens the dialog over the window that @anchor@ is in. "Add account"
+-- runs @signInWith@; @onAdded@ runs once it worked, with the dialog closed.
+open :: Gtk.Widget -> Model -> SignIn -> IO () -> IO ()
+open anchor m signInWith onAdded = do
   root <- Gtk.widgetGetRoot anchor
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
 
@@ -183,12 +197,39 @@ open anchor m onAdded = do
   cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
   add <- Button.new Button.defaults { Button.label = Just "Add account", Button.variant = Button.Primary }
   void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
-  -- Adding closes the dialog for now; signing in needs the forge client.
-  void $ GI.on add #clicked (Gtk.windowDestroy dialog >> onAdded)
   #append footer cancel
   #append footer add
 
+  -- Browser sign-in needs an app registered with each forge.
+  GI.set (methodButtons !! 1) [#sensitive := False, #tooltipText := "Comes later; use an access token for now"]
+
   selected <- newIORef m.forge
+  let showProblem problem = do
+        GI.set status [#visible := True]
+        GI.set statusIcon [#visible := False]
+        GI.set statusText [#label := problem, #cssClasses := ["status", "problem"]]
+      checking busy = GI.set add
+        [ #sensitive := not busy
+        , #label := (if busy then "Checking token…" else "Add account")
+        ]
+  void $ GI.on add #clicked $ do
+    kind <- readIORef selected
+    text <- Gtk.editableGetText url
+    tokenText <- Gtk.editableGetText token
+    case (,) <$> (parseServer text >>= parse . (.host)) <*> parse tokenText of
+      Left problem -> showProblem problem
+      Right (host, parsedToken) -> do
+        checking True
+        void $ forkIO $ do
+          outcome <- try (signInWith kind host parsedToken)
+          let result = case outcome of
+                Left (_ :: SomeException) -> Left "Signing in failed unexpectedly."
+                Right r -> r
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            case result of
+              Right () -> Gtk.windowDestroy dialog >> onAdded
+              Left problem -> checking False >> showProblem problem
+            pure False
   let refresh = do
         kind <- readIORef selected
         text <- Gtk.editableGetText url

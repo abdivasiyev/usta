@@ -265,6 +265,7 @@ type IssueDetail :: Type
 data IssueDetail = IssueDetail
   { opening :: Comment
   , closed :: Bool
+  , merged :: Bool
   , assignees :: [Login]
   , labels :: [L.Label]
   , milestone :: Maybe Text
@@ -279,10 +280,13 @@ instance FromJSON IssueDetail where
     assignees <- o .:? "assignees" .!= []
     labels <- o .:? "labels" .!= []
     milestone <- o .:? "milestone"
+    pull <- o .:? "pull_request"
+    merged <- maybe (pure False) (\p -> p .:? "merged" .!= False) pull
     title <- traverse (.: "title") milestone
     pure IssueDetail
       { opening = Comment {author = (user :: User).login, body = body, createdAt = createdAt}
       , closed = state == "closed"
+      , merged = merged
       , assignees = map (\(User login) -> login) assignees
       , labels = [L.Label {name = l.name, color = l.color} | l <- labels :: [Label]]
       , milestone = title

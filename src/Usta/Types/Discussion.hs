@@ -31,6 +31,8 @@ data Discussion = Discussion
   , comments :: [Comment]
     -- ^ Oldest first.
   , closed :: Bool
+    -- ^ Merged pull requests are closed too.
+  , merged :: Bool
   , assignees :: [Login]
   , labels :: [Label]
   , milestone :: Maybe Text

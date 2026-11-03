@@ -66,6 +66,7 @@ forgejo manager base host token = do
           { opening = d.opening
           , comments = map (.comment) cs
           , closed = d.closed
+          , merged = d.merged
           , assignees = d.assignees
           , labels = d.labels
           , milestone = d.milestone

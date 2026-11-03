@@ -2,6 +2,7 @@
 -- signed-in account. Adapters (GitHub, Forgejo, the sample) build it.
 module Usta.Forge
   ( Forge (..)
+  , Known (..)
   , Fetched (..)
   , CloneUrls (..)
   , Failure (..)
@@ -11,6 +12,7 @@ import Control.Exception (Exception)
 import Data.ByteString (ByteString)
 import Data.Kind (Type)
 import Data.Text (Text)
+import Data.Time (UTCTime)
 
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
@@ -25,15 +27,16 @@ import Usta.Types.RepoName (RepoName)
 import Usta.Types.Repository (Repository)
 import Usta.Types.ThreadId (ThreadId)
 
--- | Each list takes the ETag of the copy sync already has, and answers
--- 'NotModified' when it is still current. Calls throw 'Failure'.
+-- | Each list takes what sync already has of it, and answers
+-- 'NotModified' when that is still current, or what changed since.
+-- Calls throw 'Failure'.
 type Forge :: Type
 data Forge = Forge
-  { notifications :: Maybe ETag -> IO (Fetched [Notification])
-  , pullRequests :: Maybe ETag -> IO (Fetched [PullRequest])
+  { notifications :: Known -> IO (Fetched [Notification])
+  , pullRequests :: Known -> IO (Fetched [PullRequest])
     -- ^ The ones the account is involved in.
-  , issues :: Maybe ETag -> IO (Fetched [Issue])
-  , repositories :: Maybe ETag -> IO (Fetched [Repository])
+  , issues :: Known -> IO (Fetched [Issue])
+  , repositories :: Known -> IO (Fetched [Repository])
   , markRead :: ThreadId -> IO ()
   , markUnread :: ThreadId -> IO ()
     -- ^ Puts a notification back among the unread, for "Move to inbox".
@@ -81,6 +84,16 @@ data CloneUrls = CloneUrls
     -- ^ The forge's own URL; plain http on a forge without TLS.
   , ssh :: Maybe Text
     -- ^ 'Nothing' when the forge has ssh turned off.
+  }
+  deriving stock (Eq, Show)
+
+-- | What sync has of a list: the ETag of its copy, and when it was
+-- fetched. With 'since', a forge may send only what changed after it,
+-- which sync adds to its copy; without, it sends the whole list.
+type Known :: Type
+data Known = Known
+  { etag :: Maybe ETag
+  , since :: Maybe UTCTime
   }
   deriving stock (Eq, Show)
 

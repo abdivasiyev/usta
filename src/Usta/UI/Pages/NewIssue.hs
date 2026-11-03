@@ -10,14 +10,12 @@ module Usta.UI.Pages.NewIssue
   , css
   ) where
 
-import Control.Concurrent (forkIO)
 import Control.Monad (forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Button as Button
@@ -128,22 +126,14 @@ open anchor create opened m = do
       (_, Left _) -> GI.set note [#label := "The assignee is not a user name."]
       (Just place, Right who) -> do
         GI.set note [#label := ""]
-        GI.set createButton [#sensitive := False]
         let new = NewIssue
               { title = titleText
               , body = bodyText
               , labels = filter (not . T.null) (map T.strip (T.splitOn "," labelsText))
               , assignees = who
               }
-        void $ forkIO $ do
-          result <- create place new
-          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            case result of
-              Right number -> Gtk.windowDestroy dialog >> opened place number titleText
-              Left problem -> do
-                GI.set note [#label := problem]
-                GI.set createButton [#sensitive := True]
-            pure False
+        Button.busy createButton [cancel] "Creating…" (create place new) $
+          either (\problem -> GI.set note [#label := problem]) (\number -> Gtk.windowDestroy dialog >> opened place number titleText)
   #append footer cancel
   #append footer createButton
 

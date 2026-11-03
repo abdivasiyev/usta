@@ -194,7 +194,6 @@ new actions m = do
             | b == t -> GI.set problem [#label := "Choose two different branches."]
             | otherwise -> do
                 GI.set problem [#label := ""]
-                forM_ [createButton, draftButton] $ \x -> GI.set x [#sensitive := False]
                 let pull = NewPull
                       { title = titleText
                       , body = bodyText
@@ -204,15 +203,9 @@ new actions m = do
                       , reviewers = who
                       , draft = draft
                       }
-                void $ forkIO $ do
-                  result <- actions.create place pull
-                  void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-                    case result of
-                      Right number -> actions.opened place number titleText (t, b)
-                      Left text -> do
-                        GI.set problem [#label := text]
-                        forM_ [createButton, draftButton] $ \x -> GI.set x [#sensitive := True]
-                    pure False
+                    (pressed, other) = if draft then (draftButton, createButton) else (createButton, draftButton)
+                Button.busy pressed [other] "Creating…" (actions.create place pull) $
+                  either (\text -> GI.set problem [#label := text]) (\number -> actions.opened place number titleText (t, b))
           (_, _, _, Left _) -> GI.set problem [#label := "A reviewer is not a user name."]
           _ -> GI.set problem [#label := "Choose the repository and both branches."]
   -- Each change of branch asks again; only the latest answer is shown.

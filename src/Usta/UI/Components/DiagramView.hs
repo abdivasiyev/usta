@@ -107,9 +107,11 @@ paint area palette context item = case item of
           Start -> p.x
           Middle -> p.x - fromIntegral w' / 2
           End -> p.x - fromIntegral w'
-    render (rgb c >> Cairo.moveTo left (p.y - fromIntegral h' / 2))
+    -- On a whole pixel, so glyphs are not cut where they are hinted.
+    render (rgb c >> Cairo.moveTo (whole left) (whole (p.y - fromIntegral h' / 2)))
     PangoCairo.showLayout context l
   where
+    whole v = fromIntegral (round v :: Int)
     render :: Cairo.Render () -> IO ()
     render r = renderWithContext r context
     rgb role = let (cr, cg, cb) = colorOf palette role in Cairo.setSourceRGB cr cg cb

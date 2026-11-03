@@ -40,10 +40,13 @@ executable usta
     Usta.Forge.Forgejo.Api
     Usta.Forge.Http
     Usta.Forge.Sample
+    Usta.Git
     Usta.Keyring
     Usta.Sync
     Usta.Types.Account
+    Usta.Types.Commit
     Usta.Types.Count
+    Usta.Types.Diff
     Usta.Types.ETag
     Usta.Types.Forge
     Usta.Types.Host

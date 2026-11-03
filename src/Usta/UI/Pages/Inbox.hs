@@ -11,6 +11,7 @@ module Usta.UI.Pages.Inbox
   , View (..)
   , Actions (..)
   , lists
+  , worthTelling
   , webUrl
   , fromNotification
   , sample
@@ -109,6 +110,26 @@ lists view n = case view of
   Finished -> not waiting
   where
     waiting = n.unread && not n.done
+
+-- | What a desktop notification tells about: the notifications waiting
+-- in @now@ that were not waiting in @before@, for a review request, a
+-- mention or failed checks, with what to say.
+worthTelling :: [Notification] -> [Notification] -> [(Text, Notification)]
+worthTelling before now =
+  [ (headline, n)
+  | n <- now
+  , lists Everything n
+  , key n `notElem` waiting
+  , Just headline <- [n.reason >>= saying]
+  ]
+  where
+    waiting = [key n | n <- before, lists Everything n]
+    key n = (n.host, n.repo, n.number)
+    saying reason = case reason of
+      ReviewRequested -> Just "Review requested"
+      Mentioned -> Just "You were mentioned"
+      ChecksFailed -> Just "Checks failed"
+      _ -> Nothing
 
 -- | What the preview's buttons do.
 type Actions :: Type

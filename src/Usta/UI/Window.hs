@@ -57,6 +57,7 @@ import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
 import Usta.Details (From (..))
+import qualified Usta.Types.Discussion as D
 import Usta.Types.Parse (parse, unparse)
 -- For the commits' fields.
 import qualified Usta.Types.Commit as C
@@ -104,7 +105,19 @@ buildAt start source app = do
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
-      openIssue backLabel model = Issue.new backLabel backToMain model >>= showDetail
+      -- The header shows at once; the thread loads from the forge under it.
+      openIssue backLabel model = do
+        let actions = Issue.Actions
+              { comment = source.comment model.host model.repo model.number
+              , setClosed = source.setClosed model.host model.repo model.number
+              , refresh = openIssue backLabel model
+              }
+        Issue.new backLabel backToMain model (\showClosed ->
+          loadInto (source.discussion model.host model.repo model.number) $ \d -> do
+            c <- clock
+            showClosed d.closed
+            Issue.thread actions (Issue.fromDiscussion c d model))
+          >>= showDetail
       openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
       addAccountThen after = Gtk.toWidget screens >>= \anchor ->
         AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn after
@@ -416,19 +429,15 @@ notificationIssue n = Issue.Model
   , Issue.number = n.number
   , Issue.title = n.title
   , Issue.closed = False
-  , Issue.comments =
-      [ Issue.Comment "abdivasiyev" "AA" n.opened
-          "Found while reviewing: describe what happens and what you expected."
-      ]
+  , Issue.comments = []
   , Issue.events = []
-  , Issue.assignees = [("AA", "abdivasiyev")]
+  , Issue.assignees = []
   , Issue.labels = []
   , Issue.milestone = Nothing
   , Issue.linkedPullRequests = []
   }
 
--- | An issue's detail from its list row. The thread and side details are
--- sample content until the issue is loaded from the forge.
+-- | An issue's header from its list row; the thread is loaded after.
 issueDetail :: Issues.Issue -> Issue.Model
 issueDetail i = Issue.Model
   { Issue.forge = i.forge
@@ -437,19 +446,12 @@ issueDetail i = Issue.Model
   , Issue.number = i.number
   , Issue.title = i.title
   , Issue.closed = i.closed
-  , Issue.comments =
-      [ Issue.Comment i.author "AA" ("opened " <> i.opened)
-          "Main.hs still prints Hello world.\nOpen a Gtk.ApplicationWindow on activate, with the header bar from the design."
-      , Issue.Comment "abdivasiyev" "AA" "commented 1 hour ago"
-          "gi-gtk4 is in now (#2). The window needs wrapGAppsHook4 in the flake so it finds the GSettings schemas."
-      ]
-  , Issue.events =
-      [ Issue.LabelAdded tone name | Issues.Label tone name <- i.labels ]
-      <> [Issue.ReferencedBy "#6 feat: render main window with GTK4"]
-  , Issue.assignees = [("AA", "abdivasiyev")]
-  , Issue.labels = [ (tone, name) | Issues.Label tone name <- i.labels ]
-  , Issue.milestone = Just "First window"
-  , Issue.linkedPullRequests = ["#6 feat: render main window with GTK4"]
+  , Issue.comments = []
+  , Issue.events = []
+  , Issue.assignees = []
+  , Issue.labels = [(tone, name) | Issues.Label tone name <- i.labels]
+  , Issue.milestone = Nothing
+  , Issue.linkedPullRequests = []
   }
 
 -- | "usta #2" from "abdivasiyev/usta" and 2.

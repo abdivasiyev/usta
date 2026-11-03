@@ -6,6 +6,7 @@ module Usta.UI.Pages.Issues
   ( Label (..)
   , Relation (..)
   , Issue (..)
+  , labelTone
   , fromIssue
   , sample
   , new

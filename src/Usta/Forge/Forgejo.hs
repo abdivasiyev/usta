@@ -68,6 +68,9 @@ forgejo manager base host token = do
     , recentCommits = \repo branch -> map (.commit) <$> run client
         (Api.api.commits (owner repo) (shortName repo)
           Api.CommitsQuery {sha = branch, limit = 10, stat = False, verification = False, files = False})
+    , commitDiff = \repo sha -> do
+        text <- run client (Api.api.commitDiff (owner repo) (shortName repo) (Api.CommitDiffOf sha))
+        either (throwIO . Refused) pure (parseDiff text)
     , readme = \repo branch -> do
         entries <- run client (Api.api.contents (owner repo) (shortName repo) Api.RefQuery {ref = branch})
         case [e.name | e <- entries, e.kind == "file", T.toLower (T.takeWhile (/= '.') e.name) == "readme"] of

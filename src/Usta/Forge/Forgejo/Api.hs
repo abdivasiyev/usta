@@ -11,6 +11,7 @@ module Usta.Forge.Forgejo.Api
   , RefQuery (..)
   , RawText
   , DiffOf (..)
+  , CommitDiffOf (..)
   , Entry (..)
   , ApiCommit (..)
   , NotificationQuery (..)
@@ -46,7 +47,7 @@ import GHC.Generics (Generic)
 import Servant.API
 import Servant.Client (AsClientT, ClientM, client)
 
-import Usta.Types.Commit (Commit (..))
+import Usta.Types.Commit (Commit (..), Sha)
 import Usta.Types.Count (Count)
 import Usta.Types.Label (Color)
 import Usta.Types.Login (Login)
@@ -91,6 +92,9 @@ data Routes mode = Routes
   , raw
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "raw" :> Capture "path" Text
            :> RecordQueryParam RefQuery :> Get '[RawText] Text
+  , commitDiff
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "git" :> "commits"
+           :> Capture "sha" CommitDiffOf :> Get '[RawText] Text
   }
   deriving stock (Generic)
 
@@ -174,6 +178,13 @@ newtype DiffOf = DiffOf Number
 
 instance ToHttpApiData DiffOf where
   toUrlPiece (DiffOf n) = toUrlPiece n <> ".diff"
+
+-- | The path segment "<sha>.diff": a commit as a diff.
+type CommitDiffOf :: Type
+newtype CommitDiffOf = CommitDiffOf Sha
+
+instance ToHttpApiData CommitDiffOf where
+  toUrlPiece (CommitDiffOf sha) = toUrlPiece sha <> ".diff"
 
 -- | A file or folder in a repository's tree.
 type Entry :: Type

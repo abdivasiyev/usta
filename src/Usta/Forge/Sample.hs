@@ -81,6 +81,7 @@ new now account = do
         , F.pullCommits = \_ _ -> pure []
         , F.recentCommits = \_ _ -> pure []
         , F.readme = \_ _ -> pure Nothing
+        , F.commitDiff = \_ _ -> pure []
         , F.markRead = \thread -> do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->

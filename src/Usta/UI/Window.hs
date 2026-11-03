@@ -56,6 +56,7 @@ import qualified Usta.UI.Pages.Repositories as Repositories
 import qualified Usta.UI.Pages.RepositoryFiles as RepositoryFiles
 import qualified Usta.UI.Components.CodeView as CodeView
 import qualified Usta.UI.Components.ImageView as ImageView
+import qualified Usta.UI.Components.PdfView as PdfView
 import qualified Usta.UI.Pages.Settings as Settings
 import qualified Usta.UI.Pages.Welcome as Welcome
 import qualified Usta.UI.Platform as Platform
@@ -718,7 +719,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

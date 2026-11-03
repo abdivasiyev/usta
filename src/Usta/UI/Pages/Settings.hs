@@ -9,6 +9,7 @@ module Usta.UI.Pages.Settings
   , Model (..)
   , sample
   , new
+  , notice
   , css
   ) where
 
@@ -39,6 +40,9 @@ data Account = Account
   , user :: Text
   , auth :: Auth
   , connected :: Bool
+  , onRemove :: IO ()
+    -- ^ Runs once the user confirmed removing the account.
+  , onReauthenticate :: IO ()
   }
 
 type Model :: Type
@@ -145,7 +149,10 @@ section s m onAddAccount = do
 
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card"]]
   rows <- case s of
-    Accounts -> mapM accountRow m.accounts
+    Accounts
+      | null m.accounts ->
+          sequence [setting "No accounts yet" [plain "Add one to start syncing its pull requests, issues and notifications"] []]
+      | otherwise -> mapM accountRow m.accounts
     Sync -> sequence
       [ do
           interval <- Gtk.dropDownNewFromStrings m.syncIntervals
@@ -226,11 +233,15 @@ accountRow a = do
     else do
       Badge.dot Danger >>= #append status
       label "Signed out" ["signed-out"] >>= #append status
-  controls <- sequence
-    [ Gtk.toWidget status
-    , button "Re-authenticate" Button.Secondary
-    , button "Remove" Button.Danger
-    ]
+  reauthenticate <- Button.new Button.defaults { Button.label = Just "Re-authenticate", Button.variant = Button.Secondary }
+  void $ GI.on reauthenticate #clicked a.onReauthenticate
+  remove <- Button.new Button.defaults { Button.label = Just "Remove", Button.variant = Button.Danger }
+  void $ GI.on remove #clicked $ do
+    anchor <- Gtk.toWidget remove
+    confirm anchor ("Remove " <> a.user <> "@" <> a.host <> "?")
+      "Its cached pull requests, issues and notifications are deleted, and its token is removed from the keyring."
+      "Remove" a.onRemove
+  controls <- sequence [Gtk.toWidget status, Gtk.toWidget reauthenticate, Gtk.toWidget remove]
   row <- setting a.host
     [plain "Signed in as ", code a.user, plain (" · " <> authText a.auth)]
     controls
@@ -271,6 +282,54 @@ themeChoice = do
 switch :: Bool -> IO Gtk.Widget
 switch on = GI.new Gtk.Switch [#active := on] >>= Gtk.toWidget
 
+-- | A small modal window over @anchor@'s window: @title@, @text@, Cancel
+-- and a danger button that runs @onConfirm@.
+confirm :: Gtk.Widget -> Text -> Text -> Text -> IO () -> IO ()
+confirm anchor title text action onConfirm = do
+  (dialog, footer) <- modal anchor title text
+  cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
+  void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
+  go <- Button.new Button.defaults { Button.label = Just action, Button.variant = Button.Danger }
+  void $ GI.on go #clicked (Gtk.windowDestroy dialog >> onConfirm)
+  #append footer cancel
+  #append footer go
+  #present dialog
+
+-- | Tells the user something went wrong, with an OK button.
+notice :: Gtk.Widget -> Text -> Text -> IO ()
+notice anchor title text = do
+  (dialog, footer) <- modal anchor title text
+  ok <- Button.new Button.defaults { Button.label = Just "OK", Button.variant = Button.Primary }
+  void $ GI.on ok #clicked (Gtk.windowDestroy dialog)
+  #append footer ok
+  #present dialog
+
+-- | The window and its empty button row.
+modal :: Gtk.Widget -> Text -> Text -> IO (Gtk.Window, Gtk.Box)
+modal anchor title text = do
+  root <- Gtk.widgetGetRoot anchor
+  parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
+  dialog <- GI.new Gtk.Window [ #title := title
+                              , #modal := True
+                              , #resizable := False
+                              , #destroyWithParent := True
+                              , #defaultWidth := 420
+                              , #cssClasses := ["usta", "u-confirm"]
+                              ]
+  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #cssClasses := ["body"]]
+  label title ["title"] >>= #append body
+  message <- label text ["muted"]
+  GI.set message [#wrap := True]
+  #append body message
+  footer <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                           , #spacing := 8
+                           , #halign := Gtk.AlignEnd
+                           ]
+  #append body footer
+  GI.set dialog [#child := body]
+  pure (dialog, footer)
+
 button :: Text -> Button.Variant -> IO Gtk.Widget
 button text variant =
   Button.new Button.defaults { Button.label = Just text, Button.variant = variant } >>= Gtk.toWidget
@@ -281,8 +340,8 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 sample :: [(Text, Text)] -> Model
 sample keys = Model
   { accounts =
-      [ Account Forge.GitHub "github.com" "abdivasiyev" BrowserSignIn True
-      , Account Forge.Forgejo "git.azizovich.uz" "abdivasiyev" AccessToken True
+      [ account Forge.GitHub "github.com" BrowserSignIn
+      , account Forge.Forgejo "git.azizovich.uz" AccessToken
       ]
   , syncIntervals = ["Every minute", "Every 2 minutes", "Every 5 minutes", "Every 15 minutes", "Manually"]
   , syncInterval = 1
@@ -291,10 +350,22 @@ sample keys = Model
   , diffLayout = 0
   , shortcuts = keys
   }
+  where
+    account kind host auth = Account
+      { forge = kind
+      , host = host
+      , user = "abdivasiyev"
+      , auth = auth
+      , connected = True
+      , onRemove = pure ()
+      , onReauthenticate = pure ()
+      }
 
 css :: Text
 css = mconcat
-  [ "box.u-settings box.settings-header {"
+  [ "window.u-confirm box.body { padding: 20px; }"
+  , "window.u-confirm label.title { font-size: 15px; font-weight: 600; }"
+  , "box.u-settings box.settings-header {"
   , "  padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);"
   , "}"
   , "box.u-settings label.page-title { font-size: 17px; font-weight: 600; }"

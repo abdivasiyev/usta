@@ -67,6 +67,7 @@ data Connected = Connected
   { accountId :: AccountId
   , forge :: Kind
   , host :: Text
+  , login :: Text
   }
 
 -- | The lists as the cache has them, with the times formatted against the
@@ -93,7 +94,7 @@ fromDatabase pool changes statuses sync = Source
       pure [Repositories.fromRepository kind r | (key, r) <- rows, Just kind <- [kindOf key]]
   , accounts = do
       rows <- run pool listAccounts
-      pure [Connected {accountId = key, forge = a.forge, host = unparse a.host} | (key, a) <- rows]
+      pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login} | (key, a) <- rows]
   , onChange = \act -> subscribe changes (act . (.resource))
   , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
   , syncNow = sync.syncNow
@@ -112,7 +113,7 @@ samples = Source
   , pullRequests = pure PullRequests.sample
   , issues = pure Issues.sample
   , repositories = pure Repositories.sample
-  , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
+  , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev"} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
   , onChange = const (pure ())
   , onStatus = const (pure ())
   , syncNow = pure ()

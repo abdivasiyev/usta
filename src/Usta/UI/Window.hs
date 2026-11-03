@@ -492,6 +492,8 @@ tabContent source reopen fetch summary showState tab = case tab of
       Files.new Files.Actions
         { review = source.review summary.host summary.repo summary.number
         , merge = source.merge summary.host summary.repo summary.number Squash True
+        , version = \old path ->
+            fmap snd <$> source.file summary.host summary.repo ((if old then snd else fst) summary.branches) path
         , refresh = reopen
         }
         (Files.fromFileDiffs (said from "Diff computed locally" "Diff from the forge's API") changes)

@@ -12,6 +12,7 @@ import Control.Monad (forM_, unless)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
+import Data.Traversable (for)
 import qualified Data.Text as T
 import qualified GI.Cairo as GICairo
 import qualified GI.Cairo.Render as Cairo
@@ -34,7 +35,24 @@ new layout = do
         Pango.fontDescriptionFromString (describe font) >>= Pango.layoutSetFontDescription l . Just
         (w', h') <- Pango.layoutGetPixelSize l
         pure Size {w = fromIntegral w', h = fromIntegral h'}
-  drawn <- layout measure
+  laid <- layout measure
+  -- Text reaches as far as it is wide; the canvas grows (and the items
+  -- move right or down) so none of it is cut off.
+  corners <- for laid.items $ \item -> case item of
+    Text {at = p, text = t, font = f, anchor = a} -> do
+      s <- measure f t
+      let x0 = case a of
+            Start -> p.x
+            Middle -> p.x - s.w / 2
+            End -> p.x - s.w
+      pure [(x0, p.y - s.h / 2), (x0 + s.w, p.y + s.h / 2)]
+    _ -> pure (extent item)
+  let points = concat corners
+      dx = max 0 (negate (minimum (0 : map fst points)) + 4)
+      dy = max 0 (negate (minimum (0 : map snd points)) + 4)
+      width = max laid.size.w (maximum (0 : map fst points) + dx + 4)
+      height = max laid.size.h (maximum (0 : map snd points) + dy + 4)
+      drawn = Scene {size = Size width height, items = map (translate dx dy) laid.items}
   GI.set area [#contentWidth := ceiling drawn.size.w, #contentHeight := ceiling drawn.size.h]
   Gtk.drawingAreaSetDrawFunc area $ Just $ \_ context _ _ -> do
     palette <- Highlight.currentPalette

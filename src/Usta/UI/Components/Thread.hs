@@ -12,7 +12,7 @@ module Usta.UI.Components.Thread
   , css
   ) where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
@@ -25,6 +25,7 @@ import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
+import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Markdown as Markdown
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Style (Tone (..))
@@ -41,6 +42,8 @@ data Shown = Shown
   , me :: Text
     -- ^ The user's login, whose own notes are never new.
   , clock :: Clock
+  , reply :: Text -> IO (Either Text ())
+    -- ^ Adds a note; runs off the main thread.
   }
 
 -- | The drawn thread, and what the Files tab does with it.
@@ -114,18 +117,43 @@ new s = do
       label l ["mono", kind] >>= #append code
     #append whole code
 
-  forM_ notes $ \n -> do
-    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["note"]]
-    Avatar.new 24 (T.toUpper (T.take 2 (unparse n.author))) >>= \a -> GI.set a [#valign := Gtk.AlignStart] >> #append row a
-    column <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #hexpand := True]
-    who <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-    label (unparse n.author) ["strong"] >>= #append who
-    label ("· " <> ago s.clock n.createdAt) ["muted"] >>= #append who
-    when (fresh n) $ Badge.new Accent "New" >>= #append who
-    #append column who
-    Markdown.new n.body >>= #append column
-    #append row column
-    #append whole row
+  noteBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  let addNote who when'' isFresh body = do
+        row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["note"]]
+        Avatar.new 24 (T.toUpper (T.take 2 who)) >>= \a -> GI.set a [#valign := Gtk.AlignStart] >> #append row a
+        column <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #hexpand := True]
+        top' <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+        label who ["strong"] >>= #append top'
+        label ("· " <> when'') ["muted"] >>= #append top'
+        when isFresh $ Badge.new Accent "New" >>= #append top'
+        #append column top'
+        Markdown.new body >>= #append column
+        #append row column
+        #append noteBox row
+  forM_ notes $ \n -> addNote (unparse n.author) (ago s.clock n.createdAt) (fresh n) n.body
+  #append whole noteBox
+
+  -- A reply goes to the forge, then shows here at once.
+  replyRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["reply"]]
+  entry <- GI.new Gtk.Entry [#placeholderText := if resolved' then "Reply to reopen the discussion…" else "Reply…", #hexpand := True]
+  #append replyRow entry
+  send <- Button.new Button.defaults {Button.label = Just "Reply"}
+  #append replyRow send
+  #append whole replyRow
+  problem <- label "" ["problem"]
+  GI.set problem [#visible := False, #wrap := True]
+  #append whole problem
+  let sendReply = do
+        text <- T.strip <$> Gtk.editableGetText entry
+        unless (T.null text) $ do
+          GI.set problem [#visible := False]
+          Button.busy send [entry] "Replying…" (s.reply text) $ \case
+            Left why -> GI.set problem [#label := why, #visible := True]
+            Right () -> do
+              addNote s.me "just now" False text
+              Gtk.editableSetText entry ""
+  void $ GI.on send #clicked sendReply
+  void $ GI.on entry #activate sendReply
   #append card whole
 
   -- Only a resolved thread folds to its bar; Hide puts an outdated one
@@ -166,4 +194,6 @@ css = mconcat
   , "box.u-thread box.code label.add { background: var(--success-bg); }"
   , "box.u-thread box.code label.del { background: var(--danger-bg); }"
   , "box.u-thread box.note { padding: 10px 12px; }"
+  , "box.u-thread box.reply { padding: 10px 12px; border-top: 1px solid var(--border-subtle); }"
+  , "box.u-thread label.problem { padding: 0 12px 10px; color: var(--danger); font-size: 12px; }"
   ]

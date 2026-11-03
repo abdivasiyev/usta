@@ -45,7 +45,7 @@ import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
-import Usta.Types.Discussion (Discussion, Merge, Verdict)
+import Usta.Types.Discussion (Discussion, Merge, NewIssue, NewPull, Verdict)
 import Usta.Types.Number (Number)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Host (Host)
@@ -113,6 +113,11 @@ data Source = Source
   , merge :: Text -> Text -> Int -> Merge -> Bool -> IO (Either Text ())
     -- ^ 'True' deletes the branch after.
   , review :: Text -> Text -> Int -> Verdict -> Text -> IO (Either Text ())
+  , createIssue :: Text -> Text -> NewIssue -> IO (Either Text Int)
+    -- ^ Files it in the repository on a host, and gives its number.
+  , createPull :: Text -> Text -> NewPull -> IO (Either Text Int)
+  , branches :: Text -> Text -> IO (Either Text [Text])
+  , labels :: Text -> Text -> IO (Either Text [Text])
   }
 
 -- | A signed-in account, as the window names it.
@@ -174,6 +179,10 @@ fromDatabase pool changes statuses sync = Source
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
   , merge = \_ _ _ _ _ -> pure (Left unavailable)
   , review = \_ _ _ _ _ -> pure (Left unavailable)
+  , createIssue = \_ _ _ -> pure (Left unavailable)
+  , createPull = \_ _ _ -> pure (Left unavailable)
+  , branches = \_ _ -> pure (Left unavailable)
+  , labels = \_ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -211,6 +220,10 @@ samples = Source
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
   , merge = \_ _ _ _ _ -> pure (Left unavailable)
   , review = \_ _ _ _ _ -> pure (Left unavailable)
+  , createIssue = \_ _ _ -> pure (Left unavailable)
+  , createPull = \_ _ _ -> pure (Left unavailable)
+  , branches = \_ _ -> pure (Left unavailable)
+  , labels = \_ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -245,18 +258,27 @@ withAccounts pool accounts source = source
   , setClosed = \host repo n closed -> changing (onForge host repo n (\f name number -> f.setClosed name number closed))
   , merge = \host repo n how delete -> changing (onForge host repo n (\f name number -> f.merge name number how delete))
   , review = \host repo n verdict text -> changing (onForge host repo n (\f name number -> f.review name number verdict text))
+  , createIssue = \host repo new -> changing (onRepo host repo (\f name -> unparse <$> f.createIssue name new))
+  , createPull = \host repo new -> changing (onRepo host repo (\f name -> unparse <$> f.createPull name new))
+  , branches = \host repo -> onRepo host repo (\f name -> f.branches name)
+  , labels = \host repo -> onRepo host repo (\f name -> f.labels name)
   }
   where
-    onForge :: Text -> Text -> Int -> (Forge.Forge -> RepoName -> Number -> IO a) -> IO (Either Text a)
-    onForge host repo n act = do
+    onRepo :: Text -> Text -> (Forge.Forge -> RepoName -> IO a) -> IO (Either Text a)
+    onRepo host repo act = do
       found <- accountFor pool host repo
-      case (found, parse n) of
-        (Just (key, name), Right number) -> do
+      case found of
+        Just (key, name) -> do
           forge <- accounts.forgeOf key
           case forge of
             Nothing -> pure (Left (said SignedOut))
-            Just f -> either (Left . said) Right <$> try (act f name number)
-        _ -> pure (Left "That repository is not in the cache any more.")
+            Just f -> either (Left . said) Right <$> try (act f name)
+        Nothing -> pure (Left "That repository is not in the cache any more.")
+    onForge :: Text -> Text -> Int -> (Forge.Forge -> RepoName -> Number -> IO a) -> IO (Either Text a)
+    onForge host repo n act = case parse n of
+      Right number -> onRepo host repo (\f name -> act f name number)
+      Left _ -> pure (Left "That is not an issue or pull request number.")
+    changing :: IO (Either Text a) -> IO (Either Text a)
     changing act = do
       result <- act
       either (const (pure ())) (const source.syncNow) result

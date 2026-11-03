@@ -1,12 +1,13 @@
--- | The change bus: sync threads say what changed, and the window reloads
--- that from the database. Only what changed travels, never the data, so the
--- database stays the one copy of it.
+-- | Buses from sync threads to the window: a 'Bus' 'Change' says what
+-- changed, and the window reloads that from the database. Only what changed
+-- travels, never the data, so the database stays the one copy of it.
 module Usta.Bus
   ( Change (..)
   , Bus
   , newBus
   , publish
   , subscribe
+  , listen
   ) where
 
 import Control.Concurrent (forkIO)
@@ -33,21 +34,28 @@ data Change = Change
   }
   deriving stock (Eq, Show)
 
-type Bus :: Type
-newtype Bus = Bus (TChan Change)
+type Bus :: Type -> Type
+newtype Bus a = Bus (TChan a)
 
-newBus :: IO Bus
+newBus :: IO (Bus a)
 newBus = Bus <$> newBroadcastTChanIO
 
 -- | Safe from any thread; never blocks.
-publish :: Bus -> Change -> IO ()
-publish (Bus chan) change = atomically (writeTChan chan change)
+publish :: Bus a -> a -> IO ()
+publish (Bus chan) message = atomically (writeTChan chan message)
 
--- | Runs @onChange@ for every change published from now on, in order, on
+-- | Runs @onMessage@ for every message published from now on, in order, on
 -- the GTK main thread, so it may touch widgets.
-subscribe :: Bus -> (Change -> IO ()) -> IO ()
-subscribe (Bus chan) onChange = do
-  mine <- atomically (dupTChan chan)
+subscribe :: Bus a -> (a -> IO ()) -> IO ()
+subscribe bus onMessage = do
+  next <- listen bus
   void $ forkIO $ forever $ do
-    change <- atomically (readTChan mine)
-    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT_IDLE (onChange change >> pure False)
+    message <- next
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT_IDLE (onMessage message >> pure False)
+
+-- | The messages published from now on, one per call, blocking until the
+-- next arrives; for threads other than the window's, such as tests.
+listen :: Bus a -> IO (IO a)
+listen (Bus chan) = do
+  mine <- atomically (dupTChan chan)
+  pure (atomically (readTChan mine))

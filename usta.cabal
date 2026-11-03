@@ -36,6 +36,7 @@ executable usta
     Usta.DB.SyncCursor
     Usta.Forge
     Usta.Forge.Sample
+    Usta.Sync
     Usta.Types.Account
     Usta.Types.Count
     Usta.Types.ETag

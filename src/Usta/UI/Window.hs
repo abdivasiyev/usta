@@ -58,6 +58,7 @@ import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
 import Usta.Details (From (..))
 import qualified Usta.Types.Discussion as D
+import Usta.Preferences (Preferences (..), Theme (..))
 import Usta.Types.Discussion (Merge (..))
 import Usta.Types.Parse (parse, unparse)
 -- For the commits' fields.
@@ -94,6 +95,8 @@ buildAt start source app = do
   -- screen such as one pull request or the new pull request form).
   screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   states <- newIORef []
+  -- The saved theme, before anything is drawn.
+  source.preferences >>= Style.setTheme . (.theme)
   let backToMain = Gtk.stackSetVisibleChildName screens "main"
       showDetail :: Gtk.Widget -> IO ()
       showDetail widget = do
@@ -166,7 +169,8 @@ buildAt start source app = do
       addAccountThen after = Gtk.toWidget screens >>= \anchor ->
         AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn after
       openAddAccount = addAccountThen (pure ())
-      -- The accounts are real; the other sections are sample settings for now.
+      -- Accounts and preferences are real; the mirror and cache buttons
+      -- are not wired yet.
       openSettings = do
         known <- readIORef states
         accounts <- source.accounts
@@ -183,7 +187,14 @@ buildAt start source app = do
                   AddAccount.open anchor (AddAccount.for a.forge) {AddAccount.server = "https://" <> a.host}
                     source.signIn openSettings
               }
-            model = (Settings.sample shortcuts) {Settings.accounts = map row accounts}
+        chosen <- source.preferences
+        let model = (Settings.sample shortcuts)
+              { Settings.accounts = map row accounts
+              , Settings.preferences = chosen
+              , Settings.onPreferences = \p -> do
+                  Style.setTheme p.theme
+                  source.setPreferences p
+              }
         Settings.new backToMain (addAccountThen openSettings) model >>= showDetail
 
   -- The palette wraps the whole window, so it exists only further down.
@@ -357,9 +368,9 @@ buildAt start source app = do
       paletteModel = do
         settings <- Gtk.settingsGetDefault
         scheme <- maybe (pure Gtk.InterfaceColorSchemeDefault) (`GI.get` #gtkInterfaceColorScheme) settings
-        let (themeTitle, nextScheme)
-              | scheme == Gtk.InterfaceColorSchemeDark = ("Switch to light theme", Gtk.InterfaceColorSchemeLight)
-              | otherwise = ("Switch to dark theme", Gtk.InterfaceColorSchemeDark)
+        let (themeTitle, nextTheme)
+              | scheme == Gtk.InterfaceColorSchemeDark = ("Switch to light theme", Light)
+              | otherwise = ("Switch to dark theme", Dark)
             keys = Platform.shortcut Platform.current
             command title detail action = CommandPalette.Item CommandPalette.Command title detail action
             commands =
@@ -368,8 +379,10 @@ buildAt start source app = do
               , command "New issue" (keys "Shift I") openNewIssue
               , command "Add forge account" "" openAddAccount
               , command "Open settings" (keys ",") openSettings
-              , command themeTitle "" $
-                  forM_ settings $ \s -> GI.set s [#gtkInterfaceColorScheme := nextScheme]
+              , command themeTitle "" $ do
+                  chosen <- source.preferences
+                  Style.setTheme nextTheme
+                  source.setPreferences chosen {theme = nextTheme}
               ]
         pullRequests <- map (paletteItem openPullRequest) <$> source.pullRequests
         issues <- map (issueItem openIssue) <$> source.issues

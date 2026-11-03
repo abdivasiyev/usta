@@ -9,14 +9,17 @@ module Usta.UI.Style
   ( Tone (..)
   , toneClass
   , install
+  , setTheme
   , tokens
   ) where
 
-import Control.Monad (void)
+import Control.Monad (forM_, void)
 import Data.GI.Base (AttrOp ((:=)), SignalProxy (PropertyNotify), get, new, on, set)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
+
+import Usta.Preferences (Theme (..))
 
 -- | The meaning a colored element carries. Add a constructor here and a
 -- matching @.tone-*@ rule in the component CSS to introduce a new one.
@@ -57,6 +60,18 @@ install widget components = do
         set provider [#prefersColorScheme := scheme]
   sync
   void $ on settings (PropertyNotify #gtkInterfaceColorScheme) (const sync)
+
+-- | Light, dark, or whatever the system uses; 'install' makes the tokens
+-- follow.
+setTheme :: Theme -> IO ()
+setTheme theme = do
+  settings <- Gtk.settingsGetDefault
+  forM_ settings $ \s -> set s [#gtkInterfaceColorScheme := scheme]
+  where
+    scheme = case theme of
+      System -> Gtk.InterfaceColorSchemeDefault
+      Light -> Gtk.InterfaceColorSchemeLight
+      Dark -> Gtk.InterfaceColorSchemeDark
 
 tokens :: Text
 tokens = mconcat

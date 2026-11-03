@@ -39,6 +39,8 @@ import qualified Usta.DB.Repository as DB
 import Usta.Forge (Failure (..))
 import qualified Usta.Forge as Forge
 import Usta.Mirrors (Mirrors (..))
+import Usta.Preferences (Preferences (..))
+import qualified Usta.Preferences as Preferences
 import qualified Usta.Mirrors as Mirrors
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
@@ -84,6 +86,9 @@ data Source = Source
     -- ^ Likewise for each account's sync state, starting with the last
     -- one each account reported before.
   , syncNow :: IO ()
+  , preferences :: IO Preferences
+  , setPreferences :: Preferences -> IO ()
+    -- ^ Saves them, and syncs at the new pace.
   , setDone :: Inbox.Notification -> Bool -> IO (Either Text ())
     -- ^ "Mark as done" ('True', which also marks it read on the forge) or
     -- "Move to inbox" ('False', which marks it unread again).
@@ -166,6 +171,11 @@ fromDatabase pool changes statuses sync = Source
   , onChange = \act -> subscribe changes (act . (.resource))
   , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
   , syncNow = sync.syncNow
+  , preferences = Preferences.file >>= Preferences.load
+  , setPreferences = \p -> do
+      path <- Preferences.file
+      Preferences.save path p
+      sync.setEvery (Preferences.seconds p.interval)
   , setDone = \_ _ -> pure (Left unavailable)
   , signIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
@@ -208,6 +218,8 @@ samples = Source
   , onChange = const (pure ())
   , onStatus = const (pure ())
   , syncNow = pure ()
+  , preferences = pure Preferences.defaults
+  , setPreferences = const (pure ())
   , setDone = \_ _ -> pure (Left unavailable)
   , signIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)

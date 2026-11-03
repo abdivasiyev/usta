@@ -318,6 +318,7 @@ buildAt start source app = do
         let hostOf key = (.host) <$> find ((== key) . (.accountId)) accounts
             state
               | start == FirstSync = SyncStatus.Syncing "github.com"
+              | null accounts = SyncStatus.NoAccounts
               | otherwise = headline c [(host, s) | (key, s) <- known, Just host <- [hostOf key]]
         SyncStatus.new state source.syncNow >>= Gtk.toWidget >>= replaceChild syncChip
       reload resource = do

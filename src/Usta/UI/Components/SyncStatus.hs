@@ -8,7 +8,7 @@ module Usta.UI.Components.SyncStatus
   , css
   ) where
 
-import Control.Monad (void)
+import Control.Monad (void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
@@ -27,6 +27,9 @@ data State
     -- ^ What, e.g. "3 of 5 repositories" or "github.com".
   | Offline
   | Failed
+  | NoAccounts
+    -- ^ Nothing to sync yet.
+  deriving (Eq)
 
 -- | @onRetry@ runs for the Retry button a failed sync shows.
 new :: State -> IO () -> IO Gtk.Box
@@ -41,9 +44,7 @@ new state onRetry = do
     _ -> do
       dot <- Badge.dot (tone state)
       -- Offline is a resting state, quieter than the neutral text color.
-      case state of
-        Offline -> Gtk.widgetAddCssClass dot "quiet"
-        _ -> pure ()
+      when (state `elem` [Offline, NoAccounts]) $ Gtk.widgetAddCssClass dot "quiet"
       #append chip dot
   GI.new Gtk.Label [#label := text state, #cssClasses := ["text", stateClass state]] >>= #append chip
   case state of
@@ -61,6 +62,7 @@ tone s = case s of
   Syncing _ -> Accent
   Offline -> Neutral
   Failed -> Danger
+  NoAccounts -> Neutral
 
 text :: State -> Text
 text s = case s of
@@ -68,6 +70,7 @@ text s = case s of
   Syncing what -> "Syncing " <> what
   Offline -> "Offline · showing cached data"
   Failed -> "Sync failed"
+  NoAccounts -> "No accounts yet"
 
 stateClass :: State -> Text
 stateClass s = case s of

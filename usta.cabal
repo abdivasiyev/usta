@@ -21,6 +21,7 @@ executable usta
     Usta.DB
     Usta.DB.Account
     Usta.DB.Issue
+    Usta.DB.Mirror
     Usta.DB.Notification
     Usta.DB.PullRequest
     Usta.DB.Repository
@@ -44,6 +45,7 @@ executable usta
     Usta.Git
     Usta.Git.Credential
     Usta.Keyring
+    Usta.Mirrors
     Usta.Sync
     Usta.Types.Account
     Usta.Types.Commit

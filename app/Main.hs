@@ -25,6 +25,7 @@ import Usta.Forge.Http (apiUrl)
 import qualified Usta.Forge.Sample as Sample
 import qualified Usta.Git.Credential as Credential
 import qualified Usta.Keyring as Keyring
+import qualified Usta.Mirrors as Mirrors
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind (..))
@@ -77,6 +78,10 @@ cache = do
       , sync = sync
       , forgejoApi = \host -> apiUrl host "/api/v1"
       }
+    -- The window shows mirrors next; for now they are only kept fresh.
+    root <- Mirrors.defaultRoot
+    mirrorStatuses <- newBus
+    _ <- Mirrors.start Mirrors.Settings {pool = pool, changes = changes, statuses = mirrorStatuses, root = root}
     let source = Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync)
         start = if null saved then Window.FirstRun else Window.Ready
     runApp (void . Window.buildAt start source)

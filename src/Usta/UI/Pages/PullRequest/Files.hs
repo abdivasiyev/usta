@@ -6,6 +6,8 @@
 module Usta.UI.Pages.PullRequest.Files
   ( Comment (..)
   , Model (..)
+  , fromFileDiff
+  , fromFileDiffs
   , sample
   , new
   , Fetching (..)
@@ -14,7 +16,7 @@ module Usta.UI.Pages.PullRequest.Files
   , css
   ) where
 
-import Control.Monad (filterM, forM, forM_, void)
+import Control.Monad (filterM, forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
@@ -35,6 +37,7 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
+import qualified Usta.Types.Diff as D
 
 -- | A review comment attached to a line of a file's diff.
 type Comment :: Type
@@ -49,8 +52,11 @@ data Comment = Comment
 type Model :: Type
 data Model = Model
   { files :: [(Diff.File, [Comment])]
+  , source :: Text
+    -- ^ Where the diff came from, e.g. "Diff computed locally".
   , range :: Text
-    -- ^ The commits the diff was computed between, e.g. "8427b36..e1c90fa".
+    -- ^ The commits the diff was computed between, e.g. "8427b36..e1c90fa";
+    -- empty when not known.
   , checks :: [(Bool, Text, Text)]
     -- ^ Passed, name, duration.
   , reviewers :: [(Tone, Text, Text)]
@@ -92,8 +98,8 @@ new m = do
                          , #cssClasses := ["diffs"]
                          ]
   toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
-  label "Diff computed locally" ["muted", "small"] >>= #append toolbar
-  label m.range ["muted", "small", "mono"] >>= #append toolbar
+  label m.source ["muted", "small"] >>= #append toolbar
+  when (not (T.null m.range)) $ label m.range ["muted", "small", "mono"] >>= #append toolbar
   #append main toolbar
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
                                       , #hexpand := True
@@ -437,6 +443,35 @@ diffPlaceholder widths = do
   #append card body
   pure card
 
+-- | A changed file as the diff view shows it. A binary file has no lines,
+-- so it gets one that says so.
+fromFileDiff :: D.FileDiff -> Diff.File
+fromFileDiff f = Diff.File
+  { path = case f.change of
+      D.Renamed {from = old} -> old <> " → " <> f.path
+      _ -> f.path
+  , viewed = False
+  , diffLines = if f.binary then [Hunk "Binary file: no lines to show"] else map line f.lines
+  }
+  where
+    line l = case l of
+      D.Hunk {header = h} -> Hunk h
+      D.Context {old = o, new = n, text = t} -> Context o n t
+      D.Insertion {new = n, text = t} -> Added n t
+      D.Deletion {old = o, text = t} -> Removed o t
+
+-- | The Files tab for a pull request's changes; @source@ says where they
+-- came from. Review threads, checks and reviewers come with the review.
+fromFileDiffs :: Text -> [D.FileDiff] -> Model
+fromFileDiffs source changes = Model
+  { files = [(fromFileDiff f, []) | f <- changes]
+  , source = source
+  , range = ""
+  , checks = []
+  , reviewers = []
+  , approvalsNeeded = 0
+  }
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
@@ -467,6 +502,7 @@ sample = Model
               "Add wrapGAppsHook4 here once Main opens a window, otherwise the app can't find the GSettings schemas."
           ] )
       ]
+  , source = "Diff computed locally"
   , range = "8427b36..e1c90fa"
   , checks = [(True, "nix build", "3m 24s")]
   , reviewers = [(Warning, "abdivasiyev", "awaiting")]

@@ -16,6 +16,7 @@ import System.Environment (getArgs)
 import System.FilePath ((</>))
 
 import qualified Usta.Accounts as Accounts
+import qualified Usta.Details as Details
 import Usta.Bus (newBus)
 import Usta.DB (databaseFile, run, withDatabase)
 import Usta.DB.Account (listAccounts, saveAccount)
@@ -82,8 +83,10 @@ cache = do
       , mirrors = mirrors
       , forgejoApi = \host -> apiUrl host "/api/v1"
       }
-    let source = Source.withMirrors pool accounts mirrors mirrorStatuses
-          (Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync))
+    let details = Details.new Details.Settings {pool = pool, accounts = accounts, mirrors = mirrors}
+        source = Source.withDetails pool details
+          (Source.withMirrors pool accounts mirrors mirrorStatuses
+            (Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync)))
         start = if null saved then Window.FirstRun else Window.Ready
     runApp (void . Window.buildAt start source)
 

@@ -9,6 +9,8 @@ module Usta.UI.Window
   , buildAt
   ) where
 
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -54,6 +56,8 @@ import qualified Usta.UI.Pages.Welcome as Welcome
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
+import Usta.Details (From (..))
+import Usta.Types.Parse (parse)
 import Usta.UI.Format (Clock, ago, clock)
 import qualified Usta.Forge as Forge
 import qualified Usta.Sync as Sync
@@ -94,7 +98,7 @@ buildAt start source app = do
         void $ Gtk.stackAddNamed screens widget (Just "detail")
         Gtk.stackSetVisibleChildName screens "detail"
       openPullRequestWith fetch backLabel summary =
-        PullRequest.new backLabel backToMain (tabContent fetch summary) summary
+        PullRequest.new backLabel backToMain (tabContent source fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
@@ -321,12 +325,21 @@ buildAt start source app = do
 -- | Each tab of a pull request; sample content until the forge supplies it.
 -- @fetch@ is how far the local mirror is with the branch, while it is
 -- still fetching; the Files tab waits for it.
-tabContent :: Maybe Double -> PullRequest.Summary -> PullRequest.Tab -> IO Gtk.Widget
-tabContent fetch summary tab = case tab of
+tabContent :: Source -> Maybe Double -> PullRequest.Summary -> PullRequest.Tab -> IO Gtk.Widget
+tabContent source fetch summary tab = case tab of
   PullRequest.Files | Just p <- fetch -> Files.fetching (pure ()) (Files.fetchingSample p)
   PullRequest.Conversation -> Conversation.new Conversation.sample
-  PullRequest.Files -> Files.new Files.sample
-  PullRequest.Commits -> Commits.new Commits.sample
+  PullRequest.Files ->
+    loadInto (source.pullFiles summary.host summary.repo summary.number) $ \(from, changes) ->
+      Files.new (Files.fromFileDiffs (said from "Diff computed locally" "Diff from the forge's API") changes)
+  PullRequest.Commits ->
+    loadInto (source.pullCommits summary.host summary.repo summary.number) $ \(from, commits) -> do
+      c <- clock
+      let changesOf commit = case parse commit.hash of
+            Left _ -> pure (Left "That commit hash is not one usta can read.")
+            Right sha -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff summary.host summary.repo sha
+      Commits.new (said from "history from the local mirror" "history from the forge's API") changesOf
+        (map (Commits.fromCommit c) commits)
   PullRequest.Checks -> Checks.new $ case summary.checks of
     Just (Danger, _) -> Checks.failing
     _ -> Checks.passing
@@ -498,6 +511,31 @@ headline c known
   where
     syncing = [host | (host, Sync.Syncing) <- known]
     times = [t | (_, Sync.Synced t) <- known]
+
+-- | Where an answer came from, in words.
+said :: From -> Text -> Text -> Text
+said from mirror forge = case from of
+  FromMirror -> mirror
+  FromForge -> forge
+
+-- | A skeleton until @load@ answers off the main thread, then what
+-- @render@ makes of it, or the problem.
+loadInto :: IO (Either Text a) -> (a -> IO Gtk.Widget) -> IO Gtk.Widget
+loadInto load render = do
+  slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+  Skeleton.detail >>= #append slot
+  void $ forkIO $ do
+    result <- try load
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      widget <- case result of
+        Right (Right a) -> render a
+        Right (Left problem) -> notice problem
+        Left (_ :: SomeException) -> notice "Loading failed unexpectedly."
+      replaceChild slot widget
+      pure False
+  Gtk.toWidget slot
+  where
+    notice text = GI.new Gtk.Label [#label := text, #wrap := True, #cssClasses := ["muted"], #marginTop := 24, #marginStart := 24, #marginEnd := 24] >>= Gtk.toWidget
 
 -- | Shows @widget@ as the box's only child.
 replaceChild :: Gtk.Box -> Gtk.Widget -> IO ()

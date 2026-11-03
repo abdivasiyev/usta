@@ -14,18 +14,19 @@ module Usta.UI.Source
   , withDetails
   ) where
 
-import Control.Exception (try)
+import Control.Exception (IOException, SomeException, displayException, try)
 import Data.Kind (Type)
 import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Database.Persist.Sql (ConnectionPool, toSqlKey)
-import System.Directory (getHomeDirectory)
+import System.Directory (createDirectoryIfMissing, getHomeDirectory)
 
 import Usta.Accounts (Accounts, Origins (..), describe)
 import qualified Usta.Accounts as Accounts
-import Usta.Bus (Bus, Change (..), subscribe)
+import Usta.Bus (Bus, Change (..), publish, subscribe)
 import Usta.DB (run)
+import qualified Usta.DB.Cache as Cache
 import Usta.DB.Account (listAccounts)
 import Usta.DB.Mirror (choiceFor)
 import Usta.Details (Details, From)
@@ -86,6 +87,12 @@ data Source = Source
     -- ^ Likewise for each account's sync state, starting with the last
     -- one each account reported before.
   , syncNow :: IO ()
+  , clearCache :: IO (Either Text ())
+    -- ^ Forgets every synced list, then syncs.
+  , mirrorsFolder :: IO FilePath
+    -- ^ Where mirrors are kept; made if missing.
+  , pruneMirrors :: IO (Either Text Int)
+    -- ^ Deletes the clones no chosen mirror uses, and says how many.
   , preferences :: IO Preferences
   , setPreferences :: Preferences -> IO ()
     -- ^ Saves them, and syncs at the new pace.
@@ -171,6 +178,20 @@ fromDatabase pool changes statuses sync = Source
   , onChange = \act -> subscribe changes (act . (.resource))
   , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
   , syncNow = sync.syncNow
+  , clearCache = do
+      cleared <- try (run pool Cache.clear)
+      case cleared of
+        Left (e :: SomeException) -> pure (Left (T.pack (displayException e)))
+        Right () -> do
+          -- The pages show the empty lists until sync fills them again.
+          accounts <- run pool listAccounts
+          sequence_ [publish changes (Change key r) | (key, _) <- accounts, r <- [minBound .. maxBound]]
+          sync.syncNow
+          pure (Right ())
+  , mirrorsFolder = Mirrors.defaultRoot >>= \root -> createDirectoryIfMissing True root >> pure root
+  , pruneMirrors = do
+      pruned <- try (Mirrors.defaultRoot >>= Mirrors.prune pool)
+      pure (either (\(e :: IOException) -> Left (T.pack (displayException e))) Right pruned)
   , preferences = Preferences.file >>= Preferences.load
   , setPreferences = \p -> do
       path <- Preferences.file
@@ -218,6 +239,9 @@ samples = Source
   , onChange = const (pure ())
   , onStatus = const (pure ())
   , syncNow = pure ()
+  , clearCache = pure (Left unavailable)
+  , mirrorsFolder = Mirrors.defaultRoot
+  , pruneMirrors = pure (Left unavailable)
   , preferences = pure Preferences.defaults
   , setPreferences = const (pure ())
   , setDone = \_ _ -> pure (Left unavailable)

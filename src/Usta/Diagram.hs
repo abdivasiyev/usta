@@ -18,6 +18,7 @@ import qualified Data.Text as T
 import qualified Usta.Diagram.Class as Class
 import qualified Usta.Diagram.Flowchart as Flowchart
 import qualified Usta.Diagram.Sequence as Sequence
+import qualified Usta.Diagram.State as State
 import Usta.Diagram.Scene
 import qualified Usta.Mermaid as Mermaid
 
@@ -26,6 +27,7 @@ data Kind
   = Flowchart Mermaid.Flowchart
   | Sequence Sequence.Sequence
   | Class Class.Classes
+  | State State.States
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -46,6 +48,7 @@ parse source = do
         w | w `elem` ["graph", "flowchart"] -> Flowchart <$> Mermaid.parse (T.unlines meaningful)
         "sequencediagram" -> Sequence <$> Sequence.parse (T.unlines meaningful)
         w | w `elem` ["classdiagram", "classdiagram-v2"] -> Class <$> Class.parse (T.unlines meaningful)
+        w | w `elem` ["statediagram", "statediagram-v2"] -> State <$> State.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -70,6 +73,7 @@ draw measure d = do
     Flowchart chart -> Flowchart.draw measure chart
     Sequence s -> Sequence.draw measure s
     Class c -> Class.draw measure c
+    State s -> State.draw measure s
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

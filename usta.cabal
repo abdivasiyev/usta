@@ -46,6 +46,7 @@ executable usta
     Usta.Diagram.Route
     Usta.Diagram.Scene
     Usta.Diagram.Sequence
+    Usta.Diagram.State
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api

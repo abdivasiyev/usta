@@ -55,6 +55,10 @@ data Thread = Thread
   , setOpen :: Bool -> IO ()
     -- ^ Shows the notes, or only the one-line bar; an open thread is
     -- always shown whole.
+  , toggle :: IO ()
+    -- ^ Folds an open thread, or opens a folded one.
+  , focusReply :: IO ()
+    -- ^ Opens it and puts the cursor in its Reply box.
   , isNew :: Bool
     -- ^ It has a note since the user's last review.
   , resolved :: Bool
@@ -68,10 +72,15 @@ new s = do
       anyNew = any fresh notes
       count = T.pack (show (length notes)) <> (if length notes == 1 then " comment" else " comments")
 
-  -- The one-line bar a resolved thread starts as.
+  -- The one-line bar a resolved thread starts as, and any thread folds to.
   bar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["bar"]]
-  label "✓" ["tick"] >>= #append bar
-  label ("Resolved by " <> maybe "someone" unparse s.thread.resolvedBy) ["strong"] >>= #append bar
+  if resolved'
+    then do
+      label "✓" ["tick"] >>= #append bar
+      label ("Resolved by " <> maybe "someone" unparse s.thread.resolvedBy) ["strong"] >>= #append bar
+    else do
+      Badge.dot Warning >>= #append bar
+      label "Open" ["open", "strong"] >>= #append bar
   snippet <- label (maybe "" (\n -> unparse n.author <> ": “" <> firstLine n.body <> "”") (headOf notes)) ["muted"]
   GI.set snippet [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd]
   #append bar snippet
@@ -173,7 +182,14 @@ new s = do
   GI.set card [#visible := True]
   setOpen (not resolved')
   w <- Gtk.toWidget card
-  pure Thread {widget = w, setOpen = setOpen, isNew = anyNew, resolved = resolved'}
+  -- Enter folds even an open thread to its bar.
+  let fold = do
+        GI.set card [#visible := True]
+        GI.set bar [#visible := True]
+        GI.set whole [#visible := False]
+      toggle = GI.get whole #visible >>= \shown -> if shown then fold else setOpen True
+      focusReply = setOpen True >> void (Gtk.widgetGrabFocus entry)
+  pure Thread {widget = w, setOpen = setOpen, toggle = toggle, focusReply = focusReply, isNew = anyNew, resolved = resolved'}
   where
     resolved' = s.thread.resolvedBy /= Nothing
     headOf xs = case xs of

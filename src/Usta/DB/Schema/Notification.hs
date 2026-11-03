@@ -64,6 +64,7 @@ Notification sql=notifications
     reason         Reason Maybe
     unread         Bool
     updatedAt      UTCTime
+    done           Bool default=0
 
     UniqueNotification accountId threadId
     deriving Eq Show

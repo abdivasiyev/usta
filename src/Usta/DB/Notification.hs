@@ -6,10 +6,12 @@ module Usta.DB.Notification
   ( InboxItem (..)
   , saveNotifications
   , markRead
+  , setDone
   , inbox
   ) where
 
 import Control.Exception (throwIO)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Kind (Type)
@@ -57,6 +59,8 @@ data InboxItem = InboxItem
   , pullRequest :: Maybe PullRequest
     -- ^ The pull request it is about, when that has been synced too: the
     -- inbox shows its state and checks.
+  , done :: Bool
+    -- ^ Marked done in usta: shown under Done, not in the inbox.
   }
   deriving stock (Eq, Show)
 
@@ -67,6 +71,9 @@ saveNotifications account notifications = do
   requireHost account (map (\n -> n.host) notifications)
   for_ notifications $ \n -> do
     let row = toRow account n
+    -- New activity on a thread marked done brings it back to the inbox.
+    before <- Persist.getBy (UniqueNotification account n.threadId)
+    let renewed = maybe False (\(Entity _ old) -> old.done && n.updatedAt > old.updatedAt) before
     _ <-
       Persist.upsertBy
         (UniqueNotification account n.threadId)
@@ -79,6 +86,10 @@ saveNotifications account notifications = do
         , NotificationUnread Persist.=. row.unread
         , NotificationUpdatedAt Persist.=. row.updatedAt
         ]
+    when renewed $
+      Persist.updateWhere
+        [NotificationAccountId Persist.==. account, NotificationThreadId Persist.==. n.threadId]
+        [NotificationDone Persist.=. False]
     pure ()
 
 -- | Marks the thread read in the cache; telling the forge is sync's job.
@@ -87,6 +98,14 @@ markRead account thread =
   Persist.updateWhere
     [NotificationAccountId Persist.==. account, NotificationThreadId Persist.==. thread]
     [NotificationUnread Persist.=. False]
+
+-- | Marks the thread done in usta, or brings it back to the inbox. Usta
+-- keeps this itself: a forge only knows read and unread.
+setDone :: AccountId -> ThreadId -> Bool -> Result ()
+setDone account thread done =
+  Persist.updateWhere
+    [NotificationAccountId Persist.==. account, NotificationThreadId Persist.==. thread]
+    [NotificationDone Persist.=. done]
 
 -- | Every account's notifications, most recently updated first.
 inbox :: Result [InboxItem]
@@ -119,6 +138,7 @@ inbox = do
           , forge = account.forge
           , notification = n
           , pullRequest = pr >>= \p -> Map.lookup (entityKey p) byKey
+          , done = row.done
           }
 
 toRow :: AccountId -> Notification -> Schema.Notification
@@ -133,6 +153,7 @@ toRow account n =
     , reason = n.reason
     , unread = n.unread
     , updatedAt = n.updatedAt
+    , done = False
     }
   where
     (kind, number) = case n.subject of

@@ -7,6 +7,12 @@ module Usta.Forge.Forgejo.Api
   ( Routes (..)
   , api
   , ListQuery (..)
+  , CommitsQuery (..)
+  , RefQuery (..)
+  , RawText
+  , DiffOf (..)
+  , Entry (..)
+  , ApiCommit (..)
   , NotificationQuery (..)
   , SearchQuery (..)
   , IssueType (..)
@@ -25,6 +31,8 @@ module Usta.Forge.Forgejo.Api
   ) where
 
 import Data.Aeson (FromJSON (..), Value, withObject, (.!=), (.:), (.:?))
+import qualified Data.ByteString.Lazy as BL
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Aeson.Types (Parser)
 import Data.Int (Int64)
 import Data.Kind (Type)
@@ -32,11 +40,13 @@ import Data.Maybe (isJust)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 import Servant.API
 import Servant.Client (AsClientT, ClientM, client)
 
+import Usta.Types.Commit (Commit (..))
 import Usta.Types.Count (Count)
 import Usta.Types.Label (Color)
 import Usta.Types.Login (Login)
@@ -66,6 +76,21 @@ data Routes mode = Routes
   , status
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits" :> Capture "ref" Text
            :> "status" :> Get '[JSON] CombinedStatus
+  , pullDiff
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" DiffOf
+           :> Get '[RawText] Text
+  , pullCommits
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "commits" :> RecordQueryParam ListQuery :> Get '[JSON] [ApiCommit]
+  , commits
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits"
+           :> RecordQueryParam CommitsQuery :> Get '[JSON] [ApiCommit]
+  , contents
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "contents"
+           :> RecordQueryParam RefQuery :> Get '[JSON] [Entry]
+  , raw
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "raw" :> Capture "path" Text
+           :> RecordQueryParam RefQuery :> Get '[RawText] Text
   }
   deriving stock (Generic)
 
@@ -111,6 +136,70 @@ data SearchQuery = SearchQuery
   deriving stock (Generic)
 
 instance ToQuery SearchQuery
+
+-- | A branch's commits; the details Forgejo can add are turned off.
+type CommitsQuery :: Type
+data CommitsQuery = CommitsQuery
+  { sha :: Text
+    -- ^ The branch or commit to start from.
+  , limit :: Int
+  , stat :: Bool
+  , verification :: Bool
+  , files :: Bool
+  }
+  deriving stock (Generic)
+
+instance ToQuery CommitsQuery
+
+type RefQuery :: Type
+newtype RefQuery = RefQuery {ref :: Text}
+  deriving stock (Generic)
+
+instance ToQuery RefQuery
+
+-- | A file sent as is: Forgejo labels raw files and diffs as plain text, a
+-- diff or a download, all read here as UTF-8.
+type RawText :: Type
+data RawText
+
+instance Accept RawText where
+  contentTypes _ = "text/plain" :| ["text/x-diff", "text/x-patch", "text/markdown", "application/octet-stream"]
+
+instance MimeUnrender RawText Text where
+  mimeUnrender _ = Right . decodeUtf8Lenient . BL.toStrict
+
+-- | The path segment "3.diff": pull request 3 as a diff.
+type DiffOf :: Type
+newtype DiffOf = DiffOf Number
+
+instance ToHttpApiData DiffOf where
+  toUrlPiece (DiffOf n) = toUrlPiece n <> ".diff"
+
+-- | A file or folder in a repository's tree.
+type Entry :: Type
+data Entry = Entry
+  { name :: Text
+  , kind :: Text
+    -- ^ "file", "dir", "symlink" or "submodule".
+  }
+
+instance FromJSON Entry where
+  parseJSON = withObject "Entry" $ \o -> Entry <$> o .: "name" <*> o .: "type"
+
+-- | A commit as Forgejo lists it, read straight into usta's.
+type ApiCommit :: Type
+newtype ApiCommit = ApiCommit {commit :: Commit}
+
+instance FromJSON ApiCommit where
+  parseJSON = withObject "Commit" $ \o -> do
+    sha <- o .: "sha" >>= parseM
+    details <- o .: "commit"
+    message <- details .: "message"
+    author <- details .: "author"
+    name <- author .: "name"
+    date <- author .: "date"
+    let (subject, rest) = T.breakOn "\n" message
+    pure (ApiCommit Commit {sha = sha, author = name, authoredAt = date, subject = T.strip subject, body = T.strip rest})
 
 type IssueType :: Type
 data IssueType = Issues | Pulls

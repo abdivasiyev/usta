@@ -18,10 +18,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (NominalDiffTime, UTCTime, addUTCTime)
 
-import Usta.Forge (Failure, Fetched (..))
+import Usta.Forge (Failure, Fetched (..), Known (..))
 import qualified Usta.Forge as F
 import Usta.Types.Account (Account (..))
-import Usta.Types.ETag (ETag)
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Discussion as D
@@ -127,12 +126,13 @@ new now account = do
     , failWith = \f -> atomicModifyIORef' ref $ \s -> (s {failure = f}, ())
     }
 
-fetch :: IORef State -> Resource -> (State -> [a]) -> Maybe ETag -> IO (Fetched [a])
+-- | The whole list, or 'NotModified' while its version is the one known.
+fetch :: IORef State -> Resource -> (State -> [a]) -> Known -> IO (Fetched [a])
 fetch ref resource items known = do
   failIfTold ref
   s <- readIORef ref
   tag <- parseM ("\"sample-" <> T.pack (show (version resource s)) <> "\"")
-  pure $ if known == Just tag then NotModified else Fetched {etag = Just tag, items = items s}
+  pure $ if known.etag == Just tag then NotModified else Fetched {etag = Just tag, items = items s}
 
 -- | The sample takes no changes.
 refuse :: IO a

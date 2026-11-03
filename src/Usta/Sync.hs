@@ -12,13 +12,15 @@ module Usta.Sync
   ) where
 
 import Control.Concurrent (forkIO, killThread)
+import Control.Monad (when)
 import Control.Concurrent.STM (TVar, atomically, check, modifyTVar', newTVarIO, orElse, readTVar, readTVarIO, registerDelay, retry, writeTVar)
 import Data.Foldable (toList)
 import qualified Data.Map.Strict as Map
 import Control.Exception (Handler (..), SomeAsyncException, SomeException, catches, displayException, fromException, throwIO)
 import Data.Kind (Type)
 import qualified Data.Text as T
-import Data.Time (NominalDiffTime, UTCTime, getCurrentTime)
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Time (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime, getCurrentTime)
 import Database.Persist.Sql (ConnectionPool)
 
 import Usta.Bus (Bus, Change (..), publish)
@@ -29,8 +31,7 @@ import Usta.DB.PullRequest (savePullRequests)
 import Usta.DB.Repository (saveRepositories)
 import Usta.DB.Schema.Account (AccountId)
 import Usta.DB.SyncCursor (Cursor (..), cursor, saveCursor)
-import Usta.Forge (Failure (..), Fetched (..), Forge (..))
-import Usta.Types.ETag (ETag)
+import Usta.Forge (Failure (..), Fetched (..), Forge (..), Known (..))
 import Usta.Types.Resource (Resource (..))
 
 type State :: Type
@@ -114,22 +115,31 @@ start settings accounts = do
     }
 
 -- | Syncs, then waits for the interval (if any) or a bump of @wake@,
--- forever.
+-- forever. The first sync is a full one, and so is one each half hour
+-- after: the others ask only for what changed, which cannot tell what
+-- was deleted.
 worker :: Settings -> (Status -> IO ()) -> TVar Int -> TVar (Maybe NominalDiffTime) -> (AccountId, Forge) -> IO ()
-worker settings report wake every (key, forge) = readTVarIO wake >>= loop
+worker settings report wake every (key, forge) = do
+  fullAt <- newIORef Nothing
+  readTVarIO wake >>= loop fullAt
   where
-    loop seen = do
-      syncAccount settings report key forge
+    loop fullAt seen = do
+      now <- getCurrentTime
+      lastFull <- readIORef fullAt
+      let full = maybe True (\t -> diffUTCTime now t >= 30 * 60) lastFull
+      synced <- syncAccount settings report key forge full
+      when (full && synced) $ writeIORef fullAt (Just now)
       pace <- readTVarIO every
       timeout <- traverse (\s -> registerDelay (floor (s * 1000000))) pace
       next <- atomically $
         (readTVar wake >>= \n -> check (n /= seen) >> pure n)
           `orElse` (maybe retry (\t -> readTVar t >>= check) timeout >> readTVar wake)
-      loop next
+      loop fullAt next
 
--- | One sync of every list, stopping at the first failure.
-syncAccount :: Settings -> (Status -> IO ()) -> AccountId -> Forge -> IO ()
-syncAccount settings report key forge = do
+-- | One sync of every list, stopping at the first failure; 'True' when
+-- it went through. @full@ asks for whole lists.
+syncAccount :: Settings -> (Status -> IO ()) -> AccountId -> Forge -> Bool -> IO Bool
+syncAccount settings report key forge full = do
   report Status {accountId = key, state = Syncing}
   outcome <- attempt $ do
     list Notifications forge.notifications (const (saveNotifications key))
@@ -138,20 +148,24 @@ syncAccount settings report key forge = do
     list Repositories forge.repositories (saveRepositories key)
   time <- getCurrentTime
   report Status {accountId = key, state = either Failed (const (Synced time)) outcome}
+  pure (either (const False) (const True) outcome)
   where
-    list :: Resource -> (Maybe ETag -> IO (Fetched [a])) -> (UTCTime -> [a] -> Result ()) -> IO ()
+    list :: Resource -> (Known -> IO (Fetched [a])) -> (UTCTime -> [a] -> Result ()) -> IO ()
     list resource fetch save = do
       known <- run settings.pool (cursor key resource)
+      -- As of when this fetch starts, so what changes during it comes next
+      -- time; a minute back, for clocks a little apart.
+      started <- getCurrentTime
       let knownTag = known >>= (.etag)
-      fetched <- fetch knownTag
-      time <- getCurrentTime
+          since = if full then Nothing else addUTCTime (-60) . (.syncedAt) <$> known
+      fetched <- fetch Known {etag = knownTag, since = since}
       case fetched of
         NotModified ->
-          run settings.pool (saveCursor key resource Cursor {etag = knownTag, syncedAt = time})
+          run settings.pool (saveCursor key resource Cursor {etag = knownTag, syncedAt = started})
         Fetched {etag = tag, items = items} -> do
           run settings.pool $ do
-            save time items
-            saveCursor key resource Cursor {etag = tag, syncedAt = time}
+            save started items
+            saveCursor key resource Cursor {etag = tag, syncedAt = started}
           publish settings.changes Change {accountId = key, resource = resource}
 
 -- | Runs a sync, turning what can go wrong into a 'Failure'. Async

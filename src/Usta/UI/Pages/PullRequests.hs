@@ -73,6 +73,8 @@ data PullRequest = PullRequest
   , number :: Int
   , title :: Text
   , branch :: Text
+  , base :: Text
+    -- ^ The branch it would merge into.
   , author :: Text
   , checks :: Checks
   , review :: Review
@@ -248,6 +250,7 @@ fromPullRequest c forge pr
       , number = unparse pr.ref.number
       , title = pr.title
       , branch = pr.headBranch
+      , base = pr.baseBranch
       , author = unparse pr.author
       , checks = maybe NoChecks checks pr.checks
       , review = maybe NoReviewers review pr.review
@@ -279,17 +282,17 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 sample :: [PullRequest]
 sample =
-  [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "abdivasiyev"
+  [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "master" "abdivasiyev"
       ChecksPassed ReviewRequested 1 "5m" False [WaitingForMyReview] (2, 1) Nothing
-  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "abdivasiyev"
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "master" "abdivasiyev"
       ChecksFailed ReviewRequested 0 "22m" False [WaitingForMyReview] (2, 1) Nothing
-  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "abdivasiyev"
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "master" "abdivasiyev"
       ChecksRunning NoReviewers 2 "Yesterday" False [CreatedByMe] (2, 1) Nothing
-  , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "abdivasiyev"
+  , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "master" "abdivasiyev"
       NoChecks NoReviewers 0 "Mon" True [CreatedByMe] (2, 1) Nothing
-  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "abdivasiyev"
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "master" "abdivasiyev"
       ChecksPassed Approved 3 "Mon" False [CreatedByMe] (2, 1) Nothing
-  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 21 "refactor: move every host to den aspects" "refactor/den-aspects" "abdivasiyev"
+  , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 21 "refactor: move every host to den aspects" "refactor/den-aspects" "master" "abdivasiyev"
       ChecksRunning ReviewRequested 0 "1h" False [WaitingForMyReview] (212, 14) (Just 64)
   ]
 

@@ -101,7 +101,8 @@ buildAt start source app = do
         void $ Gtk.stackAddNamed screens widget (Just "detail")
         Gtk.stackSetVisibleChildName screens "detail"
       openPullRequestWith fetch backLabel summary =
-        PullRequest.new backLabel backToMain (tabContent source fetch summary) summary
+        PullRequest.new backLabel backToMain
+          (tabContent source (openPullRequestWith fetch backLabel summary) fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
       openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
@@ -368,10 +369,35 @@ buildAt start source app = do
 -- | Each tab of a pull request; sample content until the forge supplies it.
 -- @fetch@ is how far the local mirror is with the branch, while it is
 -- still fetching; the Files tab waits for it.
-tabContent :: Source -> Maybe Double -> PullRequest.Summary -> PullRequest.Tab -> IO Gtk.Widget
-tabContent source fetch summary tab = case tab of
+-- | @reopen@ loads the pull request again, after a change on the forge.
+tabContent :: Source -> IO () -> Maybe Double -> PullRequest.Summary -> (PullRequest.State -> IO ()) -> PullRequest.Tab -> IO Gtk.Widget
+tabContent source reopen fetch summary showState tab = case tab of
   PullRequest.Files | Just p <- fetch -> Files.fetching (pure ()) (Files.fetchingSample p)
-  PullRequest.Conversation -> Conversation.new Conversation.sample
+  PullRequest.Conversation -> do
+    let at = (summary.host, summary.repo, summary.number)
+        (host, repo, n) = at
+        load = do
+          d <- source.discussion host repo n
+          -- The timeline lists the commits; without them it still loads.
+          commits <- source.pullCommits host repo n
+          pure (fmap (\x -> (x, either (const []) snd commits)) d)
+        actions = Conversation.Actions
+          { comment = source.comment host repo n
+          , setClosed = source.setClosed host repo n
+          , merge = source.merge host repo n
+          , refresh = reopen
+          }
+        checks = case fmap fst summary.checks of
+          Just Success -> Just True
+          Just Danger -> Just False
+          _ -> Nothing
+    loadInto load $ \(d, commits) -> do
+      c <- clock
+      showState $ case (d.merged, d.closed) of
+        (True, _) -> PullRequest.MergedState
+        (_, True) -> PullRequest.Closed
+        _ -> summary.state
+      Conversation.new actions (Conversation.fromDiscussion c d commits summary.branches checks)
   PullRequest.Files ->
     loadInto (source.pullFiles summary.host summary.repo summary.number) $ \(from, changes) ->
       Files.new (Files.fromFileDiffs (said from "Diff computed locally" "Diff from the forge's API") changes)
@@ -412,6 +438,7 @@ notificationSummary n = PullRequest.Summary
   , PullRequest.commits = 1
   -- The tab has room for a word, not the card's "1 of 1 passed".
   , PullRequest.checks = fmap (\(tone, _) -> (tone, word tone)) n.checks
+  , PullRequest.branches = maybe ("", "") id n.branch
   }
   where
     word tone = case tone of
@@ -486,6 +513,7 @@ summaryOf pr = PullRequest.Summary
       PullRequests.ChecksFailed -> Just (Danger, "1 failed")
       PullRequests.ChecksRunning -> Just (Warning, "running")
       PullRequests.NoChecks -> Nothing
+  , PullRequest.branches = (pr.branch, pr.base)
   }
 
 -- | The single-key shortcuts, for the footer strip and Settings.

@@ -18,6 +18,7 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -51,6 +52,8 @@ data Summary = Summary
   , commits :: Int
   , checks :: Maybe (Tone, Text)
     -- ^ Shown next to the Checks tab, e.g. @(Success, "1/1")@.
+  , branches :: (Text, Text)
+    -- ^ The branch with the changes, and the one it would merge into.
   }
 
 type Tab :: Type
@@ -61,19 +64,21 @@ tabName :: Tab -> Text
 tabName = T.toLower . T.pack . show
 
 -- | @backLabel@ names where Back goes, e.g. "Pull requests" or "Inbox";
--- @tabContent@ builds each tab's screen.
-new :: Text -> IO () -> (Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
+-- @tabContent@ builds each tab's screen, given what sets the header's
+-- state badge, for when the forge says otherwise than the list did.
+new :: Text -> IO () -> ((State -> IO ()) -> Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
 new backLabel onBack tabContent summary = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
                          , #cssClasses := ["u-pull-request"]
                          ]
-  header summary backLabel onBack >>= #append page
+  (bar, showState) <- header summary backLabel onBack
+  #append page bar
 
   content <- GI.new Gtk.Stack [#vexpand := True, #hexpand := True]
   forM_ [minBound .. maxBound] $ \tab -> do
-    widget <- tabContent tab
+    widget <- tabContent showState tab
     void $ Gtk.stackAddNamed content widget (Just (tabName tab))
 
   tabBar summary (Gtk.stackSetVisibleChildName content . tabName) >>= #append page
@@ -85,7 +90,7 @@ placeholder :: Tab -> IO Gtk.Widget
 placeholder tab =
   GI.new Gtk.Label [#label := T.pack (show tab), #cssClasses := ["muted"]] >>= Gtk.toWidget
 
-header :: Summary -> Text -> IO () -> IO Gtk.Box
+header :: Summary -> Text -> IO () -> IO (Gtk.Box, State -> IO ())
 header s backLabel onBack = do
   bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 12
@@ -108,8 +113,14 @@ header s backLabel onBack = do
   Forge.smallDot s.forge >>= #append meta
   label (s.host <> "/" <> s.repo) ["meta", "mono"] >>= #append meta
   label ("#" <> T.pack (show s.number)) ["meta"] >>= #append meta
-  let (tone, text) = stateBadge s.state
-  Badge.new tone text >>= #append meta
+  badge <- GI.new Gtk.Box []
+  let showState state = do
+        old <- Gtk.widgetGetFirstChild badge
+        forM_ old (Gtk.boxRemove badge)
+        let (tone, text) = stateBadge state
+        Badge.new tone text >>= #append badge
+  showState s.state
+  #append meta badge
   #append titles meta
   titleLabel <- label s.title ["pr-title"]
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
@@ -117,8 +128,18 @@ header s backLabel onBack = do
   #append bar titles
 
   Button.new Button.defaults { Button.label = Just "Check out locally" } >>= #append bar
-  Button.new Button.defaults { Button.label = Just "Open in browser" } >>= #append bar
-  pure bar
+  browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
+  void $ GI.on browser #clicked $ do
+    launcher <- Gtk.uriLauncherNew (Just url)
+    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  #append bar browser
+  pure (bar, showState)
+  where
+    path = case s.forge of
+      Forge.GitHub -> "/pull/"
+      Forge.GitLab -> "/-/merge_requests/"
+      Forge.Forgejo -> "/pulls/"
+    url = "https://" <> s.host <> "/" <> s.repo <> path <> T.pack (show s.number)
 
 -- | Underlined tabs with counts; calls @onSelect@ with the chosen tab.
 tabBar :: Summary -> (Tab -> IO ()) -> IO Gtk.Box

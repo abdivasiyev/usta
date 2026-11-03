@@ -273,6 +273,30 @@ Dark screens use the same layouts with the dark token values.
 
     ![Check out locally](design/check-out.png)
 
+### Repositories
+
+21. **Branches and history.** The header has the branch picker (search,
+    default first, recently pushed with ahead and behind counts, tags) and
+    Star and Pin; pinned repositories sit in the sidebar. Overview, Files,
+    Commits and Insights follow the chosen branch. Commits lists the
+    branch's history by day; a commit opens its diff.
+
+    ![Branches and history](design/repository-branches.png)
+
+22. **Insights.** For a month, three months, a year or all time: commits
+    per week, lines added and removed per week, and contributors with
+    their commits, lines and a weekly sparkline. Computed from the local
+    mirror and kept until the branch moves.
+
+    ![Insights](design/repository-insights.png)
+
+23. **Files: blame, find and go to file.** The code view has Code, Blame
+    and History. `Ctrl F` finds in the file; `Ctrl P` goes to any file by
+    fuzzy match. A line's menu copies a permalink (at the commit) or a
+    link, shows the commit, or opens it on the forge.
+
+    ![Blame, find and go to file](design/files-tools.png)
+
 ## Loading states
 
 Cached data always shows first. Loading UI appears only when there is

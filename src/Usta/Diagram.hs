@@ -21,10 +21,12 @@ import qualified Usta.Diagram.Flowchart as Flowchart
 import qualified Usta.Diagram.Gantt as Gantt
 import qualified Usta.Diagram.GitGraph as GitGraph
 import qualified Usta.Diagram.Journey as Journey
+import qualified Usta.Diagram.Kanban as Kanban
 import qualified Usta.Diagram.Mindmap as Mindmap
 import qualified Usta.Diagram.Pie as Pie
 import qualified Usta.Diagram.Quadrant as Quadrant
 import qualified Usta.Diagram.Radar as Radar
+import qualified Usta.Diagram.Sankey as Sankey
 import qualified Usta.Diagram.Sequence as Sequence
 import qualified Usta.Diagram.State as State
 import qualified Usta.Diagram.Timeline as Timeline
@@ -48,6 +50,8 @@ data Kind
   | Radar Radar.Radar
   | Mindmap Mindmap.Mindmap
   | GitGraph GitGraph.GitGraph
+  | Sankey Sankey.Sankey
+  | Kanban Kanban.Kanban
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -79,6 +83,8 @@ parse source = do
         w | w `elem` ["radar", "radar-beta"] -> Radar <$> Radar.parse (T.unlines meaningful)
         "mindmap" -> Mindmap <$> Mindmap.parse (T.unlines meaningful)
         "gitgraph" -> GitGraph <$> GitGraph.parse (T.unlines meaningful)
+        w | w `elem` ["sankey", "sankey-beta"] -> Sankey <$> Sankey.parse (T.unlines meaningful)
+        "kanban" -> Kanban <$> Kanban.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -114,6 +120,8 @@ draw measure d = do
     Radar r -> Radar.draw measure r
     Mindmap m -> Mindmap.draw measure m
     GitGraph g -> GitGraph.draw measure g
+    Sankey s -> Sankey.draw measure s
+    Kanban k -> Kanban.draw measure k
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

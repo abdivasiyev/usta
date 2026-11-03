@@ -27,6 +27,7 @@ import qualified Usta.Diagram.Packet as Packet
 import qualified Usta.Diagram.Pie as Pie
 import qualified Usta.Diagram.Quadrant as Quadrant
 import qualified Usta.Diagram.Radar as Radar
+import qualified Usta.Diagram.Requirement as Requirement
 import qualified Usta.Diagram.Sankey as Sankey
 import qualified Usta.Diagram.Sequence as Sequence
 import qualified Usta.Diagram.State as State
@@ -56,6 +57,7 @@ data Kind
   | Kanban Kanban.Kanban
   | Packet Packet.Packet
   | Treemap Treemap.Treemap
+  | Requirement Requirement.Requirements
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -91,6 +93,7 @@ parse source = do
         "kanban" -> Kanban <$> Kanban.parse (T.unlines meaningful)
         w | w `elem` ["packet", "packet-beta"] -> Packet <$> Packet.parse (T.unlines meaningful)
         w | w `elem` ["treemap", "treemap-beta"] -> Treemap <$> Treemap.parse (T.unlines meaningful)
+        "requirementdiagram" -> Requirement <$> Requirement.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -130,6 +133,7 @@ draw measure d = do
     Kanban k -> Kanban.draw measure k
     Packet p -> Packet.draw measure p
     Treemap t -> Treemap.draw measure t
+    Requirement r -> Requirement.draw measure r
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

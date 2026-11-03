@@ -10,11 +10,11 @@ module Usta.UI.Window
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, bracket_, try)
 import Control.Monad (forM, forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import System.Directory (getHomeDirectory)
@@ -64,6 +64,7 @@ import qualified Usta.UI.Pages.Welcome as Welcome
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
+import qualified Usta.UI.Source as Source
 import Usta.Details (From (..))
 import qualified Usta.Types.Discussion as D
 import Usta.Preferences (Preferences (..), Theme (..))
@@ -98,7 +99,27 @@ build = buildAt Ready
 -- | The pages show @source@'s lists, reload the ones that change, and
 -- reload all of them each minute so "5 min ago" stays true.
 buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildAt start source app = do
+buildAt start given app = do
+  -- A thin moving bar under the header while a forge or mirror call takes
+  -- longer than 300 ms (its size is not known, so it does not count).
+  activity <- Progress.bar Progress.Unknown
+  Gtk.widgetAddCssClass activity "u-activity"
+  GI.set activity [#visible := False]
+  waiting <- newIORef (0 :: Int)
+  let onMain act = void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (act >> pure False)
+      track :: IO a -> IO a
+      track act = bracket_
+        (do atomicModifyIORef' waiting (\n -> (n + 1, ()))
+            onMain $ void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 300 $ do
+              busy <- (> 0) <$> readIORef waiting
+              when busy $ GI.set activity [#visible := True]
+              pure False)
+        (do atomicModifyIORef' waiting (\n -> (n - 1, ()))
+            onMain $ do
+              idle <- (== 0) <$> readIORef waiting
+              when idle $ GI.set activity [#visible := False])
+        act
+      source = Source.tracking track given
   -- Two screens: "main" (sidebar and pages) and "detail-N" (a full-width
   -- screen such as one pull request or the new pull request form).
   -- Screens and pages cross-fade; GTK skips it when animations are off.
@@ -408,6 +429,7 @@ buildAt start source app = do
 
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
+  #append root activity
   #append root screens
   #append root footerSlot
 

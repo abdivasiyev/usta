@@ -12,6 +12,7 @@ module Usta.UI.Source
   , withAccounts
   , withMirrors
   , withDetails
+  , tracking
   ) where
 
 import Control.Exception (IOException, SomeException, displayException, try)
@@ -409,6 +410,33 @@ withMirrors pool accounts mirrors statuses source = source
       (Just (Mirrored _ _), Just (Mirrors.Failed message)) ->
         view {Repositories.mirror = (Danger, "Failed"), Repositories.mirrorDetail = Just message, Repositories.canMirror = True}
       (Just (Mirrored _ _), Nothing) -> view {Repositories.mirror = (Neutral, "Waiting to fetch")}
+
+-- | Every call that waits on a forge or a mirror run inside @track@, so
+-- the window can show that something is on its way.
+tracking :: (forall a. IO a -> IO a) -> Source -> Source
+tracking track s = s
+  { setDone = \n d -> track (s.setDone n d)
+  , mirrorOrigins = \h r -> track (s.mirrorOrigins h r)
+  , pullFiles = \h r n -> track (s.pullFiles h r n)
+  , pullCommits = \h r n -> track (s.pullCommits h r n)
+  , commitDiff = \h r x -> track (s.commitDiff h r x)
+  , recentCommits = \h r b -> track (s.recentCommits h r b)
+  , readme = \h r b -> track (s.readme h r b)
+  , tree = \h r b -> track (s.tree h r b)
+  , file = \h r b p -> track (s.file h r b p)
+  , discussion = \h r n -> track (s.discussion h r n)
+  , comment = \h r n t -> track (s.comment h r n t)
+  , setClosed = \h r n c -> track (s.setClosed h r n c)
+  , merge = \h r n m d -> track (s.merge h r n m d)
+  , review = \h r n v t -> track (s.review h r n v t)
+  , createIssue = \h r x -> track (s.createIssue h r x)
+  , createPull = \h r x -> track (s.createPull h r x)
+  , branches = \h r -> track (s.branches h r)
+  , labels = \h r -> track (s.labels h r)
+  , compare = \h r a b -> track (s.compare h r a b)
+  , clearCache = track s.clearCache
+  , pruneMirrors = track s.pruneMirrors
+  }
 
 -- | Pull requests' and branches' contents through @details@, each found by
 -- the account that has its repository in the cache.

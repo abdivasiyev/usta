@@ -18,6 +18,8 @@ import qualified Data.Text as T
 import qualified Usta.Diagram.Class as Class
 import qualified Usta.Diagram.Entity as Entity
 import qualified Usta.Diagram.Flowchart as Flowchart
+import qualified Usta.Diagram.Pie as Pie
+import qualified Usta.Diagram.Quadrant as Quadrant
 import qualified Usta.Diagram.Sequence as Sequence
 import qualified Usta.Diagram.State as State
 import Usta.Diagram.Scene
@@ -30,6 +32,8 @@ data Kind
   | Class Class.Classes
   | State State.States
   | Entity Entity.Entities
+  | Pie Pie.Pie
+  | Quadrant Quadrant.Quadrant
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -52,6 +56,8 @@ parse source = do
         w | w `elem` ["classdiagram", "classdiagram-v2"] -> Class <$> Class.parse (T.unlines meaningful)
         w | w `elem` ["statediagram", "statediagram-v2"] -> State <$> State.parse (T.unlines meaningful)
         "erdiagram" -> Entity <$> Entity.parse (T.unlines meaningful)
+        "pie" -> Pie <$> Pie.parse (T.unlines meaningful)
+        "quadrantchart" -> Quadrant <$> Quadrant.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -78,6 +84,8 @@ draw measure d = do
     Class c -> Class.draw measure c
     State s -> State.draw measure s
     Entity e -> Entity.draw measure e
+    Pie p -> Pie.draw measure p
+    Quadrant q -> Quadrant.draw measure q
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

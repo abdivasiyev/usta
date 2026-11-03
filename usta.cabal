@@ -34,6 +34,8 @@ executable usta
     Usta.DB.Schema.Repository
     Usta.DB.Schema.SyncCursor
     Usta.DB.SyncCursor
+    Usta.Forge
+    Usta.Forge.Sample
     Usta.Types.Account
     Usta.Types.Count
     Usta.Types.ETag

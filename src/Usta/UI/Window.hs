@@ -136,7 +136,16 @@ buildAt start source app = do
     (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))
   issuePage <- source.issues >>= Issues.new openNewIssue (openIssue "Issues" . issueDetail)
   -- The forms open with sample fields until they take the repository.
-  repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest)
+  -- Declining starts no clone, so no mirror state tells the page to redraw.
+  pageRef <- newIORef (pure ())
+  let chooseMirror r choice = do
+        answered <- source.mirror r.host r.name choice
+        when (either (const False) (const True) answered) $
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (join (readIORef pageRef) >> pure False)
+        pure answered
+  repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest) chooseMirror
+  writeIORef pageRef (source.repositories >>= repositoryPage.update)
+  source.onMirrorStatus (source.repositories >>= repositoryPage.update)
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   shownPage <- newIORef Sidebar.Inbox
   sidebarSlot <- GI.new Gtk.Box []

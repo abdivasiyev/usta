@@ -7,7 +7,11 @@
 -- Git never asks on the terminal (@GIT_TERMINAL_PROMPT=0@, and ssh in
 -- batch mode unless @GIT_SSH_COMMAND@ is set already) and speaks in the C
 -- locale with paths unquoted, so its answers parse the same way everywhere.
--- A mirror's URL is https or ssh; over ssh the user's own keys sign in. Revisions and URLs come after @--end-of-options@ or @--@,
+-- A mirror's URL is https or ssh; over ssh the user's own keys sign in,
+-- over https usta itself is git's only credential helper
+-- ("Usta.Git.Credential"), so the token is not kept by any other helper.
+-- An https URL names the user (@https://login\@host/owner/repo.git@), which
+-- tells the helper whose token to give. Revisions and URLs come after @--end-of-options@ or @--@,
 -- so a name that starts with "-" is never taken for an option.
 module Usta.Git
   ( Kind (..)
@@ -32,7 +36,7 @@ import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Time (UTCTime, zonedTimeToUTC)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import System.Directory (createDirectoryIfMissing)
-import System.Environment (getEnvironment)
+import System.Environment (getEnvironment, getExecutablePath)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory)
 import System.Process.Typed (proc, readProcess, setEnv)
@@ -62,16 +66,21 @@ instance Exception GitError
 git :: [String] -> IO Text
 git args = do
   inherited <- getEnvironment
+  self <- getExecutablePath
   let ssh = [("GIT_SSH_COMMAND", "ssh -o BatchMode=yes") | "GIT_SSH_COMMAND" `notElem` map fst inherited]
       env = ("GIT_TERMINAL_PROMPT", "0") : ("LC_ALL", "C") : ssh
         <> [kv | kv@(k, _) <- inherited, k `notElem` ["GIT_TERMINAL_PROMPT", "LC_ALL"]]
-      common = ["-c", "core.quotePath=false", "-c", "color.ui=false"]
+      -- The empty helper drops every helper configured before it.
+      helpers = ["-c", "credential.helper=", "-c", "credential.helper=!" <> quoted self <> " git-credential"]
+      common = ["-c", "core.quotePath=false", "-c", "color.ui=false"] <> helpers
   (code, out, err) <- readProcess (setEnv env (proc "git" (common <> args)))
   case code of
     ExitSuccess -> pure (decode out)
-    ExitFailure _ -> throwIO (GitError (T.intercalate "\n" (take 3 (T.lines (decode err)))))
+    ExitFailure _ -> throwIO (GitError (T.intercalate "\n" (take 3 (map T.strip (T.lines (decode err))))))
   where
     decode = decodeUtf8Lenient . BL.toStrict
+    -- A helper starting with "!" is a shell command, so the path is quoted.
+    quoted path = "'" <> concatMap (\c -> if c == '\'' then "'\\''" else [c]) path <> "'"
 
 -- | Makes a bare mirror of @url@ at @path@. Every ref is kept, pull
 -- requests' own (@refs/pull/…@) too, so their commits are local.

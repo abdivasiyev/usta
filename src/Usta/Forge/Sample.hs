@@ -24,6 +24,7 @@ import Usta.Types.Account (Account (..))
 import Usta.Types.ETag (ETag)
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
+import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Issue as I
 import qualified Usta.Types.Label as L
 import qualified Usta.Types.Notification as N
@@ -86,6 +87,27 @@ new now account = do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->
               (bumped s s {notifications = [n {N.unread = n.unread && n.threadId /= thread} | n <- s.notifications]}, ())
+        -- Discussions are the items' own: no description, no comments,
+        -- and nothing can be posted.
+        , F.discussion = \repo n -> do
+            failIfTold ref
+            s <- readIORef ref
+            let opened = [(i.author, i.createdAt, i.closedAt /= Nothing) | i <- s.issues, i.ref.repo == repo, i.ref.number == n]
+                  <> [(p.author, p.createdAt, p.state `elem` [P.Merged, P.Closed]) | p <- s.pullRequests, p.ref.repo == repo, p.ref.number == n]
+            case opened of
+              (author, at, closed) : _ -> pure D.Discussion
+                { D.opening = D.Comment {D.author = author, D.body = "", D.createdAt = at}
+                , D.comments = []
+                , D.closed = closed
+                , D.assignees = []
+                , D.labels = []
+                , D.milestone = Nothing
+                }
+              [] -> throwIO (F.Refused "No such issue or pull request.")
+        , F.comment = \_ _ _ -> refuse
+        , F.setClosed = \_ _ _ -> refuse
+        , F.merge = \_ _ _ _ -> refuse
+        , F.review = \_ _ _ _ -> refuse
         , F.markUnread = \thread -> do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->
@@ -103,6 +125,10 @@ fetch ref resource items known = do
   s <- readIORef ref
   tag <- parseM ("\"sample-" <> T.pack (show (version resource s)) <> "\"")
   pure $ if known == Just tag then NotModified else Fetched {etag = Just tag, items = items s}
+
+-- | The sample takes no changes.
+refuse :: IO a
+refuse = throwIO (F.Refused "The sample forge takes no changes.")
 
 failIfTold :: IORef State -> IO ()
 failIfTold ref = readIORef ref >>= \s -> for_ s.failure throwIO

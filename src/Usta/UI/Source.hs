@@ -45,7 +45,8 @@ data Source = Source
     -- ^ Runs the action on the GTK main thread whenever a list was saved
     -- anew.
   , onStatus :: (Status -> IO ()) -> IO ()
-    -- ^ Likewise for each account's sync state.
+    -- ^ Likewise for each account's sync state, starting with the last
+    -- one each account reported before.
   , syncNow :: IO ()
   }
 
@@ -83,7 +84,7 @@ fromDatabase pool changes statuses sync = Source
       rows <- run pool listAccounts
       pure [Connected {accountId = key, forge = a.forge, host = unparse a.host} | (key, a) <- rows]
   , onChange = \act -> subscribe changes (act . (.resource))
-  , onStatus = subscribe statuses
+  , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
   , syncNow = sync.syncNow
   }
   where

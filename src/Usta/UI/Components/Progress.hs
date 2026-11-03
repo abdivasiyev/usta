@@ -84,7 +84,10 @@ new parts amount = do
 
 css :: Text
 css = mconcat
-  [ "progressbar.u-progress trough {"
+  -- The window's activity bar: 3 px, edge to edge, under the header.
+  [ "progressbar.u-activity trough, progressbar.u-activity progress { min-height: 3px; border-radius: 0; }"
+  , "progressbar.u-activity trough { background: transparent; }"
+  , "progressbar.u-progress trough {"
   , "  min-height: 6px; border-radius: 999px; background: var(--neutral-bg); border: none;"
   , "}"
   , "progressbar.u-progress progress {"

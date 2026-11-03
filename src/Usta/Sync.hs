@@ -12,6 +12,8 @@ module Usta.Sync
 
 import Control.Concurrent (forkIO, killThread)
 import Control.Concurrent.STM (TVar, atomically, check, modifyTVar', newTVarIO, orElse, readTVar, readTVarIO, registerDelay)
+import Data.Foldable (toList)
+import qualified Data.Map.Strict as Map
 import Control.Exception (Handler (..), SomeAsyncException, SomeException, catches, displayException, fromException, throwIO)
 import Data.Kind (Type)
 import qualified Data.Text as T
@@ -60,23 +62,30 @@ data Sync = Sync
   { syncNow :: IO ()
     -- ^ Every account syncs now instead of at its next interval.
   , stop :: IO ()
+  , latest :: IO [Status]
+    -- ^ Each account's last status, for whoever starts listening late.
   }
 
 start :: Settings -> [(AccountId, Forge)] -> IO Sync
 start settings accounts = do
   wake <- newTVarIO (0 :: Int)
-  threads <- traverse (forkIO . worker settings wake) accounts
+  known <- newTVarIO Map.empty
+  let report status = do
+        atomically (modifyTVar' known (Map.insert status.accountId status))
+        publish settings.statuses status
+  threads <- traverse (forkIO . worker settings report wake) accounts
   pure Sync
     { syncNow = atomically (modifyTVar' wake (+ 1))
     , stop = mapM_ killThread threads
+    , latest = toList <$> readTVarIO known
     }
 
 -- | Syncs, then waits for the interval or a bump of @wake@, forever.
-worker :: Settings -> TVar Int -> (AccountId, Forge) -> IO ()
-worker settings wake (key, forge) = readTVarIO wake >>= loop
+worker :: Settings -> (Status -> IO ()) -> TVar Int -> (AccountId, Forge) -> IO ()
+worker settings report wake (key, forge) = readTVarIO wake >>= loop
   where
     loop seen = do
-      syncAccount settings key forge
+      syncAccount settings report key forge
       timeout <- registerDelay (floor (settings.every * 1000000))
       next <- atomically $
         (readTVar wake >>= \n -> check (n /= seen) >> pure n)
@@ -84,16 +93,16 @@ worker settings wake (key, forge) = readTVarIO wake >>= loop
       loop next
 
 -- | One sync of every list, stopping at the first failure.
-syncAccount :: Settings -> AccountId -> Forge -> IO ()
-syncAccount settings key forge = do
-  publish settings.statuses Status {accountId = key, state = Syncing}
+syncAccount :: Settings -> (Status -> IO ()) -> AccountId -> Forge -> IO ()
+syncAccount settings report key forge = do
+  report Status {accountId = key, state = Syncing}
   outcome <- attempt $ do
     list Notifications forge.notifications (const (saveNotifications key))
     list PullRequests forge.pullRequests (savePullRequests key)
     list Issues forge.issues (saveIssues key)
     list Repositories forge.repositories (saveRepositories key)
   time <- getCurrentTime
-  publish settings.statuses Status {accountId = key, state = either Failed (const (Synced time)) outcome}
+  report Status {accountId = key, state = either Failed (const (Synced time)) outcome}
   where
     list :: Resource -> (Maybe ETag -> IO (Fetched [a])) -> (UTCTime -> [a] -> Result ()) -> IO ()
     list resource fetch save = do

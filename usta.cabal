@@ -41,6 +41,7 @@ executable usta
     Usta.Details
     Usta.Diagram
     Usta.Diagram.Class
+    Usta.Diagram.Entity
     Usta.Diagram.Flowchart
     Usta.Diagram.Layered
     Usta.Diagram.Route

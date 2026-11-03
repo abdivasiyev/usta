@@ -24,6 +24,8 @@ module Usta.Git
   , commitDiff
   , recent
   , readme
+  , tree
+  , blob
   ) where
 
 import Control.Exception (Exception, throwIO, try)
@@ -41,10 +43,13 @@ import System.Environment (getEnvironment, getExecutablePath)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory)
 import System.Process.Typed (proc, readProcess, setEnv)
+import Text.Read (readMaybe)
 
 import Usta.Types.Commit (Commit (..), Sha)
 import Usta.Types.Diff (FileDiff, parseDiff)
 import Usta.Types.Parse (parseM, unparse)
+import Usta.Types.Tree (Entry (..))
+import qualified Usta.Types.Tree as Tree
 
 -- | How much of a repository a mirror keeps.
 type Kind :: Type
@@ -65,7 +70,11 @@ instance Exception GitError
 
 -- | Runs git and returns what it printed.
 git :: [String] -> IO Text
-git args = do
+git args = decodeUtf8Lenient . BL.toStrict <$> gitBytes args
+
+-- | Runs git and returns what it printed, as bytes, for file contents.
+gitBytes :: [String] -> IO BL.ByteString
+gitBytes args = do
   inherited <- getEnvironment
   self <- getExecutablePath
   let ssh = [("GIT_SSH_COMMAND", "ssh -o BatchMode=yes") | "GIT_SSH_COMMAND" `notElem` map fst inherited]
@@ -76,7 +85,7 @@ git args = do
       common = ["-c", "core.quotePath=false", "-c", "color.ui=false"] <> helpers
   (code, out, err) <- readProcess (setEnv env (proc "git" (common <> args)))
   case code of
-    ExitSuccess -> pure (decode out)
+    ExitSuccess -> pure out
     ExitFailure _ -> throwIO (GitError (T.intercalate "\n" (take 3 (map T.strip (T.lines (decode err))))))
   where
     decode = decodeUtf8Lenient . BL.toStrict
@@ -140,6 +149,26 @@ readme path ref = do
       pure (Just (name, contents))
   where
     isReadme name = map toLower (takeWhile (/= '.') (T.unpack name)) == "readme"
+
+-- | Every folder and file on a ref, with the files' sizes.
+tree :: FilePath -> Text -> IO [Entry]
+tree path ref = do
+  out <- git ["-C", path, "ls-tree", "-r", "-t", "-l", "--full-tree", "--end-of-options", T.unpack ref]
+  traverse entry (filter (not . T.null) (T.lines out))
+  where
+    -- "<mode> <type> <object> <size>\t<path>"; the size is "-" for a tree.
+    entry line = case (T.words meta, T.drop 1 name) of
+      ([_, kind, _, size], p) | kind == "tree" -> pure Entry {path = p, kind = Tree.Folder, size = Nothing}
+                              | kind == "blob" -> pure Entry {path = p, kind = Tree.File, size = readMaybe (T.unpack size)}
+      -- A submodule's commit is neither; it shows as an empty folder.
+      ([_, "commit", _, _], p) -> pure Entry {path = p, kind = Tree.Folder, size = Nothing}
+      _ -> throwIO (GitError "git listed a tree entry usta cannot read")
+      where
+        (meta, name) = T.breakOn "\t" line
+
+-- | A file's contents on a ref.
+blob :: FilePath -> Text -> Text -> IO BL.ByteString
+blob path ref file = gitBytes ["-C", path, "cat-file", "blob", "--end-of-options", T.unpack ref <> ":" <> T.unpack file]
 
 revs :: Sha -> String
 revs = T.unpack . unparse

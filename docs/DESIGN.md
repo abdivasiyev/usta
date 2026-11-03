@@ -163,6 +163,25 @@ Dark screens use the same layouts with the dark token values.
 
    ![Pull request files](design/pull-request-files.png)
 
+   **Review threads.** Every thread stays in the diff, so a second review
+   still shows what was said. Open threads are expanded; resolved ones are
+   one collapsed line at their place saying who resolved them and how the
+   thread started. A thread whose line changed since sits at the nearest
+   line that still exists, marked Outdated, with the code it was about. A
+   "new reply" tag marks what was said since your last review. The file
+   list counts open, resolved and outdated threads; All threads, Open only
+   and Hidden filter them; the review panel lists every thread to jump
+   to. A thread you open stays open until you hide it.
+
+   ![Review threads](design/review-threads.png)
+
+   **Diff options.** Unified or split, hide whitespace-only changes,
+   highlight the changed words in a line, and expand the context 20 lines
+   at a time or to the next change. The choice is kept per pull request;
+   Settings has the default.
+
+   ![Diff options](design/diff-options.png)
+
 10. **Checks.** Check runs on the left; log viewer on the right with
     failing lines highlighted; re-run and copy log.
 
@@ -204,8 +223,13 @@ nothing local to show yet.
 5. With reduced motion, the shimmer and spinners stop moving.
 
 The sync status in the header has four states: synced, syncing (spinner
-with progress), offline (showing cached data) and sync failed (with
-Retry).
+with progress), offline (showing cached data) and sync failed. The chip
+only says where sync stands; the refresh button next to it syncs again.
+
+**Busy buttons.** A button waiting for the forge spins and names what it
+does ("Commenting…", "Merging…"); it is never narrower than before, and
+the buttons beside it wait too, so nothing is sent twice. On failure it
+comes back and the reason shows next to it.
 
 ![Loading patterns](design/loading-patterns.png)
 
@@ -226,6 +250,6 @@ as soon as they are available, and the ones in view render first.
 |---|---|
 | Everywhere | `Ctrl K` search and commands, `Ctrl R` sync now |
 | Inbox | `j` / `k` move, `Enter` open, `e` done, `Shift E` all done, `s` star, `o` open in browser |
-| Pull request files | `n` / `p` next / previous file, `c` comment on line, `v` mark viewed, `Ctrl Enter` submit review |
+| Pull request files | `n` / `p` next / previous file, `[` / `]` previous / next thread, `r` reply, `c` comment on line, `v` mark viewed, `s` split, `w` whitespace, `x` expand context, `Ctrl Enter` submit review |
 | Palette | `↑` / `↓` move, `Enter` open, `Ctrl Enter` open in browser, `Esc` close |
 | Creating | `Ctrl Shift P` new pull request, `Ctrl Shift I` new issue |

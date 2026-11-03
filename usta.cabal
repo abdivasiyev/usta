@@ -29,6 +29,7 @@ executable usta
     Usta.DB.Schema.SyncCursor
     Usta.Types.Account
     Usta.Types.Count
+    Usta.Types.ETag
     Usta.Types.Forge
     Usta.Types.Host
     Usta.Types.Involvement
@@ -43,6 +44,7 @@ executable usta
     Usta.Types.Ref
     Usta.Types.RepoName
     Usta.Types.Repository
+    Usta.Types.Resource
     Usta.Types.ThreadId
     Usta.Types.Token
     Usta.UI.Components.Avatar

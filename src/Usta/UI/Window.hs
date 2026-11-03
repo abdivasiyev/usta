@@ -227,8 +227,23 @@ buildAt start source app = do
       inboxActions = Inbox.Actions {open = openNotification, setDone = setDone}
   initial <- source.inbox
   inboxPages <- forM inboxViews $ \(page, view) -> (,) page <$> Inbox.new view inboxActions initial
-  let reloadInbox = do
+  -- Each reload tells the desktop about what is new since the last one,
+  -- as the preferences say.
+  shown <- newIORef initial
+  let tell everything = do
+        before <- readIORef shown
+        writeIORef shown everything
+        chosen <- source.preferences
+        active <- Gtk.applicationGetActiveWindow app >>= maybe (pure False) Gtk.windowIsActive
+        when (chosen.notify && not (chosen.onlyInBackground && active)) $
+          forM_ (Inbox.worthTelling before everything) $ \(what, n) -> do
+            note <- Gio.notificationNew what
+            Gio.notificationSetBody note (Just (n.repo <> " #" <> T.pack (show n.number) <> ": " <> n.title))
+            Gio.applicationSendNotification app
+              (Just (n.host <> "/" <> n.repo <> "#" <> T.pack (show n.number))) note
+      reloadInbox = do
         everything <- source.inbox
+        tell everything
         forM_ inboxPages $ \(_, p) -> p.update everything
   pullRequestPage <- source.pullRequests >>= PullRequests.new openNewPullRequest
     (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))

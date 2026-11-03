@@ -12,7 +12,7 @@ module Usta.UI.Components.Diff
   , css
   ) where
 
-import Control.Monad (forM_, void)
+import Control.Monad (forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
@@ -20,6 +20,8 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
+
+import qualified Usta.UI.Highlight as Highlight
 
 type Line :: Type
 data Line
@@ -62,12 +64,16 @@ build file attached onViewed = do
   body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #visible := not file.viewed
                          ]
-  forM_ (zip [0 ..] file.diffLines) $ \(index, line) -> do
-    lineRow line >>= #append body
+  codes <- forM (zip [0 ..] file.diffLines) $ \(index, line) -> do
+    (row, code) <- lineRow line
+    #append body row
     forM_ [w | (i, w) <- attached, i == index] $ \w -> do
       holder <- GI.new Gtk.Box [#cssClasses := ["diff-attached"]]
       #append holder w
       #append body holder
+    pure code
+  Highlight.follow card $ \palette ->
+    forM_ (zip codes (highlighted palette file)) $ \(code, marked) -> Gtk.labelSetMarkup code marked
   #append card body
   setCollapsed card file.viewed
 
@@ -98,7 +104,33 @@ stat file = "+" <> count isAdded <> " −" <> count isRemoved
     isRemoved (Removed _ _) = True
     isRemoved _ = False
 
-lineRow :: Line -> IO Gtk.Box
+-- | Each line's code as Pango markup, highlighted by the file's language.
+-- The lines are tokenized together, so a comment or string that spans
+-- lines keeps its color; hunk headers stay plain.
+highlighted :: Highlight.Palette -> File -> [Text]
+highlighted palette file
+  | length marked == length codes = fill file.diffLines marked
+  | otherwise = map (Highlight.plain . textOf) file.diffLines
+  where
+    codes = [t | line <- file.diffLines, Just t <- [codeOf line]]
+    marked = Highlight.markup palette (Highlight.languageFor (T.unpack file.path)) (T.intercalate "\n" codes <> "\n")
+    fill (line : rest) ms = case (codeOf line, ms) of
+      (Just _, m : ms') -> m : fill rest ms'
+      _ -> Highlight.plain (textOf line) : fill rest ms
+    fill [] _ = []
+    codeOf line = case line of
+      Hunk _ -> Nothing
+      Context _ _ t -> Just t
+      Added _ t -> Just t
+      Removed _ t -> Just t
+    textOf line = case line of
+      Hunk t -> t
+      Context _ _ t -> t
+      Added _ t -> t
+      Removed _ t -> t
+
+-- | The row, and the label its code goes in as markup.
+lineRow :: Line -> IO (Gtk.Box, Gtk.Label)
 lineRow line = do
   row <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #cssClasses := ["diff-line", kindClass]
@@ -106,16 +138,16 @@ lineRow line = do
   gutter old >>= #append row
   gutter new' >>= #append row
   label sign ["sign"] >>= #append row
-  text <- label body ["code"]
+  text <- label "" ["code"]
   GI.set text [#hexpand := True, #selectable := True]
   #append row text
-  pure row
+  pure (row, text)
   where
-    (kindClass, old, new', sign, body) = case line of
-      Hunk t -> ("hunk", "", "", "", t)
-      Context a b t -> ("context", number a, number b, "", t)
-      Added b t -> ("added", "", number b, "+", t)
-      Removed a t -> ("removed", number a, "", "−", t)
+    (kindClass, old, new', sign) = case line of
+      Hunk _ -> ("hunk", "", "", "")
+      Context a b _ -> ("context", number a, number b, "")
+      Added b _ -> ("added", "", number b, "+")
+      Removed a _ -> ("removed", number a, "", "−")
     number = T.pack . show
 
 gutter :: Text -> IO Gtk.Label

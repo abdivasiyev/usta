@@ -92,6 +92,7 @@ executable usta
     Usta.UI.Components.Skeleton
     Usta.UI.Components.SyncStatus
     Usta.UI.Format
+    Usta.UI.Highlight
     Usta.UI.Gallery
     Usta.UI.Page
     Usta.UI.Pages.AddAccount
@@ -140,6 +141,7 @@ executable usta
     servant,
     servant-client,
     servant-client-core,
+    skylighting,
     stm,
     text,
     time,

@@ -34,6 +34,7 @@
           esqueleto
           filepath
           gi-gdk4
+          gi-gio
           gi-glib
           gi-gtk4
           gi-pango
@@ -49,6 +50,7 @@
           servant
           servant-client
           servant-client-core
+          skylighting
           stm
           text
           time

@@ -27,6 +27,7 @@ import qualified Usta.Forge.Sample as Sample
 import qualified Usta.Git.Credential as Credential
 import qualified Usta.Keyring as Keyring
 import qualified Usta.Mirrors as Mirrors
+import qualified Usta.Preferences as Preferences
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind (..))
@@ -70,7 +71,9 @@ cache = do
     saved <- run pool listAccounts
     changes <- newBus
     statuses <- newBus
+    chosen <- Preferences.file >>= Preferences.load
     sync <- Sync.start Sync.Settings {pool = pool, changes = changes, statuses = statuses, every = 60} []
+    sync.setEvery (Preferences.seconds chosen.interval)
     root <- Mirrors.defaultRoot
     mirrorStatuses <- newBus
     mirrors <- Mirrors.start Mirrors.Settings {pool = pool, changes = changes, statuses = mirrorStatuses, root = root}

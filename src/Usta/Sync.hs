@@ -12,7 +12,7 @@ module Usta.Sync
   ) where
 
 import Control.Concurrent (forkIO, killThread)
-import Control.Concurrent.STM (TVar, atomically, check, modifyTVar', newTVarIO, orElse, readTVar, readTVarIO, registerDelay)
+import Control.Concurrent.STM (TVar, atomically, check, modifyTVar', newTVarIO, orElse, readTVar, readTVarIO, registerDelay, retry, writeTVar)
 import Data.Foldable (toList)
 import qualified Data.Map.Strict as Map
 import Control.Exception (Handler (..), SomeAsyncException, SomeException, catches, displayException, fromException, throwIO)
@@ -73,12 +73,16 @@ data Sync = Sync
     -- token is gone.
   , stop :: IO ()
   , latest :: IO [Status]
+  , setEvery :: Maybe NominalDiffTime -> IO ()
+    -- ^ A new interval, 'Nothing' for syncing only when asked. Every
+    -- account syncs at once and then keeps the new pace.
     -- ^ Each account's last status, for whoever starts listening late.
   }
 
 start :: Settings -> [(AccountId, Forge)] -> IO Sync
 start settings accounts = do
   wake <- newTVarIO (0 :: Int)
+  every <- newTVarIO (Just settings.every)
   known <- newTVarIO Map.empty
   threads <- newTVarIO Map.empty
   let report status = do
@@ -94,7 +98,7 @@ start settings accounts = do
         atomically (modifyTVar' known (Map.delete key))
       add key forge = do
         remove key
-        thread <- forkIO (worker settings report wake (key, forge))
+        thread <- forkIO (worker settings report wake every (key, forge))
         atomically (modifyTVar' threads (Map.insert key thread))
   mapM_ (uncurry add) accounts
   pure Sync
@@ -104,18 +108,23 @@ start settings accounts = do
     , report = report
     , stop = readTVarIO threads >>= mapM_ killThread
     , latest = toList <$> readTVarIO known
+    , setEvery = \new -> atomically $ do
+        writeTVar every new
+        modifyTVar' wake (+ 1)
     }
 
--- | Syncs, then waits for the interval or a bump of @wake@, forever.
-worker :: Settings -> (Status -> IO ()) -> TVar Int -> (AccountId, Forge) -> IO ()
-worker settings report wake (key, forge) = readTVarIO wake >>= loop
+-- | Syncs, then waits for the interval (if any) or a bump of @wake@,
+-- forever.
+worker :: Settings -> (Status -> IO ()) -> TVar Int -> TVar (Maybe NominalDiffTime) -> (AccountId, Forge) -> IO ()
+worker settings report wake every (key, forge) = readTVarIO wake >>= loop
   where
     loop seen = do
       syncAccount settings report key forge
-      timeout <- registerDelay (floor (settings.every * 1000000))
+      pace <- readTVarIO every
+      timeout <- traverse (\s -> registerDelay (floor (s * 1000000))) pace
       next <- atomically $
         (readTVar wake >>= \n -> check (n /= seen) >> pure n)
-          `orElse` (readTVar timeout >>= check >> readTVar wake)
+          `orElse` (maybe retry (\t -> readTVar t >>= check) timeout >> readTVar wake)
       loop next
 
 -- | One sync of every list, stopping at the first failure.

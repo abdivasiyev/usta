@@ -14,7 +14,6 @@ module Usta.UI.Pages.Issue
   , css
   ) where
 
-import Control.Concurrent (forkIO)
 import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -22,7 +21,6 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gio as Gio
-import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -241,22 +239,14 @@ replyBox actions m = do
   send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
   #append buttons send
   -- The buttons wait for the forge, so a second click sends nothing twice.
-  let run act = do
-        GI.set buttons [#sensitive := False]
+  let run button doing act = do
         GI.set problem [#visible := False]
-        void $ forkIO $ do
-          result <- act
-          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            case result of
-              Right () -> actions.refresh
-              Left text -> do
-                GI.set problem [#label := text, #visible := True]
-                GI.set buttons [#sensitive := True]
-            pure False
+        Button.busy button [buttons] doing act $
+          either (\text -> GI.set problem [#label := text, #visible := True]) (const actions.refresh)
   void $ GI.on send #clicked $ do
     text <- maybe "" id <$> GI.get buffer #text
-    unless (T.null (T.strip text)) $ run (actions.comment text)
-  void $ GI.on close #clicked $ run (actions.setClosed (not m.closed))
+    unless (T.null (T.strip text)) $ run send "Commenting…" (actions.comment text)
+  void $ GI.on close #clicked $ run close (if m.closed then "Reopening…" else "Closing…") (actions.setClosed (not m.closed))
   #append box problem
   #append box buttons
   pure box

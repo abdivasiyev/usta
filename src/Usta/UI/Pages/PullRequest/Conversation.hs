@@ -16,7 +16,6 @@ module Usta.UI.Pages.PullRequest.Conversation
   , css
   ) where
 
-import Control.Concurrent (forkIO)
 import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -24,7 +23,6 @@ import Data.Kind (Type)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Avatar as Avatar
@@ -139,18 +137,10 @@ new actions m = do
   forM_ m.threads $ \t -> threadCard t >>= #append main
   problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
   -- Buttons wait for the forge, so a second click sends nothing twice.
-  let run buttons act = do
-        GI.set buttons [#sensitive := False]
+  let run button row doing act = do
         GI.set problem [#visible := False]
-        void $ forkIO $ do
-          result <- act
-          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            case result of
-              Right () -> actions.refresh
-              Left text -> do
-                GI.set problem [#label := text, #visible := True]
-                GI.set buttons [#sensitive := True]
-            pure False
+        Button.busy button [row] doing act $
+          either (\text -> GI.set problem [#label := text, #visible := True]) (const actions.refresh)
   forM_ m.merge $ \s -> mergeBox run actions s >>= #append main
   commentBox run actions m >>= #append main
   #append main problem
@@ -234,7 +224,7 @@ threadCard t = do
   pure card
 
 -- | @run@ disables the buttons while an action runs.
-mergeBox :: (Gtk.Box -> IO (Either Text ()) -> IO ()) -> Actions -> MergeState -> IO Gtk.Box
+mergeBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> MergeState -> IO Gtk.Box
 mergeBox run actions s = do
   card <- Card.new
   Gtk.widgetAddCssClass card "merge-box"
@@ -265,12 +255,12 @@ mergeBox run actions s = do
     deleting <- GI.get delete #active
     let ways = [minBound .. maxBound] :: [D.Merge]
     when (fromIntegral chosen < length ways) $
-      run buttons (actions.merge (ways !! fromIntegral chosen) deleting)
+      run mergeButton buttons "Merging…" (actions.merge (ways !! fromIntegral chosen) deleting)
   #append buttons mergeButton
   #append card buttons
   pure card
 
-commentBox :: (Gtk.Box -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box
+commentBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box
 commentBox run actions m = do
   box <- vbox 8
   label "Add a comment" ["strong"] >>= #append box
@@ -291,13 +281,13 @@ commentBox run actions m = do
   when (m.closed || isJust m.merge) $ do
     close <- Button.new Button.defaults
       { Button.label = Just (if m.closed then "Reopen pull request" else "Close pull request") }
-    void $ GI.on close #clicked $ run buttons (actions.setClosed (not m.closed))
+    void $ GI.on close #clicked $ run close buttons (if m.closed then "Reopening…" else "Closing…") (actions.setClosed (not m.closed))
     #append buttons close
   send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
   void $ GI.on send #clicked $ do
     buffer <- Gtk.textViewGetBuffer editor
     text <- maybe "" id <$> GI.get buffer #text
-    unless (T.null (T.strip text)) $ run buttons (actions.comment text)
+    unless (T.null (T.strip text)) $ run send buttons "Commenting…" (actions.comment text)
   #append buttons send
   #append box buttons
   pure box

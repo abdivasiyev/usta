@@ -317,17 +317,10 @@ review actions m = do
   #append side verdict
 
   -- Buttons wait for the forge, so a second click sends nothing twice.
-  let run button act done = do
-        GI.set button [#sensitive := False]
+  let run button doing act done = do
         GI.set said [#visible := False]
-        void $ forkIO $ do
-          result <- act
-          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            GI.set button [#sensitive := True]
-            case result of
-              Right () -> done
-              Left text -> GI.set said [#label := text, #visible := True, #cssClasses := ["small", "problem"]]
-            pure False
+        Button.busy button ([] :: [Gtk.Button]) doing act $
+          either (\text -> GI.set said [#label := text, #visible := True, #cssClasses := ["small", "problem"]]) (const done)
       -- In the order of the radios.
       verdicts = [CommentOnly, Approve, RequestChanges]
       send = do
@@ -337,7 +330,7 @@ review actions m = do
         text <- maybe "" id <$> GI.get buffer #text
         -- A comment-only review needs words; the forge refuses an empty one.
         forM_ (take 1 pick) $ \v -> unless (v == CommentOnly && T.null (T.strip text)) $
-          run submit (actions.review v text) $ do
+          run submit "Submitting…" (actions.review v text) $ do
             Gtk.textBufferSetText buffer "" (-1)
             GI.set said [#label := "Review submitted.", #visible := True, #cssClasses := ["small", "muted"]]
   void $ GI.on submit #clicked send
@@ -375,7 +368,7 @@ review actions m = do
   mergeButton <- Button.new Button.defaults
     { Button.label = Just "Squash and merge", Button.variant = Button.Primary }
   GI.set mergeButton [#sensitive := m.approvalsNeeded == 0]
-  void $ GI.on mergeButton #clicked $ run mergeButton actions.merge actions.refresh
+  void $ GI.on mergeButton #clicked $ run mergeButton "Merging…" actions.merge actions.refresh
   #append bottom mergeButton
   void $ if m.approvalsNeeded == 0
     then pure ()

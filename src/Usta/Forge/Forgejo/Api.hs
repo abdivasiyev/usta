@@ -20,6 +20,12 @@ module Usta.Forge.Forgejo.Api
   , IssueEdit (..)
   , MergeOption (..)
   , NewReview (..)
+  , CreateIssue (..)
+  , CreatePull (..)
+  , Created (..)
+  , BranchName (..)
+  , RepoLabel (..)
+  , Reviewers (..)
   , NotificationQuery (..)
   , ThreadQuery (..)
   , ThreadState (..)
@@ -62,7 +68,7 @@ import Usta.Types.Label (Color)
 import qualified Usta.Types.Label as L
 import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
-import Usta.Types.Parse (parseM)
+import Usta.Types.Parse (parseM, unparse)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Servant.NamedQueryParam (Named (..), RecordQueryParam, ToQuery)
 import Usta.Types.ThreadId (ThreadId)
@@ -125,6 +131,21 @@ data Routes mode = Routes
   , review
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "reviews" :> ReqBody '[JSON] NewReview :> Post '[JSON] NoContent
+  , createIssue
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues"
+           :> ReqBody '[JSON] CreateIssue :> Verb 'POST 201 '[JSON] Created
+  , createPull
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls"
+           :> ReqBody '[JSON] CreatePull :> Verb 'POST 201 '[JSON] Created
+  , requestReviewers
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "requested_reviewers" :> ReqBody '[JSON] Reviewers :> Verb 'POST 201 '[JSON] NoContent
+  , branches
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "branches"
+           :> RecordQueryParam ListQuery :> Get '[JSON] [BranchName]
+  , labels
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels"
+           :> RecordQueryParam ListQuery :> Get '[JSON] [RepoLabel]
   }
   deriving stock (Generic)
 
@@ -344,6 +365,69 @@ instance ToJSON NewReview where
         CommentOnly -> "COMMENT"
     , "body" .= r.body
     ]
+
+-- | Labels go by id; the adapter finds them by name first.
+type CreateIssue :: Type
+data CreateIssue = CreateIssue
+  { title :: Text
+  , body :: Text
+  , labels :: [Int64]
+  , assignees :: [Login]
+  }
+
+instance ToJSON CreateIssue where
+  toJSON c = object
+    [ "title" .= c.title
+    , "body" .= c.body
+    , "labels" .= c.labels
+    , "assignees" .= map unparse c.assignees
+    ]
+
+type CreatePull :: Type
+data CreatePull = CreatePull
+  { title :: Text
+  , body :: Text
+  , head :: Text
+  , base :: Text
+  , labels :: [Int64]
+  }
+
+instance ToJSON CreatePull where
+  toJSON c = object
+    [ "title" .= c.title
+    , "body" .= c.body
+    , "head" .= c.head
+    , "base" .= c.base
+    , "labels" .= c.labels
+    ]
+
+-- | What a create answers with that usta reads: the new number.
+type Created :: Type
+newtype Created = Created {number :: Number}
+
+instance FromJSON Created where
+  parseJSON = withObject "Created" $ \o -> Created <$> o .: "number"
+
+type Reviewers :: Type
+newtype Reviewers = Reviewers {reviewers :: [Login]}
+
+instance ToJSON Reviewers where
+  toJSON r = object ["reviewers" .= map unparse r.reviewers]
+
+type BranchName :: Type
+newtype BranchName = BranchName {name :: Text}
+
+instance FromJSON BranchName where
+  parseJSON = withObject "Branch" $ \o -> BranchName <$> o .: "name"
+
+type RepoLabel :: Type
+data RepoLabel = RepoLabel
+  { id :: Int64
+  , name :: Text
+  }
+
+instance FromJSON RepoLabel where
+  parseJSON = withObject "Label" $ \o -> RepoLabel <$> o .: "id" <*> o .: "name"
 
 type IssueType :: Type
 data IssueType = Issues | Pulls

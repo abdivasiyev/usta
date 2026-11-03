@@ -1,0 +1,293 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | The part of Forgejo's REST API (@/api/v1@) usta uses, as a servant API,
+-- with the answers decoded into usta's value types as they arrive. Only the
+-- fields usta reads are decoded; Forgejo sends many more.
+module Usta.Forge.Forgejo.Api
+  ( Routes (..)
+  , api
+  , ListQuery (..)
+  , NotificationQuery (..)
+  , SearchQuery (..)
+  , IssueType (..)
+  , IssueState (..)
+  , User (..)
+  , Repository (..)
+  , RepositoryRef (..)
+  , Thread (..)
+  , Subject (..)
+  , Issue (..)
+  , Label (..)
+  , PullRequest (..)
+  , Branch (..)
+  , Review (..)
+  , CombinedStatus (..)
+  ) where
+
+import Data.Aeson (FromJSON (..), Value, withObject, (.!=), (.:), (.:?))
+import Data.Aeson.Types (Parser)
+import Data.Int (Int64)
+import Data.Kind (Type)
+import Data.Maybe (isJust)
+import Data.Proxy (Proxy (..))
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Time (UTCTime)
+import GHC.Generics (Generic)
+import Servant.API
+import Servant.Client (AsClientT, ClientM, client)
+
+import Usta.Types.Count (Count)
+import Usta.Types.Label (Color)
+import Usta.Types.Login (Login)
+import Usta.Types.Number (Number)
+import Usta.Types.Parse (parseM)
+import Usta.Types.RepoName (RepoName)
+import Usta.Types.Servant.NamedQueryParam (Named, RecordQueryParam, ToQuery)
+import Usta.Types.ThreadId (ThreadId)
+
+-- | Paths under @/api/v1@.
+type Routes :: Type -> Type
+data Routes mode = Routes
+  { me :: mode :- "user" :> Get '[JSON] User
+  , repositories :: mode :- "user" :> "repos" :> RecordQueryParam ListQuery :> Get '[JSON] [Repository]
+  , notifications :: mode :- "notifications" :> RecordQueryParam NotificationQuery :> Get '[JSON] [Thread]
+  , markRead
+      :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId
+           :> Verb 'PATCH 205 '[JSON] NoContent
+  , search :: mode :- "repos" :> "issues" :> "search" :> RecordQueryParam SearchQuery :> Get '[JSON] [Issue]
+  , pullRequest
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> Get '[JSON] PullRequest
+  , reviews
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "reviews" :> RecordQueryParam ListQuery :> Get '[JSON] [Review]
+  , status
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits" :> Capture "ref" Text
+           :> "status" :> Get '[JSON] CombinedStatus
+  }
+  deriving stock (Generic)
+
+api :: Routes (AsClientT ClientM)
+api = client (Proxy @(NamedRoutes Routes))
+
+-- | One page of a list. Forgejo pages from 1; a short page is the last.
+type ListQuery :: Type
+data ListQuery = ListQuery
+  { page :: Maybe Int
+  , limit :: Maybe Int
+  }
+  deriving stock (Generic)
+
+instance ToQuery ListQuery
+
+-- | @all@ includes notifications already read.
+type NotificationQuery :: Type
+data NotificationQuery = NotificationQuery
+  { all :: Bool
+  , since :: Maybe UTCTime
+  , page :: Maybe Int
+  , limit :: Maybe Int
+  }
+  deriving stock (Generic)
+
+instance ToQuery NotificationQuery
+
+-- | Issues or pull requests across repositories. Each flag set to 'True'
+-- keeps those involving the user that way.
+type SearchQuery :: Type
+data SearchQuery = SearchQuery
+  { kind :: Named "type" IssueType
+  , state :: IssueState
+  , since :: Maybe UTCTime
+  , assigned :: Maybe Bool
+  , created :: Maybe Bool
+  , mentioned :: Maybe Bool
+  , reviewRequested :: Named "review_requested" (Maybe Bool)
+  , page :: Maybe Int
+  , limit :: Maybe Int
+  }
+  deriving stock (Generic)
+
+instance ToQuery SearchQuery
+
+type IssueType :: Type
+data IssueType = Issues | Pulls
+
+instance ToHttpApiData IssueType where
+  toQueryParam t = case t of
+    Issues -> "issues"
+    Pulls -> "pulls"
+
+type IssueState :: Type
+data IssueState = Open | Closed
+
+instance ToHttpApiData IssueState where
+  toQueryParam s = case s of
+    Open -> "open"
+    Closed -> "closed"
+
+type User :: Type
+newtype User = User {login :: Login}
+
+instance FromJSON User where
+  parseJSON = withObject "User" $ \o -> User <$> o .: "login"
+
+type Repository :: Type
+data Repository = Repository
+  { fullName :: RepoName
+  , description :: Text
+  , defaultBranch :: Text
+  , private :: Bool
+  , openIssues :: Count
+  , openPullRequests :: Count
+  , updatedAt :: UTCTime
+  }
+
+instance FromJSON Repository where
+  parseJSON = withObject "Repository" $ \o -> Repository
+    <$> o .: "full_name"
+    <*> o .:? "description" .!= ""
+    <*> o .: "default_branch"
+    <*> o .: "private"
+    <*> o .: "open_issues_count"
+    <*> o .: "open_pr_counter"
+    <*> o .: "updated_at"
+
+-- | The repository a thread or an issue is in.
+type RepositoryRef :: Type
+newtype RepositoryRef = RepositoryRef {fullName :: RepoName}
+
+instance FromJSON RepositoryRef where
+  parseJSON = withObject "RepositoryRef" $ \o -> RepositoryRef <$> o .: "full_name"
+
+type Thread :: Type
+data Thread = Thread
+  { threadId :: ThreadId
+  , repository :: RepositoryRef
+  , subject :: Subject
+  , unread :: Bool
+  , updatedAt :: UTCTime
+  }
+
+instance FromJSON Thread where
+  parseJSON = withObject "Thread" $ \o -> Thread
+    <$> (o .: "id" >>= \n -> parseM (T.pack (show (n :: Int64))))
+    <*> o .: "repository"
+    <*> o .: "subject"
+    <*> o .: "unread"
+    <*> o .: "updated_at"
+
+-- | @kind@ is Forgejo's subject type: "Issue", "Pull", "Commit" or
+-- "Repository". @url@ is the API URL of the subject, which ends in its
+-- number for issues and pull requests.
+type Subject :: Type
+data Subject = Subject
+  { title :: Text
+  , kind :: Text
+  , url :: Text
+  }
+
+instance FromJSON Subject where
+  parseJSON = withObject "Subject" $ \o -> Subject
+    <$> o .: "title"
+    <*> o .: "type"
+    <*> o .:? "url" .!= ""
+
+-- | An issue or, with @pullRequest@ set, a pull request, as search lists
+-- them.
+type Issue :: Type
+data Issue = Issue
+  { number :: Number
+  , title :: Text
+  , user :: User
+  , labels :: [Label]
+  , comments :: Count
+  , repository :: RepositoryRef
+  , isPullRequest :: Bool
+  , createdAt :: UTCTime
+  , updatedAt :: UTCTime
+  , closedAt :: Maybe UTCTime
+  }
+
+instance FromJSON Issue where
+  parseJSON = withObject "Issue" $ \o -> do
+    pull <- o .:? "pull_request" :: Parser (Maybe Value)
+    Issue
+      <$> o .: "number"
+      <*> o .: "title"
+      <*> o .: "user"
+      <*> o .:? "labels" .!= []
+      <*> o .: "comments"
+      <*> o .: "repository"
+      <*> pure (isJust pull)
+      <*> o .: "created_at"
+      <*> o .: "updated_at"
+      <*> o .:? "closed_at"
+
+type Label :: Type
+data Label = Label
+  { name :: Text
+  , color :: Color
+  }
+
+instance FromJSON Label where
+  parseJSON = withObject "Label" $ \o -> Label <$> o .: "name" <*> o .: "color"
+
+type PullRequest :: Type
+data PullRequest = PullRequest
+  { head :: Branch
+  , base :: Branch
+  , draft :: Bool
+  , merged :: Bool
+  , changedFiles :: Maybe Count
+  , requestedReviewers :: [User]
+  }
+
+instance FromJSON PullRequest where
+  parseJSON = withObject "PullRequest" $ \o -> PullRequest
+    <$> o .: "head"
+    <*> o .: "base"
+    <*> o .:? "draft" .!= False
+    <*> o .:? "merged" .!= False
+    <*> o .:? "changed_files"
+    <*> o .:? "requested_reviewers" .!= []
+
+type Branch :: Type
+data Branch = Branch
+  { ref :: Text
+  , sha :: Text
+  }
+
+instance FromJSON Branch where
+  parseJSON = withObject "Branch" $ \o -> Branch <$> o .: "ref" <*> o .: "sha"
+
+-- | @state@ is "APPROVED", "REQUEST_CHANGES", "COMMENT", "PENDING" or
+-- "REQUEST_REVIEW"; @stale@ when commits came after it.
+type Review :: Type
+data Review = Review
+  { state :: Text
+  , user :: Maybe User
+  , stale :: Bool
+  , dismissed :: Bool
+  }
+
+instance FromJSON Review where
+  parseJSON = withObject "Review" $ \o -> Review
+    <$> o .: "state"
+    <*> o .:? "user"
+    <*> o .:? "stale" .!= False
+    <*> o .:? "dismissed" .!= False
+
+-- | @state@ is "pending", "success", "error", "failure", "warning" or
+-- "skipped"; no statuses at all when @total@ is 0.
+type CombinedStatus :: Type
+data CombinedStatus = CombinedStatus
+  { state :: Text
+  , total :: Int
+  }
+
+instance FromJSON CombinedStatus where
+  parseJSON = withObject "CombinedStatus" $ \o -> CombinedStatus
+    <$> o .:? "state" .!= ""
+    <*> o .:? "total_count" .!= 0

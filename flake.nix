@@ -41,6 +41,7 @@
           http-api-data
           http-client
           http-client-tls
+          http-types
           monad-logger
           persistent
           persistent-sqlite

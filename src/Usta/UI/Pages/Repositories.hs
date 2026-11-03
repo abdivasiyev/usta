@@ -143,15 +143,18 @@ new actions repositories = do
                              , #cssClasses := ["u-repo-pane"]
                              ]
   selectedKey <- newIORef Nothing
-  void $ GI.on list #rowSelected $ \selected -> case selected of
-    Nothing -> clear detail
-    Just row -> do
+  -- A sync refills the list, which drops the selection for a moment and
+  -- selects the same repository again: its detail stays as it is, on the
+  -- tab, file and scroll position the user left it.
+  void $ GI.on list #rowSelected $ \selected -> forM_ selected $ \row -> do
       index <- Gtk.listBoxRowGetIndex row
       shown <- readIORef items
-      when (index >= 0 && fromIntegral index < length shown) $ do
+      before <- readIORef selectedKey
+      when (index >= 0 && fromIntegral index < length shown && before /= Just (key (shown !! fromIntegral index))) $ do
         let r = shown !! fromIntegral index
         writeIORef selectedKey (Just (key r))
         clear detail
+        GI.set listPane [#visible := True]
         -- The Files tab takes the list's room, as the design draws it.
         repositoryDetail actions r (\inFiles -> GI.set listPane [#visible := not inFiles]) >>= #append detail
 
@@ -197,6 +200,7 @@ new actions repositories = do
     , update = \shown -> do
         writeIORef items shown
         refill list repositoryRow shown
+        when (null shown) $ clear detail >> writeIORef selectedKey Nothing
         select
     }
   where

@@ -81,6 +81,7 @@ new now account = do
         , F.pullDiff = \_ _ -> pure []
         , F.pullCommits = \_ _ -> pure []
         , F.threads = \_ _ -> pure (Threads [] Nothing)
+        , F.reply = \_ _ _ _ -> refuse
         , F.recentCommits = \_ _ -> pure []
         , F.readme = \_ _ -> pure Nothing
         , F.commitDiff = \_ _ -> pure []

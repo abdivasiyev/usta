@@ -3,6 +3,7 @@
 module Usta.Forge
   ( Forge (..)
   , Fetched (..)
+  , CloneUrls (..)
   , Failure (..)
   ) where
 
@@ -14,6 +15,7 @@ import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Notification (Notification)
 import Usta.Types.PullRequest (PullRequest)
+import Usta.Types.RepoName (RepoName)
 import Usta.Types.Repository (Repository)
 import Usta.Types.ThreadId (ThreadId)
 
@@ -27,7 +29,20 @@ data Forge = Forge
   , issues :: Maybe ETag -> IO (Fetched [Issue])
   , repositories :: Maybe ETag -> IO (Fetched [Repository])
   , markRead :: ThreadId -> IO ()
+  , cloneUrls :: RepoName -> IO CloneUrls
+    -- ^ Where a mirror of the repository fetches from, as the forge says.
   }
+
+-- | A repository's clone URLs. The forge gives them because only it knows
+-- its address (it may sit under a path) and its ssh port.
+type CloneUrls :: Type
+data CloneUrls = CloneUrls
+  { https :: Text
+    -- ^ The forge's own URL; plain http on a forge without TLS.
+  , ssh :: Maybe Text
+    -- ^ 'Nothing' when the forge has ssh turned off.
+  }
+  deriving stock (Eq, Show)
 
 type Fetched :: Type -> Type
 data Fetched a

@@ -27,7 +27,7 @@ import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
 import qualified Usta.Types.Label as L
 import qualified Usta.Types.Notification as N
-import Usta.Types.Parse (parseM)
+import Usta.Types.Parse (parseM, unparse)
 import qualified Usta.Types.PullRequest as P
 import Usta.Types.Ref (Ref (..))
 import qualified Usta.Types.Repository as R
@@ -72,6 +72,10 @@ new now account = do
         , F.pullRequests = fetch ref PullRequests (.pullRequests)
         , F.issues = fetch ref Issues (.issues)
         , F.repositories = fetch ref Repositories (.repositories)
+        , F.cloneUrls = \repo -> pure F.CloneUrls
+            { F.https = "https://" <> unparse account.host <> "/" <> unparse repo <> ".git"
+            , F.ssh = Just ("git@" <> unparse account.host <> ":" <> unparse repo <> ".git")
+            }
         , F.markRead = \thread -> do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->

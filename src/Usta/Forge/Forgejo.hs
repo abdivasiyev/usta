@@ -30,6 +30,7 @@ import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import Usta.Types.Diff (parseDiff)
+import Usta.Types.Discussion (Discussion (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
@@ -58,6 +59,25 @@ forgejo manager base host token = do
     , repositories = const (Fetched Nothing <$> repositoriesOf client host)
     , markRead = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Read)))
     , markUnread = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Unread)))
+    , discussion = \repo n -> do
+        d <- run client (Api.api.issue (owner repo) (shortName repo) n)
+        cs <- run client (Api.api.issueComments (owner repo) (shortName repo) n)
+        pure Discussion
+          { opening = d.opening
+          , comments = map (.comment) cs
+          , closed = d.closed
+          , assignees = d.assignees
+          , labels = d.labels
+          , milestone = d.milestone
+          }
+    , comment = \repo n text ->
+        (.comment) <$> run client (Api.api.postComment (owner repo) (shortName repo) n (Api.NewComment text))
+    , setClosed = \repo n closed ->
+        () <$ run client (Api.api.editIssue (owner repo) (shortName repo) n (Api.IssueEdit closed))
+    , merge = \repo n how delete ->
+        () <$ run client (Api.api.merge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete})
+    , review = \repo n verdict text ->
+        () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview {verdict = verdict, body = text})
     , cloneUrls = \repo -> do
         r <- run client (Api.api.repository (owner repo) (shortName repo))
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}

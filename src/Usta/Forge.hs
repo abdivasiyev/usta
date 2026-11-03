@@ -13,6 +13,7 @@ import Data.Text (Text)
 
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
+import Usta.Types.Discussion (Comment, Discussion, Merge, Verdict)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Notification (Notification)
@@ -46,6 +47,16 @@ data Forge = Forge
     -- ^ The README at the top of a branch, with its file name.
   , commitDiff :: RepoName -> Sha -> IO [FileDiff]
     -- ^ What one commit changes.
+  , discussion :: RepoName -> Number -> IO Discussion
+    -- ^ An issue's or pull request's description and comments.
+  , comment :: RepoName -> Number -> Text -> IO Comment
+    -- ^ Posts a comment, and gives it back as the forge saved it.
+  , setClosed :: RepoName -> Number -> Bool -> IO ()
+    -- ^ Closes ('True') or reopens an issue or pull request.
+  , merge :: RepoName -> Number -> Merge -> Bool -> IO ()
+    -- ^ Merges a pull request; 'True' deletes its branch after.
+  , review :: RepoName -> Number -> Verdict -> Text -> IO ()
+    -- ^ Submits a review with its comment.
   }
 
 -- | A repository's clone URLs. The forge gives them because only it knows

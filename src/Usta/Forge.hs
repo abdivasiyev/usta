@@ -32,6 +32,8 @@ data Forge = Forge
   , issues :: Maybe ETag -> IO (Fetched [Issue])
   , repositories :: Maybe ETag -> IO (Fetched [Repository])
   , markRead :: ThreadId -> IO ()
+  , markUnread :: ThreadId -> IO ()
+    -- ^ Puts a notification back among the unread, for "Move to inbox".
   , cloneUrls :: RepoName -> IO CloneUrls
     -- ^ Where a mirror of the repository fetches from, as the forge says.
   , pullDiff :: RepoName -> Number -> IO [FileDiff]

@@ -15,6 +15,8 @@ module Usta.Forge.Forgejo.Api
   , Entry (..)
   , ApiCommit (..)
   , NotificationQuery (..)
+  , ThreadQuery (..)
+  , ThreadState (..)
   , SearchQuery (..)
   , IssueType (..)
   , IssueState (..)
@@ -54,7 +56,7 @@ import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
 import Usta.Types.Parse (parseM)
 import Usta.Types.RepoName (RepoName)
-import Usta.Types.Servant.NamedQueryParam (Named, RecordQueryParam, ToQuery)
+import Usta.Types.Servant.NamedQueryParam (Named (..), RecordQueryParam, ToQuery)
 import Usta.Types.ThreadId (ThreadId)
 
 -- | Paths under @/api/v1@.
@@ -64,8 +66,8 @@ data Routes mode = Routes
   , repositories :: mode :- "user" :> "repos" :> RecordQueryParam ListQuery :> Get '[JSON] [Repository]
   , repository :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> Get '[JSON] Repository
   , notifications :: mode :- "notifications" :> RecordQueryParam NotificationQuery :> Get '[JSON] [Thread]
-  , markRead
-      :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId
+  , markThread
+      :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId :> RecordQueryParam ThreadQuery
            :> Verb 'PATCH 205 '[JSON] NoContent
   , search :: mode :- "repos" :> "issues" :> "search" :> RecordQueryParam SearchQuery :> Get '[JSON] [Issue]
   , pullRequest
@@ -110,6 +112,24 @@ data ListQuery = ListQuery
   deriving stock (Generic)
 
 instance ToQuery ListQuery
+
+-- | What a notification thread becomes.
+type ThreadQuery :: Type
+newtype ThreadQuery = ThreadQuery
+  { toStatus :: Named "to-status" ThreadState
+  }
+  deriving stock (Generic)
+
+instance ToQuery ThreadQuery
+
+type ThreadState :: Type
+data ThreadState = Read | Unread
+  deriving stock (Eq, Show)
+
+instance ToHttpApiData ThreadState where
+  toQueryParam state = case state of
+    Read -> "read"
+    Unread -> "unread"
 
 -- | @all@ includes notifications already read.
 type NotificationQuery :: Type

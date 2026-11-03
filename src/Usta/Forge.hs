@@ -11,7 +11,7 @@ import Control.Exception (Exception)
 import Data.Kind (Type)
 import Data.Text (Text)
 
-import Usta.Types.Commit (Commit)
+import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
@@ -42,6 +42,8 @@ data Forge = Forge
     -- ^ The last commits on a branch, newest first.
   , readme :: RepoName -> Text -> IO (Maybe (Text, Text))
     -- ^ The README at the top of a branch, with its file name.
+  , commitDiff :: RepoName -> Sha -> IO [FileDiff]
+    -- ^ What one commit changes.
   }
 
 -- | A repository's clone URLs. The forge gives them because only it knows

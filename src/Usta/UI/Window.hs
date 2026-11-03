@@ -133,6 +133,7 @@ buildAt start given app = do
   -- The saved theme, before anything is drawn.
   applyTheme <- Style.themes
   source.preferences >>= applyTheme . (.theme)
+  notifying <- Platform.canNotify
   let backToMain = Gtk.stackSetVisibleChildName screens "main"
       showDetail :: Gtk.Widget -> IO ()
       -- The new screen fades in over the old one, which goes once hidden.
@@ -239,6 +240,7 @@ buildAt start given app = do
               , Settings.onPrune = source.pruneMirrors
               , Settings.onClearCache = source.clearCache
               , Settings.preferences = chosen
+              , Settings.canNotify = notifying
               , Settings.onPreferences = \p -> do
                   applyTheme p.theme
                   source.setPreferences p
@@ -268,14 +270,14 @@ buildAt start given app = do
   initial <- source.inbox
   inboxPages <- forM inboxViews $ \(page, view) -> (,) page <$> Inbox.new view inboxActions initial
   -- Each reload tells the desktop about what is new since the last one,
-  -- as the preferences say.
+  -- as the preferences say, when the desktop would show it.
   shown <- newIORef initial
   let tell everything = do
         before <- readIORef shown
         writeIORef shown everything
         chosen <- source.preferences
         active <- Gtk.applicationGetActiveWindow app >>= maybe (pure False) Gtk.windowIsActive
-        when (chosen.notify && not (chosen.onlyInBackground && active)) $
+        when (notifying && chosen.notify && not (chosen.onlyInBackground && active)) $
           forM_ (Inbox.worthTelling before everything) $ \(what, n) -> do
             note <- Gio.notificationNew what
             Gio.notificationSetBody note (Just (n.repo <> " #" <> T.pack (show n.number) <> ": " <> n.title))

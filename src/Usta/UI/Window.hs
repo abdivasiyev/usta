@@ -109,18 +109,18 @@ buildAt start app = do
         let open n
               | n.kind == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
               | otherwise = openPullRequest "Inbox" (notificationSummary n)
-        in Inbox.new open Inbox.sample >>= Gtk.toWidget
+        in Inbox.new open Inbox.sample >>= Gtk.toWidget . (.widget)
       Sidebar.PullRequests ->
         PullRequests.new openNewPullRequest
           (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))
           PullRequests.sample
           >>= Gtk.toWidget . (.widget)
       Sidebar.Issues ->
-        Issues.new openNewIssue (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget
+        Issues.new openNewIssue (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget . (.widget)
       -- The forms open with sample fields until they take the repository.
       Sidebar.Repositories ->
         Repositories.new (const openNewIssue) (const openNewPullRequest) Repositories.sample
-          >>= Gtk.toWidget
+          >>= Gtk.toWidget . (.widget)
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget

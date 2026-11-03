@@ -15,7 +15,7 @@ module Usta.UI.Pages.Inbox
   , css
   ) where
 
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -33,6 +33,7 @@ import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Format (Clock, ago, short)
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Types.Notification as N
@@ -92,8 +93,11 @@ keeps f n = case f of
   Participating -> n.reason `elem` map Just [ReviewRequested, Mentioned, Assigned]
 
 -- | @onOpen@ runs for "Open review" or "Open issue".
-new :: (Notification -> IO ()) -> [Notification] -> IO Gtk.Box
+-- | The selected notification stays selected when the list is updated;
+-- the first one is selected when it is gone.
+new :: (Notification -> IO ()) -> [Notification] -> IO (Page Notification)
 new onOpen notifications = do
+  items <- newIORef notifications
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
   previewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
@@ -101,16 +105,18 @@ new onOpen notifications = do
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeSingle
                              , #cssClasses := ["u-inbox-list"]
                              ]
-  rows <- forM notifications $ \n -> do
-    row <- GI.new Gtk.ListBoxRow [#child GI.:=> notificationRow n]
-    #append list row
-    pure (row, n)
+  refill list notificationRow notifications
 
-  void $ GI.on list #rowSelected $ \selected ->
-    forM_ selected $ \row -> do
+  selectedKey <- newIORef Nothing
+  void $ GI.on list #rowSelected $ \selected -> case selected of
+    Nothing -> Gtk.scrolledWindowSetChild previewScroll (Nothing :: Maybe Gtk.Widget)
+    Just row -> do
       index <- Gtk.listBoxRowGetIndex row
-      when (index >= 0 && fromIntegral index < length notifications) $ do
-        content <- preview onOpen (notifications !! fromIntegral index)
+      shown <- readIORef items
+      when (index >= 0 && fromIntegral index < length shown) $ do
+        let n = shown !! fromIntegral index
+        writeIORef selectedKey (Just (key n))
+        content <- preview onOpen n
         GI.set previewScroll [#child := content]
 
   (filters, buttons) <- Segmented.new ["All", "Unread", "Participating"] 0
@@ -122,12 +128,14 @@ new onOpen notifications = do
   let apply f = do
         writeIORef current f
         Gtk.listBoxInvalidateFilter list
-        let shown = length (filter (keeps f) notifications)
-        GI.set countLabel [#label := T.pack (show shown) <> " items"]
+        shown <- readIORef items
+        let count = length (filter (keeps f) shown)
+        GI.set countLabel [#label := T.pack (show count) <> " items"]
   Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
     f <- readIORef current
     index <- Gtk.listBoxRowGetIndex row
-    pure (keeps f (notifications !! fromIntegral index))
+    shown <- readIORef items
+    pure (keeps f (shown !! fromIntegral index))
   forM_ (zip [minBound ..] buttons) $ \(f, button) ->
     void $ GI.on button #toggled $ do
       active <- GI.get button #active
@@ -155,10 +163,24 @@ new onOpen notifications = do
   #append page listPane
   #append page previewScroll
 
-  case rows of
-    (first, _) : _ -> Gtk.listBoxSelectRow list (Just first)
-    [] -> pure ()
-  pure page
+  let select = do
+        shown <- readIORef items
+        wanted <- readIORef selectedKey
+        let index = maybe 0 (\k -> length (takeWhile ((/= k) . key) shown)) wanted
+            at = if index < length shown then index else 0
+        row <- Gtk.listBoxGetRowAtIndex list (fromIntegral at)
+        Gtk.listBoxSelectRow list row
+  select
+  pure Page
+    { widget = page
+    , update = \shown -> do
+        writeIORef items shown
+        refill list notificationRow shown
+        readIORef current >>= apply
+        select
+    }
+  where
+    key n = (n.host, n.repo, n.number)
 
 -- | The inbox during the first sync: @note@ on top, skeleton rows and a
 -- skeleton preview until notifications arrive.

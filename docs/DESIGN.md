@@ -102,6 +102,22 @@ Dark screens use the same layouts with the dark token values.
 
    ![Settings](design/settings.png)
 
+   **Links.** Open forge links in usta: links to your forges from mail,
+   chat or a terminal open the pull request, issue or file in usta, which
+   becomes the system's link handler; every other link goes to the browser
+   it remembered, and turning it off gives links back. A test field shows
+   where a link would open. **About** shows the version and checks the
+   GitHub releases for updates once a day.
+
+   ![Settings: links and updates](design/settings-links.png)
+
+   **Sign in with the browser.** usta opens the forge to approve it and
+   waits; the token goes to the keyring. A Forgejo server needs an OAuth2
+   application for usta once; the dialog says how and takes its client
+   ID.
+
+   ![Sign in with the browser](design/add-account-browser.png)
+
 ### Inbox and search
 
 4. **Inbox.** Notifications from all forges with filters All, Unread,
@@ -351,6 +367,17 @@ branch is fetched into the local mirror with a progress bar. Files render
 as soon as they are available, and the ones in view render first.
 
 ![Large diff loading](design/large-diff-loading.png)
+
+## Problem reports
+
+When usta quits unexpectedly, the next start offers to report it. Report
+a problem (in Settings, the palette and error banners) opens a new issue
+form on `abdivasiyev/usta` with the version and system, the last log
+lines (tokens, request bodies and the home folder removed) and the macOS
+crash report. Everything is shown and editable before it leaves the
+machine; a log too long for a link is saved to Downloads to attach.
+
+![Report a problem](design/report-problem.png)
 
 ## Keyboard shortcuts
 

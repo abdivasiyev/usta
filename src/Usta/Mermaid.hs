@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Mermaid flowcharts in Markdown, drawn without a browser: usta reads
--- the diagram, writes it as Graphviz's DOT, and has @dot@ lay it out and
--- draw it. Only flowcharts (@graph@ and @flowchart@) are read; other
--- diagram types are refused with words for the user, who sees the source.
+-- | Mermaid diagrams in Markdown, read by usta itself; "Usta.Diagram"
+-- lays them out and the window draws them. Flowcharts (@graph@ and
+-- @flowchart@) are read here; a type usta does not read yet is refused
+-- with words for the user, who sees the source.
 module Usta.Mermaid
   ( Direction (..)
   , Shape (..)
@@ -13,21 +13,13 @@ module Usta.Mermaid
   , Group (..)
   , Flowchart (..)
   , parse
-  , Colors (..)
-  , toDot
-  , draw
   ) where
 
-import Control.Exception (IOException, try)
-import qualified Data.ByteString.Lazy as BL
 import Data.Char (isAlphaNum, isSpace)
 import Data.Kind (Type)
 import Data.List (nub)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8Lenient, encodeUtf8)
-import System.Exit (ExitCode (..))
-import System.Process.Typed (byteStringInput, proc, readProcess, setStdin)
 
 type Direction :: Type
 data Direction = TopDown | BottomUp | LeftRight | RightLeft
@@ -219,59 +211,3 @@ connector text
 
 labelled :: Text -> Link -> Link
 labelled l link = Link {label = Just l, stroke = link.stroke, arrow = link.arrow}
-
--- | What the drawing is colored with, for the theme.
-type Colors :: Type
-data Colors = Colors
-  { fill :: Text
-  , border :: Text
-  , text :: Text
-  , line :: Text
-  }
-
-toDot :: Colors -> Flowchart -> Text
-toDot colors chart = T.unlines $
-  [ "digraph usta {"
-  , "  rankdir=" <> rank <> "; bgcolor=\"transparent\"; pad=0.2; nodesep=0.4; ranksep=0.5;"
-  , "  node [fontname=\"Helvetica\", fontsize=12, style=\"filled\", penwidth=1.2, fillcolor=" <> q colors.fill
-      <> ", color=" <> q colors.border <> ", fontcolor=" <> q colors.text <> "];"
-  , "  edge [fontname=\"Helvetica\", fontsize=11, arrowsize=0.7, color=" <> q colors.line <> ", fontcolor=" <> q colors.text <> "];"
-  ]
-  <> ["  " <> q n.name <> " [label=" <> q n.label <> ", " <> shapeOf n.shape <> "];" | n <- chart.nodes]
-  <> ["  " <> q e.from <> " -> " <> q e.to <> " [" <> T.intercalate ", " (edgeAttributes e) <> "];" | e <- chart.edges]
-  <> ["}"]
-  where
-    rank = case chart.direction of
-      TopDown -> "TB"
-      BottomUp -> "BT"
-      LeftRight -> "LR"
-      RightLeft -> "RL"
-    shapeOf shape = case shape of
-      Rectangle -> "shape=box"
-      Rounded -> "shape=box, style=\"filled,rounded\""
-      Stadium -> "shape=box, style=\"filled,rounded\""
-      Diamond -> "shape=diamond"
-      Hexagon -> "shape=hexagon"
-      Subroutine -> "shape=box, peripheries=2"
-      Circle -> "shape=circle"
-      Database -> "shape=cylinder"
-      Flag -> "shape=cds"
-    edgeAttributes e =
-      [ "style=" <> case e.stroke of
-          Solid -> "solid"
-          Dotted -> "dashed"
-          Thick -> "bold"
-      , "arrowhead=" <> if e.arrow then "normal" else "none"
-      ] <> ["label=" <> q (" " <> l <> " ") | Just l <- [e.label]]
-    -- A DOT string: backslashes and quotes escaped, line breaks as \n.
-    q t = "\"" <> T.replace "\n" "\\n" (T.replace "\"" "\\\"" (T.replace "\\" "\\\\" t)) <> "\""
-
--- | The flowchart as a PNG at twice the screen's resolution, drawn by
--- Graphviz's @dot@; the DOT goes on its stdin.
-draw :: Colors -> Flowchart -> IO (Either Text BL.ByteString)
-draw colors chart = do
-  ran <- try (readProcess (setStdin (byteStringInput (BL.fromStrict (encodeUtf8 (toDot colors chart)))) (proc "dot" ["-Tpng", "-Gdpi=144"])))
-  pure $ case ran of
-    Left (_ :: IOException) -> Left "Drawing diagrams needs Graphviz's dot, which usta did not find."
-    Right (ExitSuccess, png, _) -> Right png
-    Right (ExitFailure _, _, err) -> Left ("Graphviz could not draw it: " <> T.strip (decodeUtf8Lenient (BL.toStrict err)))

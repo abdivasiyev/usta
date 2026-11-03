@@ -70,10 +70,6 @@
         # Lets the installed binary find GTK's schemas and the icon theme.
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [pkgs.wrapGAppsHook4];
         buildInputs = (old.buildInputs or []) ++ [pkgs.gtk4 pkgs.adwaita-icon-theme];
-        # Mermaid diagrams in Markdown are laid out and drawn by Graphviz.
-        preFixup = (old.preFixup or "") + ''
-          gappsWrapperArgs+=(--prefix PATH : ${pkgs.lib.makeBinPath [pkgs.graphviz]})
-        '';
       });
   in {
     packages = forAllSystems (pkgs: {
@@ -97,7 +93,6 @@
           hsPkgs.cabal-install
           hsPkgs.haskell-language-server
           hsPkgs.cabal-gild
-          pkgs.graphviz
         ];
         buildInputs = [pkgs.adwaita-icon-theme];
         shellHook = ''

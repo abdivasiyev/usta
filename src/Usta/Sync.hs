@@ -2,6 +2,7 @@
 
 -- | Keeps the database a copy of every account's forge: one thread per
 -- account syncs its lists, then waits for the interval or 'syncNow'.
+-- Accounts can be added and removed while it runs.
 module Usta.Sync
   ( State (..)
   , Status (..)
@@ -61,6 +62,15 @@ type Sync :: Type
 data Sync = Sync
   { syncNow :: IO ()
     -- ^ Every account syncs now instead of at its next interval.
+  , add :: AccountId -> Forge -> IO ()
+    -- ^ Starts syncing an account at once; replaces its forge if it was
+    -- already syncing, as after signing in again.
+  , remove :: AccountId -> IO ()
+    -- ^ Stops syncing an account. When it returns, nothing more is
+    -- reported for it.
+  , report :: Status -> IO ()
+    -- ^ Tells of an account that cannot sync at all, such as one whose
+    -- token is gone.
   , stop :: IO ()
   , latest :: IO [Status]
     -- ^ Each account's last status, for whoever starts listening late.
@@ -70,13 +80,29 @@ start :: Settings -> [(AccountId, Forge)] -> IO Sync
 start settings accounts = do
   wake <- newTVarIO (0 :: Int)
   known <- newTVarIO Map.empty
+  threads <- newTVarIO Map.empty
   let report status = do
         atomically (modifyTVar' known (Map.insert status.accountId status))
         publish settings.statuses status
-  threads <- traverse (forkIO . worker settings report wake) accounts
+      remove key = do
+        old <- atomically $ do
+          running <- readTVar threads
+          modifyTVar' threads (Map.delete key)
+          pure (Map.lookup key running)
+        -- killThread returns once the thread has stopped.
+        mapM_ killThread old
+        atomically (modifyTVar' known (Map.delete key))
+      add key forge = do
+        remove key
+        thread <- forkIO (worker settings report wake (key, forge))
+        atomically (modifyTVar' threads (Map.insert key thread))
+  mapM_ (uncurry add) accounts
   pure Sync
     { syncNow = atomically (modifyTVar' wake (+ 1))
-    , stop = mapM_ killThread threads
+    , add = add
+    , remove = remove
+    , report = report
+    , stop = readTVarIO threads >>= mapM_ killThread
     , latest = toList <$> readTVarIO known
     }
 

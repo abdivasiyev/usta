@@ -19,7 +19,7 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Word (Word32)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Badge as Badge
@@ -28,6 +28,8 @@ import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.NavItem as NavItem
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import Usta.UI.Style (Tone (..))
+import Usta.Preferences (Interval (..), Preferences (..), Theme (..))
+import qualified Usta.Preferences as Preferences
 
 -- | How usta signed in to the forge.
 type Auth :: Type
@@ -48,12 +50,11 @@ data Account = Account
 type Model :: Type
 data Model = Model
   { accounts :: [Account]
-  , syncIntervals :: [Text]
-  , syncInterval :: Word32
-    -- ^ Index into 'syncIntervals'.
+  , preferences :: Preferences
+  , onPreferences :: Preferences -> IO ()
+    -- ^ Runs with every change of the sync interval, theme or
+    -- notifications, which the caller saves and applies.
   , mirrorPath :: Text
-  , diffLayouts :: [Text]
-  , diffLayout :: Word32
   , shortcuts :: [(Text, Text)]
     -- ^ Keys and what they do, as the shortcut strip shows them.
   }
@@ -98,8 +99,14 @@ new onBack onAddAccount m = do
                             , #halign := Gtk.AlignStart
                             , #cssClasses := ["content"]
                             ]
+  -- Each change builds on the ones before it on this page.
+  chosen <- newIORef m.preferences
+  let change f = do
+        p <- f <$> readIORef chosen
+        writeIORef chosen p
+        m.onPreferences p
   sections <- forM [minBound .. maxBound] $ \s -> do
-    widget <- section s m onAddAccount
+    widget <- section s m change onAddAccount
     #append content widget
     pure (s, widget)
 
@@ -133,8 +140,8 @@ new onBack onAddAccount m = do
   #append page body
   Gtk.toWidget page
 
-section :: Section -> Model -> IO () -> IO Gtk.Widget
-section s m onAddAccount = do
+section :: Section -> Model -> ((Preferences -> Preferences) -> IO ()) -> IO () -> IO Gtk.Widget
+section s m change onAddAccount = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12]
   heading <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
   title <- label (sectionTitle s) ["section-title"]
@@ -155,8 +162,12 @@ section s m onAddAccount = do
       | otherwise -> mapM accountRow m.accounts
     Sync -> sequence
       [ do
-          interval <- Gtk.dropDownNewFromStrings m.syncIntervals
-          Gtk.dropDownSetSelected interval m.syncInterval
+          let intervals = [minBound .. maxBound] :: [Interval]
+          interval <- Gtk.dropDownNewFromStrings (map intervalName intervals)
+          Gtk.dropDownSetSelected interval (fromIntegral (fromEnum m.preferences.interval))
+          void $ GI.on interval (GI.PropertyNotify #selected) $ \_ -> do
+            i <- fromIntegral <$> Gtk.dropDownGetSelected interval
+            when (i < length intervals) $ change (\p -> p {interval = intervals !! i})
           setting "Check for updates" [plain "How often usta asks your forges for new activity"]
             =<< sequence [Gtk.toWidget interval]
       , setting "Local git mirrors"
@@ -167,16 +178,12 @@ section s m onAddAccount = do
       ]
     Notifications -> sequence
       [ setting "Desktop notifications" [plain "Review requests, mentions and failed checks"]
-          =<< sequence [switch True]
+          =<< sequence [switch m.preferences.notify (\on p -> p {notify = on})]
       , setting "Only when usta is in the background" [plain "Stay quiet while you are looking at the app"]
-          =<< sequence [switch False]
+          =<< sequence [switch m.preferences.onlyInBackground (\on p -> p {onlyInBackground = on})]
       ]
     Appearance -> sequence
-      [ setting "Theme" [] =<< sequence [themeChoice]
-      , do
-          layout <- Gtk.dropDownNewFromStrings m.diffLayouts
-          Gtk.dropDownSetSelected layout m.diffLayout
-          setting "Diff layout" [] =<< sequence [Gtk.toWidget layout]
+      [ setting "Theme" [] =<< sequence [themeChoice m.preferences.theme (\t -> change (\p -> p {theme = t}))]
       ]
     Keyboard -> forM m.shortcuts $ \(keys, action) -> do
       keyLabel <- Shortcut.key keys >>= Gtk.toWidget
@@ -186,6 +193,18 @@ section s m onAddAccount = do
   Gtk.toWidget box
   where
     capitalize t = T.toUpper (T.take 1 t) <> T.drop 1 t
+    switch on set' = do
+      w <- GI.new Gtk.Switch [#active := on]
+      void $ GI.on w (GI.PropertyNotify #active) $ \_ -> do
+        now <- GI.get w #active
+        change (set' now)
+      Gtk.toWidget w
+    intervalName i = case i of
+      EveryMinute -> "Every minute"
+      EveryTwoMinutes -> "Every 2 minutes"
+      EveryFiveMinutes -> "Every 5 minutes"
+      EveryFifteenMinutes -> "Every 15 minutes"
+      Manually -> "Manually"
 
 -- | A piece of a row's description, in the normal or the code font.
 type Piece :: Type
@@ -254,33 +273,21 @@ accountRow a = do
     authText AccessToken = "Access token"
 
 -- | System, Light or Dark; switches the app's colors right away.
-themeChoice :: IO Gtk.Widget
-themeChoice = do
+-- | System, Light and Dark; @onTheme@ runs with the one chosen.
+themeChoice :: Theme -> (Theme -> IO ()) -> IO Gtk.Widget
+themeChoice current onTheme = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 16]
-  settings <- Gtk.settingsGetDefault
-  reported <- maybe (pure Gtk.InterfaceColorSchemeDefault) (`GI.get` #gtkInterfaceColorScheme) settings
-  -- Anything but an explicit light or dark choice follows the system.
-  let current
-        | reported `elem` [Gtk.InterfaceColorSchemeLight, Gtk.InterfaceColorSchemeDark] = reported
-        | otherwise = Gtk.InterfaceColorSchemeDefault
-  let choices = [ ("System", Gtk.InterfaceColorSchemeDefault)
-                , ("Light", Gtk.InterfaceColorSchemeLight)
-                , ("Dark", Gtk.InterfaceColorSchemeDark)
-                ]
-  buttons <- forM choices $ \(name, scheme) -> do
-    b <- GI.new Gtk.CheckButton [#label := name, #active := scheme == current]
+  buttons <- forM [minBound .. maxBound] $ \theme -> do
+    b <- GI.new Gtk.CheckButton [#label := T.pack (show theme), #active := theme == current]
     void $ GI.on b #toggled $ do
       active <- GI.get b #active
-      when active $ forM_ settings $ \s -> GI.set s [#gtkInterfaceColorScheme := scheme]
+      when active (onTheme theme)
     #append box b
     pure b
   case buttons of
     first : rest -> forM_ rest $ \b -> Gtk.checkButtonSetGroup b (Just first)
     [] -> pure ()
   Gtk.toWidget box
-
-switch :: Bool -> IO Gtk.Widget
-switch on = GI.new Gtk.Switch [#active := on] >>= Gtk.toWidget
 
 -- | A small modal window over @anchor@'s window: @title@, @text@, Cancel
 -- and a danger button that runs @onConfirm@.
@@ -343,11 +350,9 @@ sample keys = Model
       [ account Forge.GitHub "github.com" BrowserSignIn
       , account Forge.Forgejo "git.azizovich.uz" AccessToken
       ]
-  , syncIntervals = ["Every minute", "Every 2 minutes", "Every 5 minutes", "Every 15 minutes", "Manually"]
-  , syncInterval = 1
-  , mirrorPath = "~/.cache/usta/repos"
-  , diffLayouts = ["Unified", "Split"]
-  , diffLayout = 0
+  , preferences = Preferences.defaults
+  , onPreferences = const (pure ())
+  , mirrorPath = "~/Library/Caches/usta/mirrors"
   , shortcuts = keys
   }
   where

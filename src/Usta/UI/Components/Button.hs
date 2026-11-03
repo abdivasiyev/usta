@@ -9,14 +9,17 @@ module Usta.UI.Components.Button
   , Config (..)
   , defaults
   , new
+  , busy
   , css
   ) where
 
-import Control.Monad (forM_)
+import Control.Concurrent (forkIO)
+import Control.Monad (forM_, void)
 import Data.GI.Base (AttrOp ((:=)), set)
 import qualified Data.GI.Base as GI
 import Data.Kind (Type)
 import Data.Text (Text)
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 type Variant :: Type
@@ -63,6 +66,33 @@ new cfg = do
   forM_ cfg.tooltip $ \t -> set button [#tooltipText := t]
   pure button
 
+-- | Runs @act@ off the main thread while the button waits for it: it
+-- keeps its width, shows a spinner and @doing@ (such as "Commenting…") and
+-- cannot be pressed, and @others@ (the buttons beside it) wait too, so
+-- nothing is sent twice. Then the button comes back as it was and @done@
+-- gets the result on the main thread.
+busy :: Gtk.IsWidget w => Gtk.Button -> [w] -> Text -> IO a -> (a -> IO ()) -> IO ()
+busy button others doing act done = do
+  before <- Gtk.buttonGetChild button
+  width <- Gtk.widgetGetWidth button
+  spinner <- GI.new Gtk.Spinner [#spinning := True]
+  caption <- GI.new Gtk.Label [#label := doing]
+  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignCenter]
+  #append box spinner
+  #append box caption
+  set button [#child := box, #widthRequest := width, #sensitive := False]
+  Gtk.widgetAddCssClass button "busy"
+  forM_ others (\w -> Gtk.widgetSetSensitive w False)
+  void $ forkIO $ do
+    result <- act
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      Gtk.buttonSetChild button before
+      set button [#widthRequest := -1, #sensitive := True]
+      Gtk.widgetRemoveCssClass button "busy"
+      forM_ others (\w -> Gtk.widgetSetSensitive w True)
+      done result
+      pure False
+
 variantClass :: Variant -> Text
 variantClass v = case v of
   Primary -> "u-primary"
@@ -86,4 +116,11 @@ css = mconcat
   , "button.u-danger { background: var(--surface); color: var(--danger); border: 1px solid var(--danger-border); }"
   , "button.u-danger:hover { background: var(--danger-bg); }"
   , "button.u-button:disabled { background: var(--border); color: var(--text-muted); border: none; }"
+  -- A busy button keeps its look, so it reads as working, not refused.
+  , "button.u-primary.busy:disabled { background: var(--accent); color: var(--on-accent); }"
+  , "button.u-secondary.busy:disabled { background: var(--surface); color: var(--text-soft); border: 1px solid var(--input-border); }"
+  , "button.u-danger.busy:disabled { background: var(--surface); color: var(--danger); border: 1px solid var(--danger-border); }"
+  , "button.u-flat.busy:disabled { background: transparent; color: var(--text-soft); }"
+  , "button.u-button.busy spinner, button.u-button.busy spinner:disabled { min-width: 14px; min-height: 14px; color: var(--accent); opacity: 1; }"
+  , "button.u-primary.busy spinner, button.u-primary.busy spinner:disabled { color: var(--on-accent); }"
   ]

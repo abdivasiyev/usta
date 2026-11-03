@@ -7,6 +7,7 @@
 module Usta.Details
   ( Settings (..)
   , Details (..)
+  , From (..)
   , new
   ) where
 
@@ -39,15 +40,21 @@ data Settings = Settings
   , mirrors :: Mirrors
   }
 
--- | Each answer is 'Left' with words for the user when neither the mirror
--- nor the forge could give it.
+-- | Where an answer came from, which the screens say.
+type From :: Type
+data From = FromMirror | FromForge
+  deriving stock (Eq, Show)
+
+-- | Each answer says where it came from, or is 'Left' with words for the
+-- user when neither the mirror nor the forge could give it.
 type Details :: Type
 data Details = Details
-  { pullFiles :: AccountId -> RepoName -> Number -> IO (Either Text [FileDiff])
-  , pullCommits :: AccountId -> RepoName -> Number -> IO (Either Text [Commit])
-  , recentCommits :: AccountId -> RepoName -> Text -> IO (Either Text [Commit])
+  { pullFiles :: AccountId -> RepoName -> Number -> IO (Either Text (From, [FileDiff]))
+  , pullCommits :: AccountId -> RepoName -> Number -> IO (Either Text (From, [Commit]))
+  , commitDiff :: AccountId -> RepoName -> Sha -> IO (Either Text (From, [FileDiff]))
+  , recentCommits :: AccountId -> RepoName -> Text -> IO (Either Text (From, [Commit]))
     -- ^ The last commits on a branch, newest first.
-  , readme :: AccountId -> RepoName -> Text -> IO (Either Text (Maybe (Text, Text)))
+  , readme :: AccountId -> RepoName -> Text -> IO (Either Text (From, Maybe (Text, Text)))
     -- ^ A branch's README, with its file name.
   }
 
@@ -55,6 +62,7 @@ new :: Settings -> Details
 new settings = Details
   { pullFiles = \key repo n -> pull key repo n Git.diff (\f -> f.pullDiff repo n)
   , pullCommits = \key repo n -> pull key repo n Git.history (\f -> f.pullCommits repo n)
+  , commitDiff = \key repo sha -> either' key repo (\path -> Git.commitDiff path sha) (\f -> f.commitDiff repo sha)
   , recentCommits = \key repo branch ->
       either' key repo (\path -> Git.recent path branch 10) (\f -> f.recentCommits repo branch)
   , readme = \key repo branch -> either' key repo (\path -> Git.readme path branch) (\f -> f.readme repo branch)
@@ -62,7 +70,7 @@ new settings = Details
   where
     -- A pull request from the mirror needs both its base branch and its own
     -- head there.
-    pull :: AccountId -> RepoName -> Number -> (FilePath -> Sha -> Sha -> IO a) -> (Forge -> IO a) -> IO (Either Text a)
+    pull :: AccountId -> RepoName -> Number -> (FilePath -> Sha -> Sha -> IO a) -> (Forge -> IO a) -> IO (Either Text (From, a))
     pull key repo n fromMirror fromForge = do
       base <- baseOf key repo n
       either' key repo
@@ -80,14 +88,14 @@ new settings = Details
         [] -> Nothing
 
     -- The mirror when it is there and works, the forge otherwise.
-    either' :: AccountId -> RepoName -> (FilePath -> IO a) -> (Forge -> IO a) -> IO (Either Text a)
+    either' :: AccountId -> RepoName -> (FilePath -> IO a) -> (Forge -> IO a) -> IO (Either Text (From, a))
     either' key repo fromMirror fromForge = do
       path <- settings.mirrors.ready key repo
       local <- case path of
         Nothing -> pure Nothing
         Just p -> either (\(_ :: IOError) -> Nothing) Just <$> try (fromMirrorSafe (fromMirror p))
       case local of
-        Just answer -> pure (Right answer)
+        Just answer -> pure (Right (FromMirror, answer))
         Nothing -> do
           forge <- settings.accounts.forgeOf key
           case forge of
@@ -95,7 +103,7 @@ new settings = Details
             Just f -> do
               asked <- try (fromForge f)
               pure $ case asked of
-                Right answer -> Right answer
+                Right answer -> Right (FromForge, answer)
                 Left Offline -> Left "The forge could not be reached."
                 Left SignedOut -> Left "The forge refused the account's token; sign in again."
                 Left (Refused message) -> Left ("The forge said: " <> message)

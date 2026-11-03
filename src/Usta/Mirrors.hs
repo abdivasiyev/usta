@@ -11,20 +11,21 @@ module Usta.Mirrors
   , Mirrors (..)
   , defaultRoot
   , start
+  , prune
   ) where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.STM (atomically, modifyTVar', newTQueueIO, newTVarIO, readTQueue, readTVarIO, writeTQueue)
 import Control.Exception (try)
-import Control.Monad (forM_, forever, void, when)
+import Control.Monad (filterM, forM_, forever, void, when)
 import qualified Data.Map.Strict as Map
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime, getCurrentTime)
 import Database.Persist.Sql (ConnectionPool)
-import System.Directory (XdgDirectory (XdgCache), doesFileExist, getHomeDirectory, getXdgDirectory)
-import System.FilePath ((</>))
+import System.Directory (XdgDirectory (XdgCache), doesDirectoryExist, doesFileExist, getHomeDirectory, getXdgDirectory, listDirectory, removeDirectoryRecursive)
+import System.FilePath (takeExtension, (</>))
 
 import Usta.Bus (Bus, Change (..), listen, publish)
 import Usta.DB (run)
@@ -135,6 +136,25 @@ work settings report job = do
       Everything -> True
       OfAccount key -> w.accountId == key
       One key repo -> w.accountId == key && w.repo == repo
+
+-- | Deletes the clones under @root@ that no chosen mirror uses any more,
+-- such as those of a removed account or a repository set to the API, and
+-- gives how many went.
+prune :: ConnectionPool -> FilePath -> IO Int
+prune pool root = do
+  wanted <- map (\w -> pathOf root w.host w.repo) <$> run pool mirrored
+  hosts <- folders root
+  owners <- concat <$> traverse folders hosts
+  clones <- concat <$> traverse folders owners
+  let unused = [c | c <- clones, takeExtension c == ".git", c `notElem` wanted]
+  mapM_ removeDirectoryRecursive unused
+  pure (length unused)
+  where
+    folders dir = do
+      exists <- doesDirectoryExist dir
+      if not exists then pure [] else do
+        names <- listDirectory dir
+        filterM doesDirectoryExist (map (dir </>) names)
 
 pathOf :: FilePath -> Host -> RepoName -> FilePath
 pathOf root host repo = root </> T.unpack (unparse host) </> T.unpack (unparse repo) <> ".git"

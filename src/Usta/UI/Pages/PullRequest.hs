@@ -154,6 +154,9 @@ tabBar s onSelect = do
     case (tab, s.checks) of
       (Checks, Just (tone, text)) -> label text ["tab-count", toneClass tone] >>= #append row
       (Checks, Nothing) -> pure ()
+      -- A pull request has at least one file and commit, so 0 is not
+      -- known yet: no count is better than a wrong one.
+      (_, _) | tab `elem` [Files, Commits] && count tab == 0 -> pure ()
       _ -> label (T.pack (show (count tab))) ["tab-count"] >>= #append row
     button <- GI.new Gtk.ToggleButton [#child := row]
     #append bar button

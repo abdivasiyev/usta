@@ -15,6 +15,7 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
 import Usta.UI.Style (Tone, toneClass)
 
@@ -31,7 +32,13 @@ stat tone caption value = do
                         , #cssClasses := ["u-card", "u-stat"]
                         ]
   captionLabel <- GI.new Gtk.Label [#label := caption, #xalign := 0, #cssClasses := ["caption"]]
-  valueLabel <- GI.new Gtk.Label [#label := value, #xalign := 0, #cssClasses := ["value", toneClass tone]]
+  -- A long value ends in an ellipsis; the tooltip has all of it.
+  valueLabel <- GI.new Gtk.Label [ #label := value
+                                 , #xalign := 0
+                                 , #ellipsize := Pango.EllipsizeModeEnd
+                                 , #tooltipText := value
+                                 , #cssClasses := ["value", toneClass tone]
+                                 ]
   #append box captionLabel
   #append box valueLabel
   pure box

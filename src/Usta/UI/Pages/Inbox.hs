@@ -157,9 +157,8 @@ new view actions notifications = do
                             , #wrap := True
                             , #cssClasses := ["muted", "u-inbox-empty"]
                             ]
-  -- Removing every row removes the placeholder too, so it is set again.
-  let fill shown = refill list notificationRow shown >> Gtk.listBoxSetPlaceholder list (Just empty)
-  readIORef items >>= fill
+  Gtk.listBoxSetPlaceholder list (Just empty)
+  readIORef items >>= refill list notificationRow
 
   selectedKey <- newIORef Nothing
   void $ GI.on list #rowSelected $ \selected -> case selected of
@@ -261,7 +260,7 @@ new view actions notifications = do
     , update = \everything -> do
         let shown = filter (lists view) everything
         writeIORef items shown
-        fill shown
+        refill list notificationRow shown
         readIORef current >>= apply
         select
     }

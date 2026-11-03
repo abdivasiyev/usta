@@ -80,17 +80,3 @@ draw measure k = do
       Just "low" -> Series 1
       Just "very low" -> Series 6
       _ -> Border
-
--- | The words in lines no wider than @width@.
-wrap :: Monad m => Measure m -> Font -> Double -> Text -> m [Text]
-wrap measure font width text = go [] (T.words text)
-  where
-    go acc [] = pure (reverse acc)
-    go acc (w : ws) = do
-      let fits line rest = case rest of
-            [] -> pure (line, [])
-            x : xs -> do
-              s <- measure font (line <> " " <> x)
-              if s.w <= width then fits (line <> " " <> x) xs else pure (line, rest)
-      (line, rest) <- fits w ws
-      go (line : acc) rest

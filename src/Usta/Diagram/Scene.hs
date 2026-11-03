@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | A diagram as something to draw: boxes, shapes, lines and text at
 -- positions, in colors named by their role. Each diagram type's layout
 -- makes one; the window draws it with GTK, and the theme decides what each
@@ -16,6 +18,7 @@ module Usta.Diagram.Scene
   , bold
   , Size (..)
   , Measure
+  , wrap
   , Item (..)
   , Scene (..)
   , scene
@@ -25,6 +28,7 @@ module Usta.Diagram.Scene
 
 import Data.Kind (Type)
 import Data.Text (Text)
+import qualified Data.Text as T
 
 -- | What a color is for; the palette gives each a light and a dark value.
 type Role :: Type
@@ -116,6 +120,20 @@ data Size = Size {w :: Double, h :: Double}
 -- window it is Pango; tests give an estimate.
 type Measure :: (Type -> Type) -> Type
 type Measure m = Font -> Text -> m Size
+
+-- | The words in lines no wider than @width@.
+wrap :: Monad m => Measure m -> Font -> Double -> Text -> m [Text]
+wrap measure font width text = go [] (T.words text)
+  where
+    go acc [] = pure (reverse acc)
+    go acc (w : ws) = do
+      let fits line rest = case rest of
+            [] -> pure (line, [])
+            x : xs -> do
+              s <- measure font (line <> " " <> x)
+              if s.w <= width then fits (line <> " " <> x) xs else pure (line, rest)
+      (line, rest) <- fits w ws
+      go (line : acc) rest
 
 type Item :: Type
 data Item

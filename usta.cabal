@@ -39,6 +39,7 @@ executable usta
     Usta.DB.Schema.SyncCursor
     Usta.DB.SyncCursor
     Usta.Details
+    Usta.Diagram.Scene
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api
@@ -83,6 +84,7 @@ executable usta
     Usta.UI.Components.Card
     Usta.UI.Components.CodeView
     Usta.UI.Components.CommandPalette
+    Usta.UI.Components.DiagramView
     Usta.UI.Components.Diff
     Usta.UI.Components.Forge
     Usta.UI.Components.Icon
@@ -142,6 +144,7 @@ executable usta
     gi-glib,
     gi-gtk4,
     gi-pango,
+    gi-pangocairo,
     gi-poppler,
     haskell-gi-base,
     http-api-data,

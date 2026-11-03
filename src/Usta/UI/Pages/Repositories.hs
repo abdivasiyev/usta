@@ -209,7 +209,11 @@ repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO Gtk.Box
 repositoryDetail actions r onFiles = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
   tabs <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
-  stack <- GI.new Gtk.Stack [#vexpand := True, #hexpand := True]
+  stack <- GI.new Gtk.Stack [ #vexpand := True
+                            , #hexpand := True
+                            , #transitionType := Gtk.StackTransitionTypeCrossfade
+                            , #transitionDuration := 150
+                            ]
   overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
   overview actions r >>= \o -> GI.set overviewScroll [#child := o]
   void $ Gtk.stackAddNamed stack overviewScroll (Just "overview")

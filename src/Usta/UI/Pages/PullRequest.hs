@@ -76,7 +76,11 @@ new backLabel onBack tabContent summary = do
   (bar, showState) <- header summary backLabel onBack
   #append page bar
 
-  content <- GI.new Gtk.Stack [#vexpand := True, #hexpand := True]
+  content <- GI.new Gtk.Stack [ #vexpand := True
+                              , #hexpand := True
+                              , #transitionType := Gtk.StackTransitionTypeCrossfade
+                              , #transitionDuration := 150
+                              ]
   forM_ [minBound .. maxBound] $ \tab -> do
     widget <- tabContent showState tab
     void $ Gtk.stackAddNamed content widget (Just (tabName tab))

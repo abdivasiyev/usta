@@ -99,19 +99,31 @@ build = buildAt Ready
 -- reload all of them each minute so "5 min ago" stays true.
 buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
 buildAt start source app = do
-  -- Two screens: "main" (sidebar and pages) and "detail" (a full-width
+  -- Two screens: "main" (sidebar and pages) and "detail-N" (a full-width
   -- screen such as one pull request or the new pull request form).
-  screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
+  -- Screens and pages cross-fade; GTK skips it when animations are off.
+  screens <- GI.new Gtk.Stack [ #hexpand := True
+                              , #vexpand := True
+                              , #transitionType := Gtk.StackTransitionTypeCrossfade
+                              , #transitionDuration := 180
+                              ]
   states <- newIORef []
+  shownDetails <- newIORef (0 :: Int)
   -- The saved theme, before anything is drawn.
   source.preferences >>= Style.setTheme . (.theme)
   let backToMain = Gtk.stackSetVisibleChildName screens "main"
       showDetail :: Gtk.Widget -> IO ()
+      -- The new screen fades in over the old one, which goes once hidden.
       showDetail widget = do
-        old <- Gtk.stackGetChildByName screens "detail"
-        forM_ old $ Gtk.stackRemove screens
-        void $ Gtk.stackAddNamed screens widget (Just "detail")
-        Gtk.stackSetVisibleChildName screens "detail"
+        n <- (+ 1) <$> readIORef shownDetails
+        writeIORef shownDetails n
+        let name = "detail-" <> T.pack (show n)
+            old = "detail-" <> T.pack (show (n - 1))
+        void $ Gtk.stackAddNamed screens widget (Just name)
+        Gtk.stackSetVisibleChildName screens name
+        void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 400 $ do
+          Gtk.stackGetChildByName screens old >>= mapM_ (Gtk.stackRemove screens)
+          pure False
       openPullRequestWith fetch backLabel summary =
         PullRequest.new backLabel backToMain
           (tabContent source (openPullRequestWith fetch backLabel summary) fetch summary) summary
@@ -288,7 +300,11 @@ buildAt start source app = do
     }
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
   source.onMirrorStatus (source.repositories >>= repositoryPage.update)
-  pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
+  pages <- GI.new Gtk.Stack [ #hexpand := True
+                            , #vexpand := True
+                            , #transitionType := Gtk.StackTransitionTypeCrossfade
+                            , #transitionDuration := 150
+                            ]
   shownPage <- newIORef Sidebar.Inbox
   sidebarSlot <- GI.new Gtk.Box []
   footerSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]

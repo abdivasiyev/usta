@@ -112,4 +112,8 @@ tokens = mconcat
   , ".muted { color: var(--text-muted); }"
   , ".soft { color: var(--text-soft); }"
   , ".mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }"
+  -- Hover, press and selection ease in instead of snapping.
+  , "button, row, entry, checkbutton check, radio, switch {"
+  , "  transition: background-color 120ms ease-out, box-shadow 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;"
+  , "}"
   ]

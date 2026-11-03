@@ -85,6 +85,7 @@ executable usta
     Usta.UI.Components.Diff
     Usta.UI.Components.Forge
     Usta.UI.Components.Icon
+    Usta.UI.Components.Markdown
     Usta.UI.Components.ImageView
     Usta.UI.Components.MarkdownEditor
     Usta.UI.Components.NavItem
@@ -126,6 +127,7 @@ executable usta
     async,
     base,
     bytestring,
+    cmark-gfm,
     containers,
     directory,
     esqueleto,

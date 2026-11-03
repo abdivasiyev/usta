@@ -12,7 +12,7 @@ module Usta.UI.Window
 import Control.Monad (forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -53,7 +53,12 @@ import qualified Usta.UI.Pages.Settings as Settings
 import qualified Usta.UI.Pages.Welcome as Welcome
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
-import Usta.UI.Source (Source (..))
+import Usta.UI.Source (Connected (..), Source (..))
+import Usta.UI.Format (Clock, ago, clock)
+import qualified Usta.Forge as Forge
+import qualified Usta.Sync as Sync
+import Data.Containers.ListUtils (nubOrd)
+import Data.List (find)
 import qualified Usta.Types.Resource as Resource
 import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Style as Style
@@ -99,10 +104,8 @@ buildAt start source app = do
 
   -- The palette wraps the whole window, so it exists only further down.
   paletteOpener <- newIORef (pure ())
-  let syncState
-        | start == FirstSync = SyncStatus.Syncing "github.com"
-        | otherwise = SyncStatus.Synced "1 min ago"
-  header <- headerBar Platform.current syncState openSettings (join (readIORef paletteOpener))
+  syncChip <- GI.new Gtk.Box []
+  header <- headerBar Platform.current syncChip source.syncNow openSettings (join (readIORef paletteOpener))
 
   let openNotification n
         | n.kind == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
@@ -113,19 +116,71 @@ buildAt start source app = do
   issuePage <- source.issues >>= Issues.new openNewIssue (openIssue "Issues" . issueDetail)
   -- The forms open with sample fields until they take the repository.
   repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest)
-  let reload resource = case resource of
-        Resource.Notifications -> source.inbox >>= inboxPage.update
-        -- Inbox rows show their pull request's checks and review.
-        Resource.PullRequests -> do
-          source.inbox >>= inboxPage.update
-          source.pullRequests >>= pullRequestPage.update
-        Resource.Issues -> source.issues >>= issuePage.update
-        Resource.Repositories -> source.repositories >>= repositoryPage.update
-  source.onChange reload
-  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $
-    mapM_ reload [minBound .. maxBound] >> pure True
-
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
+  accounts <- source.accounts
+  states <- newIORef []
+  shownPage <- newIORef Sidebar.Inbox
+  sidebarSlot <- GI.new Gtk.Box []
+  let liveModel = do
+        known <- readIORef states
+        notifications <- source.inbox
+        prs <- source.pullRequests
+        issues <- source.issues
+        let count n = if n > 0 then Just n else Nothing
+            syncing host = or [s == Sync.Syncing | a <- accounts, a.host == host, Just s <- [lookup a.accountId known]]
+        pure Sidebar.Model
+          { Sidebar.counts = \page -> case page of
+              Sidebar.Inbox -> count (length (filter (.unread) notifications))
+              Sidebar.ReviewRequests -> count (length [() | pr <- prs, PullRequests.WaitingForMyReview `elem` pr.relations])
+              Sidebar.AssignedToMe -> count $
+                length [() | pr <- prs, PullRequests.AssignedToMe `elem` pr.relations]
+                  + length [() | i <- issues, not i.closed, Issues.AssignedToMe `elem` i.relations]
+              Sidebar.Mentions -> count (length [() | n <- notifications, n.reason == Just Inbox.Mentioned])
+              _ -> Nothing
+          , Sidebar.forges = [(a.forge, a.host) | a <- accounts]
+          , Sidebar.forgeSync = \host -> if syncing host then Just Sidebar.ForgeSyncing else Nothing
+          , Sidebar.pinned = []
+          }
+      sidebarModel
+        | start == FirstSync = pure Sidebar.sample
+            { Sidebar.counts = const Nothing
+            , Sidebar.forgeSync = \host -> Just $
+                if host == "github.com" then Sidebar.ForgeSyncing else Sidebar.ForgeDone
+            , Sidebar.pinned = []
+            }
+        | otherwise = liveModel
+      drawSidebar = do
+        model <- sidebarModel
+        page <- readIORef shownPage
+        Sidebar.new model page (\p -> writeIORef shownPage p >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName p))
+          >>= Gtk.toWidget >>= replaceChild sidebarSlot
+      drawSyncChip = do
+        known <- readIORef states
+        c <- clock
+        let hostOf key = maybe "" (.host) (find ((== key) . (.accountId)) accounts)
+            state
+              | start == FirstSync = SyncStatus.Syncing "github.com"
+              | otherwise = headline c [(hostOf key, s) | (key, s) <- known]
+        SyncStatus.new state source.syncNow >>= Gtk.toWidget >>= replaceChild syncChip
+      reload resource = do
+        case resource of
+          Resource.Notifications -> source.inbox >>= inboxPage.update
+          -- Inbox rows show their pull request's checks and review.
+          Resource.PullRequests -> do
+            source.inbox >>= inboxPage.update
+            source.pullRequests >>= pullRequestPage.update
+          Resource.Issues -> source.issues >>= issuePage.update
+          Resource.Repositories -> source.repositories >>= repositoryPage.update
+        drawSidebar
+  source.onChange reload
+  source.onStatus $ \status -> do
+    modifyIORef' states (\known -> (status.accountId, status.state) : filter ((/= status.accountId) . fst) known)
+    drawSyncChip
+    drawSidebar
+  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $
+    mapM_ reload [minBound .. maxBound] >> drawSyncChip >> pure True
+  drawSyncChip
+
   forM_ [minBound .. maxBound] $ \page -> do
     content <- case page of
       Sidebar.Inbox | start == FirstSync ->
@@ -140,19 +195,10 @@ buildAt start source app = do
              >>= Gtk.toWidget
     void $ Gtk.stackAddNamed pages content (Just (Sidebar.pageName page))
 
-  let sidebarModel
-        | start == FirstSync = Sidebar.sample
-            { Sidebar.counts = const Nothing
-            , Sidebar.forgeSync = \host -> Just $
-                if host == "github.com" then Sidebar.ForgeSyncing else Sidebar.ForgeDone
-            , Sidebar.pinned = []
-            }
-        | otherwise = Sidebar.sample
-  sidebar <- Sidebar.new sidebarModel Sidebar.Inbox $ \page ->
-    Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
+  drawSidebar
 
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True]
-  #append body sidebar
+  #append body sidebarSlot
   #append body pages
   void $ Gtk.stackAddNamed screens body (Just "main")
 
@@ -162,7 +208,8 @@ buildAt start source app = do
       note <- GI.new Gtk.Label [#label := "You can keep working: items open as soon as they are cached."]
       Gtk.boxPrepend bar note
       pure bar
-    else Shortcut.bar shortcuts (Just "2 forges · 3 accounts")
+    else Shortcut.bar shortcuts (Just (plural (length (nubOrd [a.host | a <- accounts])) "forge" "forges"
+                                       <> " · " <> plural (length accounts) "account" "accounts"))
 
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
@@ -350,8 +397,10 @@ shortcuts :: [(Text, Text)]
 shortcuts =
   [("j k", "move"), ("Enter", "open"), ("e", "done"), ("s", "star"), ("o", "open in browser")]
 
-headerBar :: Platform.Platform -> SyncStatus.State -> IO () -> IO () -> IO Gtk.HeaderBar
-headerBar platform syncState onSettings onSearch = do
+-- | @syncChip@ holds the sync state, which the window keeps current;
+-- @onSync@ runs for the refresh button.
+headerBar :: Platform.Platform -> Gtk.Box -> IO () -> IO () -> IO () -> IO Gtk.HeaderBar
+headerBar platform syncChip onSync onSettings onSearch = do
   header <- GI.new Gtk.HeaderBar [#cssClasses := ["u-header"]]
   Platform.configureHeaderBar platform header
 
@@ -374,14 +423,12 @@ headerBar platform syncState onSettings onSearch = do
   Gtk.widgetAddController search click
   #packStart header search
 
-  -- Retrying needs the sync engine, which comes later.
-  sync <- SyncStatus.new syncState (pure ())
-
   refresh <- Button.new Button.defaults
     { Button.icon = Just "view-refresh-symbolic"
     , Button.variant = Button.Flat
     , Button.tooltip = Just "Sync now"
     }
+  void $ GI.on refresh #clicked onSync
   settings <- Button.new Button.defaults
     { Button.icon = Just "emblem-system-symbolic"
     , Button.variant = Button.Flat
@@ -394,8 +441,32 @@ headerBar platform syncState onSettings onSearch = do
   #packEnd header avatar
   #packEnd header settings
   #packEnd header refresh
-  #packEnd header sync
+  #packEnd header syncChip
   pure header
+
+-- | One state for the header from each account's, with its host: a
+-- failure first, then offline, then what is syncing, then the oldest sync.
+-- With no account synced, the cache is all there is.
+headline :: Clock -> [(Text, Sync.State)] -> SyncStatus.State
+headline c known
+  | not (null [() | (_, Sync.Failed f) <- known, f /= Forge.Offline]) = SyncStatus.Failed
+  | not (null [() | (_, Sync.Failed Forge.Offline) <- known]) = SyncStatus.Offline
+  | not (null syncing) = SyncStatus.Syncing (T.intercalate ", " (nubOrd syncing))
+  | not (null times) = SyncStatus.Synced (ago c (minimum times))
+  | otherwise = SyncStatus.Offline
+  where
+    syncing = [host | (host, Sync.Syncing) <- known]
+    times = [t | (_, Sync.Synced t) <- known]
+
+-- | Shows @widget@ as the box's only child.
+replaceChild :: Gtk.Box -> Gtk.Widget -> IO ()
+replaceChild box widget = do
+  old <- Gtk.widgetGetFirstChild box
+  forM_ old (Gtk.boxRemove box)
+  #append box widget
+
+plural :: Int -> Text -> Text -> Text
+plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
 
 styles :: [Text]
 styles =

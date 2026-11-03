@@ -40,7 +40,7 @@ import qualified Usta.DB.Issue as DB
 import qualified Usta.DB.Notification as DB
 import qualified Usta.DB.PullRequest as DB
 import qualified Usta.DB.Repository as DB
-import Usta.Forge (Failure (..))
+import Usta.Forge (Failure (..), LineNote)
 import qualified Usta.Forge as Forge
 import Usta.Mirrors (Mirrors (..))
 import Usta.Preferences (Preferences (..))
@@ -137,7 +137,7 @@ data Source = Source
   , setClosed :: Text -> Text -> Int -> Bool -> IO (Either Text ())
   , merge :: Text -> Text -> Int -> Merge -> Bool -> IO (Either Text ())
     -- ^ 'True' deletes the branch after.
-  , review :: Text -> Text -> Int -> Verdict -> Text -> IO (Either Text ())
+  , review :: Text -> Text -> Int -> Verdict -> Text -> [LineNote] -> IO (Either Text ())
   , createIssue :: Text -> Text -> NewIssue -> IO (Either Text Int)
     -- ^ Files it in the repository on a host, and gives its number.
   , createPull :: Text -> Text -> NewPull -> IO (Either Text Int)
@@ -232,7 +232,7 @@ fromDatabase pool changes statuses sync = Source
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
   , merge = \_ _ _ _ _ -> pure (Left unavailable)
-  , review = \_ _ _ _ _ -> pure (Left unavailable)
+  , review = \_ _ _ _ _ _ -> pure (Left unavailable)
   , createIssue = \_ _ _ -> pure (Left unavailable)
   , createPull = \_ _ _ -> pure (Left unavailable)
   , branches = \_ _ -> pure (Left unavailable)
@@ -283,7 +283,7 @@ samples = Source
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
   , merge = \_ _ _ _ _ -> pure (Left unavailable)
-  , review = \_ _ _ _ _ -> pure (Left unavailable)
+  , review = \_ _ _ _ _ _ -> pure (Left unavailable)
   , createIssue = \_ _ _ -> pure (Left unavailable)
   , createPull = \_ _ _ -> pure (Left unavailable)
   , branches = \_ _ -> pure (Left unavailable)
@@ -324,7 +324,7 @@ withAccounts pool accounts source = source
   , comment = \host repo n text -> changing (onForge host repo n (\f name number -> () <$ f.comment name number text))
   , setClosed = \host repo n closed -> changing (onForge host repo n (\f name number -> f.setClosed name number closed))
   , merge = \host repo n how delete -> changing (onForge host repo n (\f name number -> f.merge name number how delete))
-  , review = \host repo n verdict text -> changing (onForge host repo n (\f name number -> f.review name number verdict text []))
+  , review = \host repo n verdict text notes -> changing (onForge host repo n (\f name number -> f.review name number verdict text notes))
   , createIssue = \host repo new -> changing (onRepo host repo (\f name -> unparse <$> f.createIssue name new))
   , createPull = \host repo new -> changing (onRepo host repo (\f name -> unparse <$> f.createPull name new))
   , branches = \host repo -> onRepo host repo (\f name -> f.branches name)
@@ -445,7 +445,7 @@ tracking track s = s
   , comment = \h r n t -> track (s.comment h r n t)
   , setClosed = \h r n c -> track (s.setClosed h r n c)
   , merge = \h r n m d -> track (s.merge h r n m d)
-  , review = \h r n v t -> track (s.review h r n v t)
+  , review = \h r n v t notes -> track (s.review h r n v t notes)
   , createIssue = \h r x -> track (s.createIssue h r x)
   , createPull = \h r x -> track (s.createPull h r x)
   , branches = \h r -> track (s.branches h r)

@@ -22,9 +22,11 @@ import qualified Usta.Diagram.Gantt as Gantt
 import qualified Usta.Diagram.Journey as Journey
 import qualified Usta.Diagram.Pie as Pie
 import qualified Usta.Diagram.Quadrant as Quadrant
+import qualified Usta.Diagram.Radar as Radar
 import qualified Usta.Diagram.Sequence as Sequence
 import qualified Usta.Diagram.State as State
 import qualified Usta.Diagram.Timeline as Timeline
+import qualified Usta.Diagram.XyChart as XyChart
 import Usta.Diagram.Scene
 import qualified Usta.Mermaid as Mermaid
 
@@ -40,6 +42,8 @@ data Kind
   | Gantt Gantt.Gantt
   | Journey Journey.Journey
   | Timeline Timeline.Timeline
+  | XyChart XyChart.XyChart
+  | Radar Radar.Radar
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -67,6 +71,8 @@ parse source = do
         "gantt" -> Gantt <$> Gantt.parse (T.unlines meaningful)
         "journey" -> Journey <$> Journey.parse (T.unlines meaningful)
         "timeline" -> Timeline <$> Timeline.parse (T.unlines meaningful)
+        w | w `elem` ["xychart", "xychart-beta"] -> XyChart <$> XyChart.parse (T.unlines meaningful)
+        w | w `elem` ["radar", "radar-beta"] -> Radar <$> Radar.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -98,6 +104,8 @@ draw measure d = do
     Gantt g -> Gantt.draw measure g
     Journey j -> Journey.draw measure j
     Timeline t -> Timeline.draw measure t
+    XyChart x -> XyChart.draw measure x
+    Radar r -> Radar.draw measure r
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

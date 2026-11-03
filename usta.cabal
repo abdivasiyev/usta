@@ -48,11 +48,13 @@ executable usta
     Usta.Diagram.Layered
     Usta.Diagram.Pie
     Usta.Diagram.Quadrant
+    Usta.Diagram.Radar
     Usta.Diagram.Route
     Usta.Diagram.Scene
     Usta.Diagram.Sequence
     Usta.Diagram.State
     Usta.Diagram.Timeline
+    Usta.Diagram.XyChart
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api

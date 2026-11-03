@@ -58,6 +58,7 @@ import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
 import Usta.Details (From (..))
 import qualified Usta.Types.Discussion as D
+import Usta.Types.Discussion (Merge (..))
 import Usta.Types.Parse (parse, unparse)
 -- For the commits' fields.
 import qualified Usta.Types.Commit as C
@@ -400,7 +401,12 @@ tabContent source reopen fetch summary showState tab = case tab of
       Conversation.new actions (Conversation.fromDiscussion c d commits summary.branches checks)
   PullRequest.Files ->
     loadInto (source.pullFiles summary.host summary.repo summary.number) $ \(from, changes) ->
-      Files.new (Files.fromFileDiffs (said from "Diff computed locally" "Diff from the forge's API") changes)
+      Files.new Files.Actions
+        { review = source.review summary.host summary.repo summary.number
+        , merge = source.merge summary.host summary.repo summary.number Squash True
+        , refresh = reopen
+        }
+        (Files.fromFileDiffs (said from "Diff computed locally" "Diff from the forge's API") changes)
   PullRequest.Commits ->
     loadInto (source.pullCommits summary.host summary.repo summary.number) $ \(from, commits) -> do
       c <- clock

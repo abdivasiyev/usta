@@ -19,7 +19,9 @@ import qualified Usta.Diagram.Class as Class
 import qualified Usta.Diagram.Entity as Entity
 import qualified Usta.Diagram.Flowchart as Flowchart
 import qualified Usta.Diagram.Gantt as Gantt
+import qualified Usta.Diagram.GitGraph as GitGraph
 import qualified Usta.Diagram.Journey as Journey
+import qualified Usta.Diagram.Mindmap as Mindmap
 import qualified Usta.Diagram.Pie as Pie
 import qualified Usta.Diagram.Quadrant as Quadrant
 import qualified Usta.Diagram.Radar as Radar
@@ -44,6 +46,8 @@ data Kind
   | Timeline Timeline.Timeline
   | XyChart XyChart.XyChart
   | Radar Radar.Radar
+  | Mindmap Mindmap.Mindmap
+  | GitGraph GitGraph.GitGraph
 
 type Diagram :: Type
 data Diagram = Diagram
@@ -73,6 +77,8 @@ parse source = do
         "timeline" -> Timeline <$> Timeline.parse (T.unlines meaningful)
         w | w `elem` ["xychart", "xychart-beta"] -> XyChart <$> XyChart.parse (T.unlines meaningful)
         w | w `elem` ["radar", "radar-beta"] -> Radar <$> Radar.parse (T.unlines meaningful)
+        "mindmap" -> Mindmap <$> Mindmap.parse (T.unlines meaningful)
+        "gitgraph" -> GitGraph <$> GitGraph.parse (T.unlines meaningful)
         w -> Left ("usta does not draw " <> w <> " diagrams yet; it shows as text.")
       pure Diagram {title = title, kind = kind}
   where
@@ -106,6 +112,8 @@ draw measure d = do
     Timeline t -> Timeline.draw measure t
     XyChart x -> XyChart.draw measure x
     Radar r -> Radar.draw measure r
+    Mindmap m -> Mindmap.draw measure m
+    GitGraph g -> GitGraph.draw measure g
   pure $ case d.title of
     Nothing -> body
     -- The title above, centred over the diagram.

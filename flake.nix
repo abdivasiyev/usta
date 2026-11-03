@@ -29,6 +29,7 @@
           async
           base
           bytestring
+          cmark-gfm
           containers
           directory
           esqueleto

@@ -106,7 +106,29 @@ buildAt start source app = do
           (tabContent source (openPullRequestWith fetch backLabel summary) fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
-      openNewPullRequest = NewPullRequest.new backToMain NewPullRequest.sample >>= showDetail
+      -- In @at@ (host and repository) when given, else the first one.
+      openNewPullRequestIn at = do
+        repos <- source.repositories
+        let places =
+              [ NewPullRequest.Place {forge = r.forge, host = r.host, repo = r.name, defaultBranch = r.defaultBranch}
+              | r <- repos
+              ]
+            chosen = length (takeWhile (\p -> Just (p.host, p.repo) /= at) places)
+            opened p number title branches = openPullRequest "Pull requests" PullRequest.Summary
+              { PullRequest.forge = p.forge, PullRequest.host = p.host, PullRequest.repo = p.repo
+              , PullRequest.number = number, PullRequest.title = title, PullRequest.state = PullRequest.Open
+              , PullRequest.comments = 0, PullRequest.files = 0, PullRequest.commits = 0
+              , PullRequest.checks = Nothing, PullRequest.branches = branches
+              }
+        NewPullRequest.new NewPullRequest.Actions
+          { branchesOf = \p -> source.branches p.host p.repo
+          , create = \p -> source.createPull p.host p.repo
+          , opened = opened
+          , cancel = backToMain
+          }
+          NewPullRequest.Model {places = places, chosen = if chosen < length places then chosen else 0}
+          >>= showDetail
+      openNewPullRequest = openNewPullRequestIn Nothing
       -- The header shows at once; the thread loads from the forge under it.
       openIssue backLabel model = do
         let actions = Issue.Actions
@@ -210,7 +232,7 @@ buildAt start source app = do
             }
   repositoryPage <- source.repositories >>= Repositories.new Repositories.Actions
     { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))
-    , newPullRequest = const openNewPullRequest
+    , newPullRequest = \r -> openNewPullRequestIn (Just (r.host, r.name))
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
     , loadContents = loadContents

@@ -7,6 +7,7 @@ module Usta.UI.Pages.Repositories
   ( Commit (..)
   , Block (..)
   , Repository (..)
+  , fromRepository
   , sample
   , new
   , css
@@ -17,6 +18,7 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
@@ -26,6 +28,8 @@ import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
 import Usta.UI.Style (Tone (..))
+import Usta.Types.Parse (unparse)
+import qualified Usta.Types.Repository as R
 
 type Commit :: Type
 data Commit = Commit
@@ -220,6 +224,22 @@ blockWidget block = case block of
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
+
+-- | The list entry for a synced repository. Commits, the README and the
+-- mirror state come from the local mirror, which is not built yet.
+fromRepository :: Forge.Kind -> R.Repository -> Repository
+fromRepository forge r = Repository
+  { forge = forge
+  , host = unparse r.host
+  , name = unparse r.name
+  , description = fromMaybe "" r.description
+  , pullRequests = unparse r.openPullRequests
+  , issues = unparse r.openIssues
+  , defaultBranch = r.defaultBranch
+  , mirror = (Neutral, "Not mirrored")
+  , recentCommits = []
+  , readme = []
+  }
 
 sample :: [Repository]
 sample =

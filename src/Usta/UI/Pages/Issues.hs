@@ -6,6 +6,7 @@ module Usta.UI.Pages.Issues
   ( Label (..)
   , Relation (..)
   , Issue (..)
+  , fromIssue
   , sample
   , new
   , css
@@ -16,17 +17,25 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
+import Numeric (readHex)
 
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
+import Usta.UI.Format (Clock, ago, short)
 import Usta.UI.Style (Tone (..))
+import Usta.Types.Involvement (Involvement (..))
+import qualified Usta.Types.Issue as I
+import qualified Usta.Types.Label as L
+import Usta.Types.Parse (unparse)
+import Usta.Types.Ref (Ref (..))
 
 -- | A label as the forge defines it, shown in a tone.
 type Label :: Type
@@ -52,7 +61,7 @@ data Issue = Issue
   , comments :: Int
   , updated :: Text
   , closed :: Bool
-  , relation :: Relation
+  , relations :: [Relation]
   }
 
 type Tab :: Type
@@ -68,9 +77,9 @@ tabLabel t = case t of
 
 inTab :: Tab -> Issue -> Bool
 inTab t i = case t of
-  AssignedTab -> not i.closed && i.relation == AssignedToMe
-  CreatedTab -> not i.closed && i.relation == CreatedByMe
-  MentionedTab -> not i.closed && i.relation == MentionedMe
+  AssignedTab -> not i.closed && AssignedToMe `elem` i.relations
+  CreatedTab -> not i.closed && CreatedByMe `elem` i.relations
+  MentionedTab -> not i.closed && MentionedMe `elem` i.relations
   ClosedTab -> i.closed
 
 -- | @onNew@ runs for "New issue"; @onOpen@ when a row is clicked or
@@ -186,23 +195,72 @@ issueRow issue = do
   column issue.updated 72
   pure row
 
+-- | The list row for a synced issue.
+fromIssue :: Clock -> Forge.Kind -> I.Issue -> Issue
+fromIssue c forge issue = Issue
+  { forge = forge
+  , host = unparse issue.ref.host
+  , repo = unparse issue.ref.repo
+  , number = unparse issue.ref.number
+  , title = issue.title
+  , labels = [Label (labelTone l.color) l.name | l <- issue.labels]
+  , author = unparse issue.author
+  , opened = ago c issue.createdAt
+  , comments = unparse issue.comments
+  , updated = short c issue.updatedAt
+  , closed = isJust issue.closedAt
+  , relations = [rel | Just rel <- map relation issue.involvement]
+  }
+  where
+    relation i = case i of
+      AsAssignee -> Just AssignedToMe
+      AsAuthor -> Just CreatedByMe
+      AsMentioned -> Just MentionedMe
+      AsReviewer -> Nothing
+
+-- | The tone nearest a label's color: grays, and colors too pale or dark
+-- to tell apart, are neutral; the rest go by hue.
+labelTone :: L.Color -> Tone
+labelTone color
+  | chroma < 0.15 || lightness > 0.9 || lightness < 0.1 = Neutral
+  | hue < 20 || hue >= 340 = Danger
+  | hue < 65 = Warning
+  | hue < 170 = Success
+  | hue < 245 = Accent
+  | otherwise = Merged
+  where
+    channel i = case readHex (T.unpack (T.take 2 (T.drop i (unparse color)))) of
+      [(n, "")] -> fromIntegral (n :: Int) / 255
+      _ -> 0
+    (r, g, b) = (channel 0, channel 2, channel 4) :: (Double, Double, Double)
+    high = maximum [r, g, b]
+    low = minimum [r, g, b]
+    chroma = high - low
+    lightness = (high + low) / 2
+    hue
+      | chroma == 0 = 0
+      | high == r = 60 * fmod ((g - b) / chroma) 6
+      | high == g = 60 * ((b - r) / chroma + 2)
+      | otherwise = 60 * ((r - g) / chroma + 4)
+    fmod x m = x - m * fromIntegral (floor (x / m) :: Int)
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
 sample :: [Issue]
 sample =
   [ Issue Forge.GitHub "github.com" "abdivasiyev/usta" 5 "Render the main window with GTK4"
-      [Label Accent "gtk"] "abdivasiyev" "1 day ago" 2 "1h" False AssignedToMe
+      [Label Accent "gtk"] "abdivasiyev" "1 day ago" 2 "1h" False [AssignedToMe]
   , Issue Forge.GitHub "github.com" "abdivasiyev/usta" 3 "Diff view: keep scroll position when switching files"
-      [Label Danger "bug"] "abdivasiyev" "2 days ago" 1 "1h" False AssignedToMe
+      [Label Danger "bug"] "abdivasiyev" "2 days ago" 1 "1h" False [AssignedToMe]
   , Issue Forge.GitHub "github.com" "abdivasiyev/usta" 4 "Support GitLab merge request discussions"
-      [Label Merged "forge api"] "abdivasiyev" "2 days ago" 0 "Mon" False AssignedToMe
+      [Label Merged "forge api"] "abdivasiyev" "2 days ago" 0 "Mon" False [AssignedToMe]
   , Issue Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 12 "Restart nix-daemon after substituter changes"
-      [Label Neutral "nix"] "abdivasiyev" "3 days ago" 3 "Yesterday" False CreatedByMe
+      [Label Neutral "nix"] "abdivasiyev" "3 days ago" 3 "Yesterday" False [CreatedByMe]
   , Issue Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 30 "Binary cache answers as not a cache"
-      [Label Danger "bug"] "abdivasiyev" "last week" 4 "Tue" False MentionedMe
+      [Label Danger "bug"] "abdivasiyev" "last week" 4 "Tue" False [MentionedMe]
   , Issue Forge.GitHub "github.com" "abdivasiyev/usta" 1 "Pick a name and a logo"
-      [] "abdivasiyev" "last week" 6 "Oct 29" True CreatedByMe
+      [] "abdivasiyev" "last week" 6 "Oct 29" True [CreatedByMe]
   ]
 
 css :: Text

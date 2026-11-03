@@ -187,12 +187,13 @@ node text
 type Link :: Type
 data Link = Link {label :: Maybe Text, stroke :: Stroke, arrow :: Bool}
 
--- | "-->", "---", "-.->", "==>", with "|text|" after or "-- text -->".
+-- | "-->", "---", "-.->", "==>", with "|text|" after, or the text inside:
+-- "-- text -->", "== text ==>", "-. text .->".
 connector :: Text -> Either Text (Link, Text)
 connector text
   | any (`T.isPrefixOf` text) ["--", "==", "-."] =
       let (symbols, rest) = T.span (`elem` ("-.=>ox" :: String)) text
-       in if symbols `elem` ["--", "=="] && maybe False (isSpace . fst) (T.uncons rest)
+       in if symbols `elem` ["--", "==", "-."] && maybe False (isSpace . fst) (T.uncons rest)
             then textForm symbols rest
             else Right (withPipe (linkOf symbols) (T.stripStart rest))
   | otherwise = Left ("usta could not read the link in \"" <> T.take 40 text <> "\".")
@@ -207,11 +208,16 @@ connector text
       _ -> (link, rest)
     -- "A -- text --> B": the text runs to the rest of the connector.
     textForm symbols rest =
-      let closers = [c | c <- ["-->", "---", "==>", "==="], c `T.isInfixOf` rest]
+      let ends = case symbols of
+            "-." -> [".->", ".-"]
+            "==" -> ["==>", "==="]
+            _ -> ["-->", "---"]
+          closers = [c | c <- ends, c `T.isInfixOf` rest]
        in case closers of
             c : _ -> let (l, after) = T.breakOn c rest
                       in Right (labelled (T.strip l) (linkOf (symbols <> T.drop 2 c)), T.drop (T.length c) after)
             [] -> Left "A link's text is not closed."
 
+-- | A link with its text; quotes around the text are not part of it.
 labelled :: Text -> Link -> Link
-labelled l link = Link {label = Just l, stroke = link.stroke, arrow = link.arrow}
+labelled l link = Link {label = Just (T.dropAround (== '"') l), stroke = link.stroke, arrow = link.arrow}

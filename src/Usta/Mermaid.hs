@@ -10,6 +10,7 @@ module Usta.Mermaid
   , Node (..)
   , Stroke (..)
   , Edge (..)
+  , Group (..)
   , Flowchart (..)
   , parse
   , Colors (..)
@@ -59,6 +60,14 @@ data Edge = Edge
   }
   deriving stock (Eq, Show)
 
+-- | A subgraph: a titled frame around the nodes first named inside it.
+type Group :: Type
+data Group = Group
+  { title :: Text
+  , members :: [Text]
+  }
+  deriving stock (Eq, Show)
+
 type Flowchart :: Type
 data Flowchart = Flowchart
   { direction :: Direction
@@ -66,6 +75,7 @@ data Flowchart = Flowchart
     -- ^ In the order they first appear; a node only on an edge is a
     -- rectangle named by its id.
   , edges :: [Edge]
+  , groups :: [Group]
   }
   deriving stock (Eq, Show)
 
@@ -75,16 +85,44 @@ parse source = case filter (not . T.null) (map clean (T.lines source)) of
   [] -> Left "The diagram is empty."
   header : rest -> do
     direction <- headerOf header
-    statements <- traverse statement (concatMap (map T.strip . T.splitOn ";") rest)
+    let lines' = concatMap (map T.strip . T.splitOn ";") rest
+    statements <- traverse statement lines'
     let defined = concat [ns | (ns, _) <- statements]
         edges = concat [es | (_, es) <- statements]
         named = nub (map (.name) defined <> concat [[e.from, e.to] | e <- edges])
         nodeFor n = case [x | x <- reverse defined, x.name == n, x.label /= n || x.shape /= Rectangle] of
           x : _ -> x
           [] -> Node {name = n, label = n, shape = Rectangle}
-    pure Flowchart {direction = direction, nodes = map nodeFor named, edges = edges}
+    pure Flowchart
+      { direction = direction
+      , nodes = map nodeFor named
+      , edges = edges
+      , groups = grouped (zip lines' statements)
+      }
   where
     clean line = T.strip (fst (T.breakOn "%%" line))
+
+-- | Each subgraph with the nodes named between its "subgraph" and "end"
+-- lines and not already in an earlier one.
+grouped :: [(Text, ([Node], [Edge]))] -> [Group]
+grouped = go [] [] []
+  where
+    go done open seen items = case items of
+      [] -> reverse done <> reverse [Group t (reverse ms) | (t, ms) <- open]
+      (line, (ns, es)) : rest
+        | "subgraph" `T.isPrefixOf` line -> go done ((titleOf (T.strip (T.drop 8 line)), []) : open) seen rest
+        | line == "end" -> case open of
+            (t, ms) : outer -> go (Group t (reverse ms) : done) outer seen rest
+            [] -> go done open seen rest
+        | otherwise -> case open of
+            (t, ms) : outer ->
+              let fresh = nub [n | n <- map (.name) ns <> concat [[e.from, e.to] | e <- es], n `notElem` seen, n `notElem` ms]
+               in go done ((t, reverse fresh <> ms) : outer) (seen <> fresh) rest
+            [] -> go done open (seen <> map (.name) ns <> concat [[e.from, e.to] | e <- es]) rest
+    -- "id [Title]", "id[\"Title\"]" or just "Title".
+    titleOf text = case T.breakOn "[" text of
+      (_, bracket) | not (T.null bracket) -> T.dropAround (`elem` ("[]\" " :: String)) bracket
+      _ -> text
 
 headerOf :: Text -> Either Text Direction
 headerOf header = case T.words header of

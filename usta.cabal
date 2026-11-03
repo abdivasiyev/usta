@@ -39,6 +39,8 @@ executable usta
     Usta.DB.Schema.SyncCursor
     Usta.DB.SyncCursor
     Usta.Details
+    Usta.Diagram.Flowchart
+    Usta.Diagram.Layered
     Usta.Diagram.Scene
     Usta.Forge
     Usta.Forge.Forgejo

@@ -9,6 +9,8 @@ module Usta.UI.Pages.Repositories
   , Repository (..)
   , fromRepository
   , ChooseMirror
+  , Origins (..)
+  , LookUpOrigins
   , sample
   , new
   , css
@@ -26,12 +28,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
-import qualified Usta.UI.Components.Segmented as Segmented
+import qualified Usta.UI.Platform as Platform
 import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Git as Git
@@ -80,8 +83,22 @@ data Repository = Repository
 type ChooseMirror :: Type
 type ChooseMirror = Repository -> Choice -> IO (Either Text ())
 
-new :: (Repository -> IO ()) -> (Repository -> IO ()) -> ChooseMirror -> [Repository] -> IO (Page Repository)
-new onNewIssue onNewPullRequest chooseMirror repositories = do
+-- | Where a mirror of the repository would clone from over each transport,
+-- or why it cannot, and the folder mirrors are kept in.
+type Origins :: Type
+data Origins = Origins
+  { https :: Either Text Text
+  , ssh :: Either Text Text
+  , keptIn :: Text
+  }
+
+-- | Asks the forge for 'Origins'; 'Left' says why it could not. Runs off
+-- the GTK main thread.
+type LookUpOrigins :: Type
+type LookUpOrigins = Repository -> IO (Either Text Origins)
+
+new :: (Repository -> IO ()) -> (Repository -> IO ()) -> ChooseMirror -> LookUpOrigins -> [Repository] -> IO (Page Repository)
+new onNewIssue onNewPullRequest chooseMirror lookUp repositories = do
   items <- newIORef repositories
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
@@ -101,7 +118,7 @@ new onNewIssue onNewPullRequest chooseMirror repositories = do
       when (index >= 0 && fromIntegral index < length shown) $ do
         let r = shown !! fromIntegral index
         writeIORef selectedKey (Just (key r))
-        content <- overview onNewIssue onNewPullRequest chooseMirror r
+        content <- overview onNewIssue onNewPullRequest chooseMirror lookUp r
         GI.set overviewScroll [#child := content]
 
   (search, entry) <- SearchField.new SearchField.defaults
@@ -178,8 +195,8 @@ counts r =
   where
     plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
 
-overview :: (Repository -> IO ()) -> (Repository -> IO ()) -> ChooseMirror -> Repository -> IO Gtk.Box
-overview onNewIssue onNewPullRequest chooseMirror r = do
+overview :: (Repository -> IO ()) -> (Repository -> IO ()) -> ChooseMirror -> LookUpOrigins -> Repository -> IO Gtk.Box
+overview onNewIssue onNewPullRequest chooseMirror lookUp r = do
   pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #cssClasses := ["u-repo"]
@@ -204,7 +221,7 @@ overview onNewIssue onNewPullRequest chooseMirror r = do
   mirrorButtons <- if r.canMirror
     then do
       b <- Button.new Button.defaults { Button.label = Just "Mirror…" }
-      void $ GI.on b #clicked $ Gtk.toWidget b >>= \anchor -> askMirror anchor r chooseMirror
+      void $ GI.on b #clicked $ Gtk.toWidget b >>= \anchor -> askMirror anchor r chooseMirror lookUp
       pure [b]
     else pure []
   forM_ (mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
@@ -269,85 +286,170 @@ blockWidget block = case block of
     GI.set l [#selectable := True]
     Gtk.toWidget l
 
--- | Asks whether to mirror @r@, and how. Its "Don't mirror" is kept, so the
--- question is not asked again; the button stays for changing one's mind.
-askMirror :: Gtk.Widget -> Repository -> ChooseMirror -> IO ()
-askMirror anchor r chooseMirror = do
+-- | Asks whether to mirror @r@, and how, as the add-account dialog asks
+-- for an account. Its "Don't mirror" is kept, so the question is not asked
+-- again; the page's button stays for changing one's mind.
+askMirror :: Gtk.Widget -> Repository -> ChooseMirror -> LookUpOrigins -> IO ()
+askMirror anchor r chooseMirror lookUp = do
   root <- Gtk.widgetGetRoot anchor
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
-  dialog <- GI.new Gtk.Window [ #title := "Mirror " <> r.name <> "?"
+  dialog <- GI.new Gtk.Window [ #title := "Mirror this repository"
                               , #modal := True
+                              , #defaultWidth := 640
                               , #resizable := False
                               , #destroyWithParent := True
-                              , #defaultWidth := 520
                               , #cssClasses := ["usta", "u-mirror"]
                               ]
   forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
-  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #cssClasses := ["body"]]
-  label ("Mirror " <> r.name <> "?") ["title"] >>= #append body
-  wrapped "A local mirror makes diffs and history fast, and works offline. Without one, usta asks the forge each time." ["muted"]
+  header <- GI.new Gtk.HeaderBar []
+  Platform.configureHeaderBar Platform.current header
+  titles <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #valign := Gtk.AlignCenter]
+  label "Mirror this repository" ["title"] >>= #append titles
+  subtitle <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #halign := Gtk.AlignCenter]
+  label r.name ["subtitle", "mono"] >>= #append subtitle
+  label (" on " <> r.host) ["subtitle"] >>= #append subtitle
+  #append titles subtitle
+  GI.set header [#titleWidget := titles]
+  GI.set dialog [#titlebar := header]
+
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10, #cssClasses := ["form"]]
+  wrapped "A local mirror is a copy of the repository on this computer. Diffs and history then open at once and work offline. Without one, usta asks the forge each time." ["intro"]
     >>= #append body
 
-  label "What to download" ["caption"] >>= #append body
-  (depth, depthButtons) <- Segmented.new ["Everything", "History only"] 0
-  GI.set depth [#halign := Gtk.AlignStart]
-  #append body depth
-  wrapped "Everything: the whole repository, once. History only: file contents are fetched the first time a diff needs them." ["hint"]
-    >>= #append body
+  step "1. What to download" >>= #append body
+  everything <- optionCard "Everything" "The whole repository, once. Diffs work offline."
+  historyOnly <- optionCard "History only" "Smaller. File contents are fetched the first time a diff needs them."
+  Gtk.checkButtonSetGroup historyOnly (Just everything)
+  GI.set everything [#active := True]
+  cards [everything, historyOnly] >>= #append body
 
-  label "Connect over" ["caption"] >>= #append body
-  (over, overButtons) <- Segmented.new ["HTTPS", "SSH"] 0
-  GI.set over [#halign := Gtk.AlignStart]
-  #append body over
-  wrapped "HTTPS uses your account's token. SSH uses your own keys; connect to the server with ssh once first, so its host key is known." ["hint"]
-    >>= #append body
+  step "2. Connect over" >>= #append body
+  viaHttps <- optionCard "HTTPS" "With your account's token, from the system keyring."
+  viaSsh <- optionCard "SSH" "With your own ssh keys. Connect to the server with ssh once first, so its host key is known."
+  Gtk.checkButtonSetGroup viaSsh (Just viaHttps)
+  GI.set viaHttps [#active := True]
+  cards [viaHttps, viaSsh] >>= #append body
+  origin <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["origin"]]
+  GI.new Gtk.Image [#iconName := "insert-link-symbolic", #pixelSize := 16] >>= #append origin
+  originText <- label "Looking up the clone URL…" ["muted"]
+  #append origin originText
+  originUrl <- label "" ["mono", "url"]
+  GI.set originUrl [#visible := False, #wrap := True, #wrapMode := Pango.WrapModeChar, #hexpand := True]
+  #append origin originUrl
+  #append body origin
+  problemBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["problem"], #visible := False]
+  GI.new Gtk.Image [#iconName := "dialog-warning-symbolic", #pixelSize := 16, #valign := Gtk.AlignStart] >>= #append problemBox
+  problemText <- wrapped "" []
+  GI.set problemText [#hexpand := True]
+  #append problemBox problemText
+  #append body problemBox
 
-  problem <- wrapped "" ["status", "problem"]
-  GI.set problem [#visible := False]
-  #append body problem
+  step "3. Where it is kept" >>= #append body
+  kept <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+  label "In " ["muted"] >>= #append kept
+  keptPath <- label "" ["mono", "url"]
+  #append kept keptPath
+  label ". usta fetches it after each sync." ["muted"] >>= #append kept
+  #append body kept
 
-  footer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  decline <- Button.new Button.defaults { Button.label = Just "Don't mirror" }
+  footer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["footer"]]
+  declineTexts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  label "Don't mirror" ["name"] >>= #append declineTexts
+  label "Use the forge's API; usta won't ask again" ["muted"] >>= #append declineTexts
+  decline <- GI.new Gtk.Button [#child := declineTexts, #cssClasses := ["flat", "decline"]]
   spacer <- GI.new Gtk.Box [#hexpand := True]
   cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
   go <- Button.new Button.defaults { Button.label = Just "Mirror", Button.variant = Button.Primary }
-  #append footer decline
+  GI.set go [#sensitive := False]
+  forM_ [decline] (#append footer)
   #append footer spacer
   #append footer cancel
   #append footer go
-  #append body footer
 
-  let answer choice busyLabel = do
-        GI.set go [#sensitive := False, #label := busyLabel]
+  content <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  #append content body
+  #append content footer
+  GI.set dialog [#child := content]
+
+  found <- newIORef Nothing
+  busy <- newIORef False
+  let showProblem message = GI.set problemText [#label := message] >> GI.set problemBox [#visible := True]
+      refresh = do
+        looked <- readIORef found
+        https <- GI.get viaHttps #active
+        working <- readIORef busy
+        case looked of
+          Nothing -> GI.set go [#sensitive := False]
+          Just (Left message) -> do
+            GI.set originText [#label := "The clone URL could not be looked up."]
+            showProblem message
+            GI.set go [#sensitive := False]
+          Just (Right o) -> do
+            GI.set keptPath [#label := o.keptIn]
+            case (if https then o.https else o.ssh) of
+              Right url -> do
+                GI.set originText [#label := "Clones from"]
+                GI.set originUrl [#label := url, #visible := True]
+                GI.set problemBox [#visible := False]
+                GI.set go [#sensitive := not working]
+              Left message -> do
+                GI.set originText [#label := "No clone URL over " <> (if https then "HTTPS" else "SSH") <> "."]
+                GI.set originUrl [#visible := False]
+                showProblem message
+                GI.set go [#sensitive := False]
+      later act = void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (act >> pure False)
+      answer choice = do
+        writeIORef busy True
+        GI.set go [#sensitive := False, #label := "Starting…"]
         GI.set decline [#sensitive := False]
         void $ forkIO $ do
           outcome <- try (chooseMirror r choice)
           let result = case outcome of
                 Left (_ :: SomeException) -> Left "Choosing the mirror failed unexpectedly."
                 Right done -> done
-          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            case result of
-              Right () -> Gtk.windowDestroy dialog
-              Left message -> do
-                GI.set problem [#label := message, #visible := True]
-                GI.set go [#sensitive := True, #label := "Mirror"]
-                GI.set decline [#sensitive := True]
-            pure False
+          later $ case result of
+            Right () -> Gtk.windowDestroy dialog
+            Left message -> do
+              writeIORef busy False
+              GI.set go [#label := "Mirror"]
+              GI.set decline [#sensitive := True]
+              showProblem message
+              refresh
+  forM_ [viaHttps, viaSsh] $ \b -> void $ GI.on b #toggled refresh
   void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
-  void $ GI.on decline #clicked (answer Declined "Mirror")
-  void $ GI.on go #clicked $ case (depthButtons, overButtons) of
-    (everything : _, viaHttps : _) -> do
-      full <- GI.get everything #active
-      https <- GI.get viaHttps #active
-      answer (Mirrored (if full then Git.Full else Git.Partial) (if https then Https else Ssh)) "Starting…"
-    _ -> pure ()
-  GI.set dialog [#child := body]
+  void $ GI.on decline #clicked (answer Declined)
+  void $ GI.on go #clicked $ do
+    full <- GI.get everything #active
+    https <- GI.get viaHttps #active
+    answer (Mirrored (if full then Git.Full else Git.Partial) (if https then Https else Ssh))
+  void $ forkIO $ do
+    outcome <- try (lookUp r)
+    let result = case outcome of
+          Left (_ :: SomeException) -> Left "Looking up the clone URL failed unexpectedly."
+          Right o -> o
+    later (writeIORef found (Just result) >> refresh)
   #present dialog
+  -- GTK would focus "Don't mirror", drawing a ring the design does not have.
+  Gtk.windowSetFocus dialog (Nothing :: Maybe Gtk.Widget)
   where
     wrapped text classes = do
       l <- label text classes
       GI.set l [#wrap := True]
       pure l
+    step text = label text ["step"]
+    cards buttons = do
+      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #homogeneous := True]
+      forM_ buttons (#append row)
+      pure row
+
+-- | One choice: a radio, a bold title and a muted line, as the
+-- add-account dialog's forge cards.
+optionCard :: Text -> Text -> IO Gtk.CheckButton
+optionCard title text = do
+  texts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
+  GI.new Gtk.Label [#label := title, #xalign := 0, #cssClasses := ["name"]] >>= #append texts
+  GI.new Gtk.Label [#label := text, #xalign := 0, #wrap := True, #cssClasses := ["reach"]] >>= #append texts
+  GI.new Gtk.CheckButton [#child := texts, #cssClasses := ["option-card"]]
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
@@ -400,11 +502,37 @@ sample =
 
 css :: Text
 css = mconcat
-  [ "window.u-mirror box.body { padding: 20px; }"
-  , "window.u-mirror label.title { font-size: 15px; font-weight: 600; }"
-  , "window.u-mirror label.caption { font-weight: 600; margin-top: 4px; }"
-  , "window.u-mirror label.hint { font-size: 12px; color: var(--text-muted); }"
-  , "window.u-mirror label.problem { color: var(--danger); }"
+  -- The add-account dialog's look, which this one follows.
+  [ "window.u-mirror headerbar {"
+  , "  background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: none;"
+  , "}"
+  , "window.u-mirror headerbar label.title { font-size: 15px; font-weight: 600; }"
+  , "window.u-mirror headerbar label.subtitle { font-size: 13px; color: var(--text-muted); }"
+  , "window.u-mirror box.form { padding: 20px; background: var(--surface); }"
+  , "window.u-mirror label.intro { color: var(--text-soft); margin-bottom: 6px; }"
+  , "window.u-mirror label.step { font-weight: 600; color: var(--text-soft); margin-top: 8px; }"
+  , "window.u-mirror label.muted { font-size: 13px; color: var(--text-muted); }"
+  , "window.u-mirror checkbutton.option-card {"
+  , "  padding: 14px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface);"
+  , "}"
+  , "window.u-mirror checkbutton.option-card:checked {"
+  , "  border: 2px solid var(--accent); padding: 13px; background: var(--selected);"
+  , "}"
+  , "window.u-mirror checkbutton.option-card radio:checked {"
+  , "  background: var(--accent); border-color: var(--accent); color: var(--on-accent);"
+  , "}"
+  , "window.u-mirror checkbutton.option-card label.name { font-weight: 600; font-size: 15px; }"
+  , "window.u-mirror checkbutton.option-card label.reach { font-size: 13px; color: var(--text-muted); }"
+  , "window.u-mirror box.origin { color: var(--text-muted); }"
+  , "window.u-mirror label.url { color: var(--text); }"
+  , "window.u-mirror box.problem {"
+  , "  padding: 10px 12px; border-radius: 8px; background: var(--danger-bg); color: var(--danger);"
+  , "}"
+  , "window.u-mirror box.footer {"
+  , "  padding: 14px 20px; background: var(--window); border-top: 1px solid var(--border);"
+  , "}"
+  , "window.u-mirror button.decline { padding: 2px 4px; }"
+  , "window.u-mirror button.decline label.name { font-weight: 500; }"
   , "box.u-repo-pane { background: var(--surface); border-right: 1px solid var(--border); }"
   , "box.u-repo-pane box.search-bar { padding: 12px; }"
   , "list.u-repo-list { background: var(--surface); }"

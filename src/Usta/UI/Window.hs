@@ -144,6 +144,7 @@ buildAt start source app = do
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (join (readIORef pageRef) >> pure False)
         pure answered
   repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest) chooseMirror
+    (\r -> source.mirrorOrigins r.host r.name)
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
   source.onMirrorStatus (source.repositories >>= repositoryPage.update)
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]

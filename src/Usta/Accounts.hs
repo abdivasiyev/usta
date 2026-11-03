@@ -6,6 +6,7 @@
 module Usta.Accounts
   ( Settings (..)
   , Accounts (..)
+  , Origins (..)
   , Problem (..)
   , describe
   , connect
@@ -66,7 +67,18 @@ data Accounts = Accounts
   , mirror :: AccountId -> RepoName -> Choice -> IO (Either Problem ())
     -- ^ Records the user's answer for a repository; for a mirror, asks the
     -- forge where to clone from and starts cloning.
+  , origins :: AccountId -> RepoName -> IO (Either Problem Origins)
+    -- ^ Where a mirror would clone from over each transport, for showing
+    -- before the user chooses.
   }
+
+-- | The URL a mirror would use over each transport, or why it cannot.
+type Origins :: Type
+data Origins = Origins
+  { https :: Either Problem Text
+  , ssh :: Either Problem Text
+  }
+  deriving stock (Eq, Show)
 
 -- | Why signing in or out did not happen.
 type Problem :: Type
@@ -108,7 +120,7 @@ connect settings = do
   forges <- newIORef Map.empty
   saved <- run settings.pool listAccounts
   for_ saved $ \(key, account) -> resume forges key account
-  pure Accounts {signIn = signIn forges, remove = remove forges, mirror = mirror forges}
+  pure Accounts {signIn = signIn forges, remove = remove forges, mirror = mirror forges, origins = origins forges}
   where
     resume forges key account = case account.forge of
       Forgejo -> do
@@ -162,26 +174,31 @@ connect settings = do
                 publish settings.changes Change {accountId = key, resource = resource}
               pure (Right ())
 
+    -- Both URLs at once, from one call to the forge.
+    origins forges key repo = do
+      known <- Map.lookup key <$> readIORef forges
+      case known of
+        Nothing -> pure (Left NotSignedIn)
+        Just (login, forge) -> do
+          asked <- try (forge.cloneUrls repo)
+          pure $ case asked of
+            Left SignedOut -> Left TokenRefused
+            Left Offline -> Left Unreachable
+            Left (Refused message) -> Left (ForgeSaid message)
+            Right urls -> Right Origins {https = urlFor Https login urls, ssh = urlFor Ssh login urls}
+
     mirror forges key repo choice = do
       now <- getCurrentTime
       case choice of
         Declined -> Right () <$ run settings.pool (choose now key repo Declined Nothing)
         Mirrored _ transport -> do
-          known <- Map.lookup key <$> readIORef forges
-          case known of
-            Nothing -> pure (Left NotSignedIn)
-            Just (login, forge) -> do
-              asked <- try (forge.cloneUrls repo)
-              case asked of
-                Left SignedOut -> pure (Left TokenRefused)
-                Left Offline -> pure (Left Unreachable)
-                Left (Refused message) -> pure (Left (ForgeSaid message))
-                Right urls -> case urlFor transport login urls of
-                  Left problem -> pure (Left problem)
-                  Right url -> do
-                    run settings.pool (choose now key repo choice (Just url))
-                    settings.mirrors.ensure key repo
-                    pure (Right ())
+          found <- origins forges key repo
+          case found >>= \o -> case transport of Https -> o.https; Ssh -> o.ssh of
+            Left problem -> pure (Left problem)
+            Right url -> do
+              run settings.pool (choose now key repo choice (Just url))
+              settings.mirrors.ensure key repo
+              pure (Right ())
 
 -- | The URL a mirror fetches from. Over https it names the user, which
 -- tells usta's credential helper whose token to give.

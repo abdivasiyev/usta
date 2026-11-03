@@ -7,16 +7,22 @@ module Usta.UI.Pages.Issue
   ( Comment (..)
   , Event (..)
   , Model (..)
+  , Actions (..)
+  , fromDiscussion
   , new
+  , thread
   , css
   ) where
 
-import Control.Monad (forM_, void)
+import Control.Concurrent (forkIO)
+import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.Gio as Gio
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -27,7 +33,12 @@ import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
+import Usta.UI.Format (Clock, ago)
+import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
+import qualified Usta.Types.Discussion as D
+import qualified Usta.Types.Label as L
+import Usta.Types.Parse (unparse)
 
 type Comment :: Type
 data Comment = Comment
@@ -62,17 +73,59 @@ data Model = Model
   , linkedPullRequests :: [Text]
   }
 
--- | @backLabel@ names where Back goes, e.g. "Issues" or "Inbox".
-new :: Text -> IO () -> Model -> IO Gtk.Widget
-new backLabel onBack m = do
+-- | What the reply box does. Both run off the main thread; a 'Left' is
+-- said under the box, and a 'Right' runs 'refresh'.
+type Actions :: Type
+data Actions = Actions
+  { comment :: Text -> IO (Either Text ())
+  , setClosed :: Bool -> IO (Either Text ())
+  , refresh :: IO ()
+    -- ^ Loads the page again, with the change.
+  }
+
+-- | The issue as the forge has it, over what the list knew.
+fromDiscussion :: Clock -> D.Discussion -> Model -> Model
+fromDiscussion c d m = m
+  { closed = d.closed
+  , comments = said "opened " d.opening : map (said "commented ") d.comments
+  , events = []
+  , assignees = [(initials (unparse login), unparse login) | login <- d.assignees]
+  , labels = [(labelTone l.color, l.name) | l <- d.labels]
+  , milestone = d.milestone
+  , linkedPullRequests = []
+  }
+  where
+    said verb x = Comment
+      { author = unparse x.author
+      , initials = initials (unparse x.author)
+      , when' = verb <> ago c x.createdAt
+      , body = x.body
+      }
+    initials = T.toUpper . T.take 2
+
+-- | The header over @content@, which is the 'thread' once it is loaded.
+-- @content@ gets what sets the header's Open or Closed badge, for when the
+-- forge says otherwise than the list did. @backLabel@ names where Back
+-- goes, e.g. "Issues" or "Inbox".
+new :: Text -> IO () -> Model -> ((Bool -> IO ()) -> IO Gtk.Widget) -> IO Gtk.Widget
+new backLabel onBack m content = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
                          , #cssClasses := ["u-issue"]
                          ]
-  header m backLabel onBack >>= #append page
+  (bar, showClosed) <- header m backLabel onBack
+  #append page bar
+  content showClosed >>= #append page
+  Gtk.toWidget page
 
-  columns <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True]
+-- | The comments, the reply box and the side details.
+thread :: Actions -> Model -> IO Gtk.Widget
+thread actions m = do
+  columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                            , #vexpand := True
+                            , #cssClasses := ["u-issue"]
+                            ]
   main <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 16
                          , #cssClasses := ["main"]
@@ -84,17 +137,16 @@ new backLabel onBack m = do
                              ]
   forM_ m.events $ \e -> eventRow e >>= #append timeline
   #append main timeline
-  replyBox m >>= #append main
+  replyBox actions m >>= #append main
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
                                       , #hexpand := True
                                       , #hscrollbarPolicy := Gtk.PolicyTypeNever
                                       ]
   #append columns scroll
   details m >>= #append columns
-  #append page columns
-  Gtk.toWidget page
+  Gtk.toWidget columns
 
-header :: Model -> Text -> IO () -> IO Gtk.Box
+header :: Model -> Text -> IO () -> IO (Gtk.Box, Bool -> IO ())
 header m backLabel onBack = do
   bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 12
@@ -117,15 +169,28 @@ header m backLabel onBack = do
   Forge.smallDot m.forge >>= #append meta
   label (m.host <> "/" <> m.repo) ["meta", "mono"] >>= #append meta
   label ("#" <> T.pack (show m.number)) ["meta"] >>= #append meta
-  (if m.closed then Badge.new Merged "Closed" else Badge.new Success "Open") >>= #append meta
+  state <- GI.new Gtk.Box []
+  let showClosed closed = do
+        old <- Gtk.widgetGetFirstChild state
+        forM_ old (Gtk.boxRemove state)
+        (if closed then Badge.new Merged "Closed" else Badge.new Success "Open") >>= #append state
+  showClosed m.closed
+  #append meta state
   #append titles meta
   titleLabel <- label m.title ["issue-title"]
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
   #append titles titleLabel
   #append bar titles
 
-  Button.new Button.defaults { Button.label = Just "Open in browser" } >>= #append bar
-  pure bar
+  browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
+  void $ GI.on browser #clicked $ do
+    launcher <- Gtk.uriLauncherNew (Just url)
+    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  #append bar browser
+  pure (bar, showClosed)
+  where
+    issues = if m.forge == Forge.GitLab then "/-/issues/" else "/issues/"
+    url = "https://" <> m.host <> "/" <> m.repo <> issues <> T.pack (show m.number)
 
 commentCard :: Comment -> IO Gtk.Box
 commentCard c = do
@@ -138,7 +203,9 @@ commentCard c = do
   label c.author ["strong"] >>= #append top
   label c.when' ["muted"] >>= #append top
   #append card top
-  text <- label c.body ["card-body"]
+  text <- if T.null (T.strip c.body)
+    then label "No description." ["card-body", "muted"]
+    else label c.body ["card-body"]
   GI.set text [#wrap := True, #selectable := True]
   #append card text
   pure card
@@ -156,21 +223,40 @@ eventRow e = do
       label pr ["link"] >>= #append row
   pure row
 
-replyBox :: Model -> IO Gtk.Box
-replyBox m = do
+replyBox :: Actions -> Model -> IO Gtk.Box
+replyBox actions m = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
-  (editor, _) <- MarkdownEditor.new MarkdownEditor.defaults
+  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults
     { MarkdownEditor.hint = Just "Leave a comment. Markdown supported." }
   #append box editor
+  problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
   buttons <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #spacing := 8
                             , #halign := Gtk.AlignEnd
                             ]
-  Button.new Button.defaults
+  close <- Button.new Button.defaults
     { Button.label = Just (if m.closed then "Reopen issue" else "Close issue") }
-    >>= #append buttons
-  Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
-    >>= #append buttons
+  #append buttons close
+  send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
+  #append buttons send
+  -- The buttons wait for the forge, so a second click sends nothing twice.
+  let run act = do
+        GI.set buttons [#sensitive := False]
+        GI.set problem [#visible := False]
+        void $ forkIO $ do
+          result <- act
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            case result of
+              Right () -> actions.refresh
+              Left text -> do
+                GI.set problem [#label := text, #visible := True]
+                GI.set buttons [#sensitive := True]
+            pure False
+  void $ GI.on send #clicked $ do
+    text <- maybe "" id <$> GI.get buffer #text
+    unless (T.null (T.strip text)) $ run (actions.comment text)
+  void $ GI.on close #clicked $ run (actions.setClosed (not m.closed))
+  #append box problem
   #append box buttons
   pure box
 
@@ -182,7 +268,8 @@ details m = do
                          , #hexpand := False
                          , #cssClasses := ["details"]
                          ]
-  section side "Assignees" $ \box ->
+  section side "Assignees" $ \box -> do
+    when (null m.assignees) $ label "No one" ["muted"] >>= #append box
     forM_ m.assignees $ \(short, name) -> do
       row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
       Avatar.new 22 short >>= #append row
@@ -191,12 +278,13 @@ details m = do
   section side "Labels" $ \box -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
     forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
+    when (null m.labels) $ label "None" ["muted"] >>= #append row
     #append box row
   section side "Milestone" $ \box ->
     label (maybe "None" id m.milestone) [] >>= #append box
-  section side "Linked pull requests" $ \box ->
-    forM_ m.linkedPullRequests $ \pr -> label pr ["link"] >>= #append box
-  GI.new Gtk.CheckButton [#label := "Notify me about activity", #active := True] >>= #append side
+  unless (null m.linkedPullRequests) $
+    section side "Linked pull requests" $ \box ->
+      forM_ m.linkedPullRequests $ \pr -> label pr ["link"] >>= #append box
   pure side
   where
     section :: Gtk.Box -> Text -> (Gtk.Box -> IO ()) -> IO ()
@@ -220,6 +308,7 @@ css = mconcat
   , "box.u-issue box.details { padding: 20px 16px; font-size: 13px; }"
   , "box.u-issue label.strong { font-weight: 600; }"
   , "box.u-issue label.link { color: var(--accent); }"
+  , "box.u-issue label.problem { color: var(--danger); font-size: 13px; }"
   , "box.u-issue box.card-header {"
   , "  padding: 10px 14px; border-bottom: 1px solid var(--border-subtle);"
   , "  background: var(--window); border-radius: 8px 8px 0 0; font-size: 13px;"

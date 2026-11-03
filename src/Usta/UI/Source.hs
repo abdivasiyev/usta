@@ -45,6 +45,7 @@ import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
+import Usta.Types.Discussion (Discussion, Merge, Verdict)
 import Usta.Types.Number (Number)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Host (Host)
@@ -104,6 +105,14 @@ data Source = Source
   , recentCommits :: Text -> Text -> Text -> IO (Either Text (From, [Commit]))
     -- ^ A branch's last commits, by host, repository and branch.
   , readme :: Text -> Text -> Text -> IO (Either Text (From, Maybe (Text, Text)))
+  , discussion :: Text -> Text -> Int -> IO (Either Text Discussion)
+    -- ^ An issue's or pull request's thread, by host, repository and
+    -- number, from the forge.
+  , comment :: Text -> Text -> Int -> Text -> IO (Either Text ())
+  , setClosed :: Text -> Text -> Int -> Bool -> IO (Either Text ())
+  , merge :: Text -> Text -> Int -> Merge -> Bool -> IO (Either Text ())
+    -- ^ 'True' deletes the branch after.
+  , review :: Text -> Text -> Int -> Verdict -> Text -> IO (Either Text ())
   }
 
 -- | A signed-in account, as the window names it.
@@ -160,6 +169,11 @@ fromDatabase pool changes statuses sync = Source
   , commitDiff = \_ _ _ -> pure (Left unavailable)
   , recentCommits = \_ _ _ -> pure (Left unavailable)
   , readme = \_ _ _ -> pure (Left unavailable)
+  , discussion = \_ _ _ -> pure (Left unavailable)
+  , comment = \_ _ _ _ -> pure (Left unavailable)
+  , setClosed = \_ _ _ _ -> pure (Left unavailable)
+  , merge = \_ _ _ _ _ -> pure (Left unavailable)
+  , review = \_ _ _ _ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -192,6 +206,11 @@ samples = Source
   , commitDiff = \_ _ _ -> pure (Left unavailable)
   , recentCommits = \_ _ _ -> pure (Left unavailable)
   , readme = \_ _ _ -> pure (Left unavailable)
+  , discussion = \_ _ _ -> pure (Left unavailable)
+  , comment = \_ _ _ _ -> pure (Left unavailable)
+  , setClosed = \_ _ _ _ -> pure (Left unavailable)
+  , merge = \_ _ _ _ _ -> pure (Left unavailable)
+  , review = \_ _ _ _ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -199,7 +218,8 @@ unavailable :: Text
 unavailable = "Signing in is not available here."
 
 -- | Signs in and out through @accounts@, and tells their forges what the
--- user did with a notification.
+-- user did: with a notification, or on an issue or pull request. A change
+-- on the forge starts a sync, so the lists show it.
 withAccounts :: ConnectionPool -> Accounts -> Source -> Source
 withAccounts pool accounts source = source
   { signIn = \kind host token -> either (Left . describe) (const (Right ())) <$> accounts.signIn kind host token
@@ -220,8 +240,27 @@ withAccounts pool accounts source = source
                 DB.setUnread i.accountId thread (not done)
                 DB.setDone i.accountId thread done
               pure (Right ())
+  , discussion = \host repo n -> onForge host repo n (\f name number -> f.discussion name number)
+  , comment = \host repo n text -> changing (onForge host repo n (\f name number -> () <$ f.comment name number text))
+  , setClosed = \host repo n closed -> changing (onForge host repo n (\f name number -> f.setClosed name number closed))
+  , merge = \host repo n how delete -> changing (onForge host repo n (\f name number -> f.merge name number how delete))
+  , review = \host repo n verdict text -> changing (onForge host repo n (\f name number -> f.review name number verdict text))
   }
   where
+    onForge :: Text -> Text -> Int -> (Forge.Forge -> RepoName -> Number -> IO a) -> IO (Either Text a)
+    onForge host repo n act = do
+      found <- accountFor pool host repo
+      case (found, parse n) of
+        (Just (key, name), Right number) -> do
+          forge <- accounts.forgeOf key
+          case forge of
+            Nothing -> pure (Left (said SignedOut))
+            Just f -> either (Left . said) Right <$> try (act f name number)
+        _ -> pure (Left "That repository is not in the cache any more.")
+    changing act = do
+      result <- act
+      either (const (pure ())) (const source.syncNow) result
+      pure result
     matches n i =
       unparse i.notification.host == n.host
         && unparse i.notification.repo == n.repo
@@ -315,12 +354,19 @@ withDetails pool details source = source
     -- The repository may be the user's own or one they only have pull
     -- requests in.
     repoOf :: Text -> Text -> (AccountId -> RepoName -> IO (Either Text a)) -> IO (Either Text a)
-    repoOf host repo ask = do
-      repos <- run pool DB.repositories
-      prs <- run pool DB.pullRequests
-      let keys = [key | (key, r) <- repos, unparse r.host == host, unparse r.name == repo]
-            <> [key | (key, pr) <- prs, unparse pr.ref.host == host, unparse pr.ref.repo == repo]
-      case (keys, parse repo) of
-        (key : _, Right name) -> ask key name
-        _ -> pure (Left gone)
+    repoOf host repo ask = accountFor pool host repo >>= maybe (pure (Left gone)) (uncurry ask)
     gone = "That repository is not in the cache any more."
+
+-- | The account that has the repository on a host in the cache: as its
+-- own, or through a pull request or issue in it.
+accountFor :: ConnectionPool -> Text -> Text -> IO (Maybe (AccountId, RepoName))
+accountFor pool host repo = do
+  repos <- run pool DB.repositories
+  prs <- run pool DB.pullRequests
+  issues <- run pool DB.issues
+  let keys = [key | (key, r) <- repos, unparse r.host == host, unparse r.name == repo]
+        <> [key | (key, pr) <- prs, unparse pr.ref.host == host, unparse pr.ref.repo == repo]
+        <> [key | (key, i) <- issues, unparse i.ref.host == host, unparse i.ref.repo == repo]
+  pure $ case (keys, parse repo) of
+    (key : _, Right name) -> Just (key, name)
+    _ -> Nothing

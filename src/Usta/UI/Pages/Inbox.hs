@@ -36,6 +36,7 @@ import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Format (Clock, ago, short)
 import Usta.UI.Style (Tone (..))
+import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Notification as N
 import Usta.Types.Parse (unparse)
 import qualified Usta.Types.PullRequest as P
@@ -343,10 +344,11 @@ changesCard cs = do
   pure card
 
 -- | The inbox row for a forge's notification, with the pull request it is
--- about when that is synced. 'Nothing' for a release, commit or discussion,
+-- about when that is synced, and how the item involves the user (for a
+-- forge that does not say why it notified). 'Nothing' for a release, commit or discussion,
 -- which the inbox does not show yet.
-fromNotification :: Clock -> Forge.Kind -> N.Notification -> Maybe P.PullRequest -> Maybe Notification
-fromNotification c forge n pr = do
+fromNotification :: Clock -> Forge.Kind -> N.Notification -> Maybe P.PullRequest -> [Involvement] -> Maybe Notification
+fromNotification c forge n pr involvement = do
   kind <- case n.subject of
     N.PullRequestSubject _
       | fmap (.state) pr == Just P.Merged -> Just MergedPullRequest
@@ -384,6 +386,11 @@ fromNotification c forge n pr = do
           Just N.Mentioned -> Just Mentioned
           Just N.TeamMentioned -> Just Mentioned
           Just N.Assigned -> Just Assigned
+          -- A forge that gives no reason (Forgejo): how it involves you.
+          Nothing
+            | AsReviewer `elem` involvement -> Just ReviewRequested
+            | AsAssignee `elem` involvement -> Just Assigned
+            | AsMentioned `elem` involvement -> Just Mentioned
           _ | (pr >>= (.checks)) == Just P.ChecksFailed -> Just ChecksFailed
             | otherwise -> Nothing
     checks state = case state of

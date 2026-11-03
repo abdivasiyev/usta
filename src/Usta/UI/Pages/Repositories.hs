@@ -8,9 +8,13 @@ module Usta.UI.Pages.Repositories
   , Block (..)
   , Repository (..)
   , fromRepository
+  , Actions (..)
   , ChooseMirror
   , Origins (..)
   , LookUpOrigins
+  , Contents (..)
+  , LoadContents
+  , readmeBlocks
   , sample
   , new
   , css
@@ -34,6 +38,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Platform as Platform
 import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Style (Tone (..))
@@ -97,8 +102,30 @@ data Origins = Origins
 type LookUpOrigins :: Type
 type LookUpOrigins = Repository -> IO (Either Text Origins)
 
-new :: (Repository -> IO ()) -> (Repository -> IO ()) -> ChooseMirror -> LookUpOrigins -> [Repository] -> IO (Page Repository)
-new onNewIssue onNewPullRequest chooseMirror lookUp repositories = do
+-- | A repository's recent commits and README, loaded when it is shown.
+type Contents :: Type
+data Contents = Contents
+  { commits :: [Commit]
+  , readme :: Maybe (Text, [Block])
+    -- ^ The README's file name and blocks.
+  }
+
+-- | Loads 'Contents'; 'Left' says why not. Runs off the GTK main thread.
+type LoadContents :: Type
+type LoadContents = Repository -> IO (Either Text Contents)
+
+-- | What the page's buttons and overview do.
+type Actions :: Type
+data Actions = Actions
+  { newIssue :: Repository -> IO ()
+  , newPullRequest :: Repository -> IO ()
+  , chooseMirror :: ChooseMirror
+  , lookUpOrigins :: LookUpOrigins
+  , loadContents :: LoadContents
+  }
+
+new :: Actions -> [Repository] -> IO (Page Repository)
+new actions repositories = do
   items <- newIORef repositories
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
@@ -118,7 +145,7 @@ new onNewIssue onNewPullRequest chooseMirror lookUp repositories = do
       when (index >= 0 && fromIntegral index < length shown) $ do
         let r = shown !! fromIntegral index
         writeIORef selectedKey (Just (key r))
-        content <- overview onNewIssue onNewPullRequest chooseMirror lookUp r
+        content <- overview actions r
         GI.set overviewScroll [#child := content]
 
   (search, entry) <- SearchField.new SearchField.defaults
@@ -195,8 +222,8 @@ counts r =
   where
     plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
 
-overview :: (Repository -> IO ()) -> (Repository -> IO ()) -> ChooseMirror -> LookUpOrigins -> Repository -> IO Gtk.Box
-overview onNewIssue onNewPullRequest chooseMirror lookUp r = do
+overview :: Actions -> Repository -> IO Gtk.Box
+overview actions r = do
   pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #cssClasses := ["u-repo"]
@@ -214,14 +241,14 @@ overview onNewIssue onNewPullRequest chooseMirror lookUp r = do
   #append titles descriptionLabel
   #append header titles
   newIssue <- Button.new Button.defaults { Button.label = Just "New issue" }
-  void $ GI.on newIssue #clicked (onNewIssue r)
+  void $ GI.on newIssue #clicked (actions.newIssue r)
   newPullRequest <- Button.new Button.defaults
     { Button.label = Just "New pull request", Button.variant = Button.Primary }
-  void $ GI.on newPullRequest #clicked (onNewPullRequest r)
+  void $ GI.on newPullRequest #clicked (actions.newPullRequest r)
   mirrorButtons <- if r.canMirror
     then do
       b <- Button.new Button.defaults { Button.label = Just "Mirror…" }
-      void $ GI.on b #clicked $ Gtk.toWidget b >>= \anchor -> askMirror anchor r chooseMirror lookUp
+      void $ GI.on b #clicked $ Gtk.toWidget b >>= \anchor -> askMirror anchor r actions.chooseMirror actions.lookUpOrigins
       pure [b]
     else pure []
   forM_ (mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
@@ -244,35 +271,75 @@ overview onNewIssue onNewPullRequest chooseMirror lookUp r = do
   #append stats mirrorCard
   #append pane stats
 
-  when (not (null r.recentCommits)) $ do
+  -- The sample carries its contents; a synced repository loads them.
+  contents <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 20]
+  #append pane contents
+  if not (null r.recentCommits && null r.readme)
+    then sections r Contents {commits = r.recentCommits, readme = Just ("README.md", r.readme)} contents
+    else do
+      Skeleton.block 120 >>= #append contents
+      void $ forkIO $ do
+        loaded <- try (actions.loadContents r)
+        let result = either (\(_ :: SomeException) -> Left "Loading failed unexpectedly.") id loaded
+        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+          clear contents
+          case result of
+            Right c -> sections r c contents
+            Left message -> label message ["muted"] >>= #append contents
+          pure False
+  pure pane
+  where
+    clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
+
+-- | The recent commits and README sections, into @into@.
+sections :: Repository -> Contents -> Gtk.Box -> IO ()
+sections r c into = do
+  when (not (null c.commits)) $ do
     section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
     Card.sectionTitle ("Recent commits on " <> r.defaultBranch) >>= #append section
     card <- Card.new
-    forM_ r.recentCommits $ \c -> do
+    forM_ c.commits $ \commit -> do
       line <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                              , #spacing := 12
                              , #cssClasses := ["commit-row"]
                              ]
-      label (T.take 7 c.hash) ["mono", "hash"] >>= #append line
-      messageLabel <- label c.message []
-      GI.set messageLabel [#hexpand := True]
+      label (T.take 7 commit.hash) ["mono", "hash"] >>= #append line
+      messageLabel <- label commit.message []
+      GI.set messageLabel [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd]
       #append line messageLabel
-      label c.age ["muted", "age"] >>= #append line
+      label commit.age ["muted", "age"] >>= #append line
       #append card line
     #append section card
-    #append pane section
+    #append into section
+  case c.readme of
+    Just (name, blocks) | not (null blocks) -> do
+      section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+      Card.sectionTitle name >>= #append section
+      card <- Card.new
+      Gtk.widgetAddCssClass card "readme"
+      GI.set card [#spacing := 16]
+      forM_ blocks $ \block -> blockWidget block >>= #append card
+      #append section card
+      #append into section
+    _ -> pure ()
+  when (null c.commits && maybe True (null . snd) c.readme) $
+    label "No commits or README to show yet." ["muted"] >>= #append into
 
-  when (not (null r.readme)) $ do
-    section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
-    Card.sectionTitle "README.md" >>= #append section
-    card <- Card.new
-    Gtk.widgetAddCssClass card "readme"
-    GI.set card [#spacing := 16]
-    forM_ r.readme $ \block -> blockWidget block >>= #append card
-    #append section card
-    #append pane section
-
-  pure pane
+-- | A README's Markdown as the page's blocks: headings, fenced code, and
+-- paragraphs between blank lines. Other Markdown shows as written.
+readmeBlocks :: Text -> [Block]
+readmeBlocks = go . T.lines
+  where
+    go [] = []
+    go (l : rest)
+      | T.null (T.strip l) = go rest
+      | "```" `T.isPrefixOf` T.strip l =
+          let (code, after) = break (("```" `T.isPrefixOf`) . T.strip) rest
+           in Code (T.intercalate "\n" code) : go (drop 1 after)
+      | "#" `T.isPrefixOf` l = Heading (T.strip (T.dropWhile (== '#') l)) : go rest
+      | otherwise =
+          let (para, after) = break (\x -> T.null (T.strip x) || "#" `T.isPrefixOf` x || "```" `T.isPrefixOf` T.strip x) (l : rest)
+           in Paragraph (T.unwords (map T.strip para)) : go after
 
 blockWidget :: Block -> IO Gtk.Widget
 blockWidget block = case block of

@@ -18,6 +18,7 @@ import qualified Data.Text as T
 import qualified GI.Gdk as Gdk
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Components.Mermaid as Mermaid
 import qualified Usta.UI.Highlight as Highlight
 
 -- | @text@ rendered, for a README, a description or a comment.
@@ -37,7 +38,9 @@ block (Node _ kind children) = case kind of
     Gtk.widgetAddCssClass w "quote"
     pure w
   THEMATIC_BREAK -> GI.new Gtk.Separator [#orientation := Gtk.OrientationHorizontal] >>= Gtk.toWidget
-  CODE_BLOCK info code -> codeBlock (T.takeWhile (/= ' ') (T.strip info)) code
+  CODE_BLOCK info code
+    | T.toLower (T.strip info) == "mermaid" -> Mermaid.new code
+    | otherwise -> codeBlock (T.takeWhile (/= ' ') (T.strip info)) code
   HTML_BLOCK raw -> text' (Highlight.plain (T.stripEnd raw)) ["mono"]
   LIST attributes -> list attributes children
   TABLE alignments -> table alignments children

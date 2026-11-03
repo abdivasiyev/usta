@@ -70,6 +70,8 @@ data Accounts = Accounts
   , origins :: AccountId -> RepoName -> IO (Either Problem Origins)
     -- ^ Where a mirror would clone from over each transport, for showing
     -- before the user chooses.
+  , forgeOf :: AccountId -> IO (Maybe Forge)
+    -- ^ The account's forge while it is connected.
   }
 
 -- | The URL a mirror would use over each transport, or why it cannot.
@@ -120,7 +122,13 @@ connect settings = do
   forges <- newIORef Map.empty
   saved <- run settings.pool listAccounts
   for_ saved $ \(key, account) -> resume forges key account
-  pure Accounts {signIn = signIn forges, remove = remove forges, mirror = mirror forges, origins = origins forges}
+  pure Accounts
+    { signIn = signIn forges
+    , remove = remove forges
+    , mirror = mirror forges
+    , origins = origins forges
+    , forgeOf = \key -> fmap snd . Map.lookup key <$> readIORef forges
+    }
   where
     resume forges key account = case account.forge of
       Forgejo -> do

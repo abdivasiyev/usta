@@ -47,6 +47,7 @@
           resourcet
           servant
           servant-client
+          servant-client-core
           stm
           text
           time

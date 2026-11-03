@@ -54,6 +54,7 @@ executable usta
     Usta.Diagram.Quadrant
     Usta.Diagram.Radar
     Usta.Diagram.Route
+    Usta.Diagram.Requirement
     Usta.Diagram.Sankey
     Usta.Diagram.Scene
     Usta.Diagram.Sequence

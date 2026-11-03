@@ -549,9 +549,12 @@ tabContent source reopen fetch summary showState tab = case tab of
         (host, repo, n) = at
         load = do
           d <- source.discussion host repo n
-          -- The timeline lists the commits; without them it still loads.
+          -- The timeline lists the commits, and the review threads follow
+          -- the comments; without either it still loads.
           commits <- source.pullCommits host repo n
-          pure (fmap (\x -> (x, either (const []) snd commits)) d)
+          threads <- source.threads host repo n
+          me <- maybe "" (.login) . find (\a -> a.host == host) <$> source.accounts
+          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me)) d)
         actions = Conversation.Actions
           { comment = source.comment host repo n
           , setClosed = source.setClosed host repo n
@@ -562,13 +565,17 @@ tabContent source reopen fetch summary showState tab = case tab of
           Just Success -> Just True
           Just Danger -> Just False
           _ -> Nothing
-    loadInto load $ \(d, commits) -> do
+    loadInto load $ \(d, commits, threads, me) -> do
       c <- clock
       showState $ case (d.merged, d.closed) of
         (True, _) -> PullRequest.MergedState
         (_, True) -> PullRequest.Closed
         _ -> summary.state
+      let shown t = Thread.Shown
+            { thread = t, outdated = False, showCode = True, lastReviewed = threads.lastReviewed
+            , me = me, clock = c, reply = source.reply host repo n t }
       Conversation.new actions (Conversation.fromDiscussion c d commits summary.branches checks)
+        {Conversation.threads = map shown threads.threads}
   PullRequest.Files ->
     -- The diff with its review threads; without threads it still shows.
     let withThreads = do

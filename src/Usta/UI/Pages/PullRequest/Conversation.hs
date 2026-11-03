@@ -6,7 +6,6 @@
 -- reviewers, labels and linked issues on the side.
 module Usta.UI.Pages.PullRequest.Conversation
   ( Event (..)
-  , Thread (..)
   , MergeState (..)
   , Model (..)
   , Actions (..)
@@ -29,6 +28,7 @@ import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.Thread as Thread
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
 import Usta.UI.Format (Clock, ago)
@@ -50,16 +50,6 @@ data Event
     -- ^ Passed or failed, and what ran.
   | ReviewRequestedFrom Text
 
--- | An inline review comment on one line.
-type Thread :: Type
-data Thread = Thread
-  { location :: Text
-  , line :: Text
-  , author :: Text
-  , body :: Text
-  , resolved :: Bool
-  }
-
 -- | What the merge box knows.
 type MergeState :: Type
 newtype MergeState = MergeState
@@ -73,7 +63,8 @@ data Model = Model
     -- ^ The description.
   , comments :: [Comment]
   , events :: [Event]
-  , threads :: [Thread]
+  , threads :: [Thread.Shown]
+    -- ^ The review threads, each with its file and code.
   , merge :: Maybe MergeState
     -- ^ 'Nothing' once it is merged or closed.
   , closed :: Bool
@@ -134,7 +125,7 @@ new actions m = do
   Gtk.widgetAddCssClass timeline "timeline"
   forM_ m.events $ \e -> eventRow e >>= #append timeline
   #append main timeline
-  forM_ m.threads $ \t -> threadCard t >>= #append main
+  forM_ m.threads $ \t -> Thread.new t >>= #append main . (.widget)
   problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
   -- Buttons wait for the forge, so a second click sends nothing twice.
   let run button row doing act = do
@@ -192,36 +183,6 @@ eventRow e = do
       label "Review requested from" ["soft"] >>= #append row
       label who ["strong"] >>= #append row
   pure row
-
-threadCard :: Thread -> IO Gtk.Box
-threadCard t = do
-  card <- Card.new
-  top <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                        , #spacing := 8
-                        , #cssClasses := ["card-header", "plain"]
-                        ]
-  label "Comment on" ["strong"] >>= #append top
-  where' <- label t.location ["mono", "link"]
-  GI.set where' [#hexpand := True]
-  #append top where'
-  unless t.resolved $ Badge.new Warning "Unresolved" >>= #append top
-  #append card top
-  label ("+  " <> t.line) ["mono", "diff-add"] >>= #append card
-  comment <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                            , #spacing := 10
-                            , #cssClasses := ["card-body"]
-                            ]
-  avatar <- Avatar.new 24 "AA"
-  GI.set avatar [#valign := Gtk.AlignStart]
-  #append comment avatar
-  text <- vbox 4
-  label t.author ["strong"] >>= #append text
-  bodyLabel <- label t.body []
-  GI.set bodyLabel [#wrap := True]
-  #append text bodyLabel
-  #append comment text
-  #append card comment
-  pure card
 
 -- | @run@ disables the buttons while an action runs.
 mergeBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> MergeState -> IO Gtk.Box
@@ -342,11 +303,7 @@ sample = Model
       , CheckFinished True "nix build"
       , ReviewRequestedFrom "abdivasiyev"
       ]
-  , threads =
-      [ Thread "flake.nix:23" "executableHaskellDepends = with hsPkgs; [ base gi-gtk4 ];" "abdivasiyev"
-          "Add wrapGAppsHook4 here once Main opens a window, otherwise the app can't find the GSettings schemas."
-          False
-      ]
+  , threads = []
   , merge = Just MergeState {checksPassed = Just True}
   , closed = False
   , source = "feat/gtk4-dep"

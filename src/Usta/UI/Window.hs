@@ -398,11 +398,14 @@ buildAt start given app = do
       reload resource = do
         case resource of
           Resource.Notifications -> reloadInbox
-          -- Inbox rows show their pull request's checks and review.
+          -- Inbox rows show their pull request's checks and review, and
+          -- the badges that come from how the user is involved.
           Resource.PullRequests -> do
             reloadInbox
             source.pullRequests >>= pullRequestPage.update
-          Resource.Issues -> source.issues >>= issuePage.update
+          Resource.Issues -> do
+            reloadInbox
+            source.issues >>= issuePage.update
           Resource.Repositories -> source.repositories >>= repositoryPage.update
         drawSidebar
   let drawFooter = do

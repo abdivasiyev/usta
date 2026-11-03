@@ -15,6 +15,7 @@ module Usta.UI.Source
   ) where
 
 import Control.Exception (IOException, SomeException, displayException, try)
+import Data.ByteString (ByteString)
 import Data.Kind (Type)
 import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Text (Text)
@@ -48,6 +49,7 @@ import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
+import Usta.Types.Tree (Entry)
 import Usta.Types.Discussion (Discussion, Merge, NewIssue, NewPull, Verdict)
 import Usta.Types.Number (Number)
 import Usta.Types.RepoName (RepoName)
@@ -117,6 +119,10 @@ data Source = Source
   , recentCommits :: Text -> Text -> Text -> IO (Either Text (From, [Commit]))
     -- ^ A branch's last commits, by host, repository and branch.
   , readme :: Text -> Text -> Text -> IO (Either Text (From, Maybe (Text, Text)))
+  , tree :: Text -> Text -> Text -> IO (Either Text (From, [Entry]))
+    -- ^ A branch's folders and files, by host, repository and branch.
+  , file :: Text -> Text -> Text -> Text -> IO (Either Text (From, ByteString))
+    -- ^ A file's contents, by host, repository, branch and path.
   , discussion :: Text -> Text -> Int -> IO (Either Text Discussion)
     -- ^ An issue's or pull request's thread, by host, repository and
     -- number, from the forge.
@@ -208,6 +214,8 @@ fromDatabase pool changes statuses sync = Source
   , commitDiff = \_ _ _ -> pure (Left unavailable)
   , recentCommits = \_ _ _ -> pure (Left unavailable)
   , readme = \_ _ _ -> pure (Left unavailable)
+  , tree = \_ _ _ -> pure (Left unavailable)
+  , file = \_ _ _ _ -> pure (Left unavailable)
   , discussion = \_ _ _ -> pure (Left unavailable)
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
@@ -255,6 +263,8 @@ samples = Source
   , commitDiff = \_ _ _ -> pure (Left unavailable)
   , recentCommits = \_ _ _ -> pure (Left unavailable)
   , readme = \_ _ _ -> pure (Left unavailable)
+  , tree = \_ _ _ -> pure (Left unavailable)
+  , file = \_ _ _ _ -> pure (Left unavailable)
   , discussion = \_ _ _ -> pure (Left unavailable)
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
@@ -409,6 +419,8 @@ withDetails pool details source = source
   , commitDiff = \host repo sha -> repoOf host repo (\key name -> details.commitDiff key name sha)
   , recentCommits = \host repo branch -> repoOf host repo (\key name -> details.recentCommits key name branch)
   , readme = \host repo branch -> repoOf host repo (\key name -> details.readme key name branch)
+  , tree = \host repo branch -> repoOf host repo (\key name -> details.tree key name branch)
+  , file = \host repo branch path -> repoOf host repo (\key name -> details.file key name branch path)
   }
   where
     pullOf :: Text -> Text -> Int -> (AccountId -> RepoName -> Number -> IO (Either Text a)) -> IO (Either Text a)

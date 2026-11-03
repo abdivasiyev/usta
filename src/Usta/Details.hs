@@ -12,6 +12,8 @@ module Usta.Details
   ) where
 
 import Control.Exception (try)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BL
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -32,6 +34,7 @@ import Usta.Types.Parse (unparse)
 import qualified Usta.Types.PullRequest as P
 import Usta.Types.Ref (Ref (..))
 import Usta.Types.RepoName (RepoName)
+import Usta.Types.Tree (Entry)
 
 type Settings :: Type
 data Settings = Settings
@@ -56,6 +59,10 @@ data Details = Details
     -- ^ The last commits on a branch, newest first.
   , readme :: AccountId -> RepoName -> Text -> IO (Either Text (From, Maybe (Text, Text)))
     -- ^ A branch's README, with its file name.
+  , tree :: AccountId -> RepoName -> Text -> IO (Either Text (From, [Entry]))
+    -- ^ Every folder and file on a branch.
+  , file :: AccountId -> RepoName -> Text -> Text -> IO (Either Text (From, ByteString))
+    -- ^ A file's contents on a branch, by path.
   }
 
 new :: Settings -> Details
@@ -66,6 +73,9 @@ new settings = Details
   , recentCommits = \key repo branch ->
       either' key repo (\path -> Git.recent path branch 10) (\f -> f.recentCommits repo branch)
   , readme = \key repo branch -> either' key repo (\path -> Git.readme path branch) (\f -> f.readme repo branch)
+  , tree = \key repo branch -> either' key repo (\path -> Git.tree path branch) (\f -> f.tree repo branch)
+  , file = \key repo branch name ->
+      either' key repo (\path -> BL.toStrict <$> Git.blob path branch name) (\f -> f.file repo branch name)
   }
   where
     -- A pull request from the mirror needs both its base branch and its own

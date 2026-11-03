@@ -270,7 +270,7 @@ buildAt start source app = do
           (_, file) <- readme
           pure Repositories.Contents
             { commits = [Repositories.Commit {hash = unparse x.sha, message = x.subject, age = short c x.authoredAt} | x <- cs]
-            , readme = fmap (\(name, text) -> (name, Repositories.readmeBlocks text)) file
+            , readme = file
             }
   repositoryPage <- source.repositories >>= Repositories.new Repositories.Actions
     { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))

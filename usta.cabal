@@ -46,12 +46,14 @@ executable usta
     Usta.Diagram.Gantt
     Usta.Diagram.GitGraph
     Usta.Diagram.Journey
+    Usta.Diagram.Kanban
     Usta.Diagram.Mindmap
     Usta.Diagram.Layered
     Usta.Diagram.Pie
     Usta.Diagram.Quadrant
     Usta.Diagram.Radar
     Usta.Diagram.Route
+    Usta.Diagram.Sankey
     Usta.Diagram.Scene
     Usta.Diagram.Sequence
     Usta.Diagram.State

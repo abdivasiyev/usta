@@ -369,7 +369,7 @@ buildAt start given app = do
               | start == FirstSync = SyncStatus.Syncing "github.com"
               | null accounts = SyncStatus.NoAccounts
               | otherwise = headline c [(host, s) | (key, s) <- known, Just host <- [hostOf key]]
-        SyncStatus.new state source.syncNow >>= Gtk.toWidget >>= replaceChild syncChip
+        SyncStatus.new state >>= Gtk.toWidget >>= replaceChild syncChip
       reload resource = do
         case resource of
           Resource.Notifications -> reloadInbox

@@ -8,7 +8,7 @@ module Usta.UI.Components.SyncStatus
   , css
   ) where
 
-import Control.Monad (void, when)
+import Control.Monad (when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
@@ -16,7 +16,6 @@ import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Badge as Badge
-import qualified Usta.UI.Components.Button as Button
 import Usta.UI.Style (Tone (..))
 
 type State :: Type
@@ -31,9 +30,10 @@ data State
     -- ^ Nothing to sync yet.
   deriving (Eq)
 
--- | @onRetry@ runs for the Retry button a failed sync shows.
-new :: State -> IO () -> IO Gtk.Box
-new state onRetry = do
+-- | The chip only says where syncing stands; the header's refresh button
+-- is what syncs again, failed or not.
+new :: State -> IO Gtk.Box
+new state = do
   chip <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                          , #spacing := 8
                          , #valign := Gtk.AlignCenter
@@ -47,13 +47,6 @@ new state onRetry = do
       when (state `elem` [Offline, NoAccounts]) $ Gtk.widgetAddCssClass dot "quiet"
       #append chip dot
   GI.new Gtk.Label [#label := text state, #cssClasses := ["text", stateClass state]] >>= #append chip
-  case state of
-    Failed -> do
-      retry <- Button.new Button.defaults { Button.label = Just "Retry" }
-      Gtk.widgetAddCssClass retry "retry"
-      void $ GI.on retry #clicked onRetry
-      #append chip retry
-    _ -> pure ()
   pure chip
 
 tone :: State -> Tone
@@ -83,5 +76,4 @@ css = mconcat
   , "box.u-sync label.text.failed { color: var(--danger); }"
   , "box.u-sync box.u-dot.quiet { background: var(--text-muted); }"
   , "box.u-sync spinner { min-width: 14px; min-height: 14px; color: var(--accent); }"
-  , "box.u-sync button.retry { min-height: 26px; padding: 0 10px; font-size: 13px; }"
   ]

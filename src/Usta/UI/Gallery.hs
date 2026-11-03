@@ -129,7 +129,7 @@ build app = do
     column <- vbox 12
     forM_ [ SyncStatus.Synced "1 min ago", SyncStatus.Syncing "3 of 5 repositories"
           , SyncStatus.Offline, SyncStatus.Failed ] $ \state ->
-      SyncStatus.new state (pure ()) >>= #append column
+      SyncStatus.new state >>= #append column
     #append row column
 
   scroller <- GI.new Gtk.ScrolledWindow [#child := page, #vexpand := True]

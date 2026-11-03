@@ -86,7 +86,7 @@ cache = do
     let details = Details.new Details.Settings {pool = pool, accounts = accounts, mirrors = mirrors}
         source = Source.withDetails pool details
           (Source.withMirrors pool accounts mirrors mirrorStatuses
-            (Source.withAccounts accounts (Source.fromDatabase pool changes statuses sync)))
+            (Source.withAccounts pool accounts (Source.fromDatabase pool changes statuses sync)))
         start = if null saved then Window.FirstRun else Window.Ready
     runApp (void . Window.buildAt start source)
 

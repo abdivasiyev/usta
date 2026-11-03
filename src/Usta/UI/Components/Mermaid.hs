@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
 
--- | A Mermaid block in Markdown, drawn as a diagram on the app's own
+-- | A Mermaid block in Markdown, drawn by usta as a diagram on the app's own
 -- background, with its source a click away. A diagram usta cannot draw
 -- shows its source and says why.
 module Usta.UI.Components.Mermaid
@@ -9,19 +9,15 @@ module Usta.UI.Components.Mermaid
   , css
   ) where
 
-import Control.Concurrent (forkIO)
 import Control.Monad (void)
-import qualified Data.ByteString.Lazy as BL
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
-import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.Diagram.Flowchart as Flowchart
 import qualified Usta.Mermaid as Mermaid
-import qualified Usta.UI.Components.ImageView as ImageView
-import qualified Usta.UI.Components.Skeleton as Skeleton
-import qualified Usta.UI.Highlight as Highlight
+import qualified Usta.UI.Components.DiagramView as DiagramView
 
 new :: Text -> IO Gtk.Widget
 new source = do
@@ -50,39 +46,9 @@ new source = do
         Gtk.stackSetVisibleChildName stack "source"
   case Mermaid.parse source of
     Left reason -> fallBack reason
-    Right chart ->
-      -- Drawn again in the other theme's colors when it changes.
-      Highlight.follow figure $ \palette -> do
-        clear diagram
-        Skeleton.block 120 >>= #append diagram
-        void $ forkIO $ do
-          drawn <- Mermaid.draw (colors palette) chart
-          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            clear diagram
-            case drawn of
-              Left reason -> fallBack reason
-              Right png -> do
-                image <- ImageView.texture (BL.toStrict png)
-                case image of
-                  Nothing -> fallBack "The diagram was drawn in a form usta cannot show."
-                  Just t -> do
-                    -- dot drew it at twice the screen's resolution.
-                    (w, h) <- ImageView.size t
-                    picture <- GI.new Gtk.Picture [ #paintable := t
-                                                  , #canShrink := True
-                                                  , #contentFit := Gtk.ContentFitScaleDown
-                                                  , #widthRequest := fromIntegral (w `div` 2)
-                                                  , #heightRequest := fromIntegral (h `div` 2)
-                                                  , #halign := Gtk.AlignStart
-                                                  ]
-                    #append diagram picture
-            pure False
+    -- Drawn by usta; the theme's colors come in when it is painted.
+    Right chart -> DiagramView.new (\measure -> Flowchart.draw measure chart) >>= #append diagram
   Gtk.toWidget figure
-  where
-    clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
-    colors palette = case palette of
-      Highlight.LightPalette -> Mermaid.Colors {fill = "#FFFFFF", border = "#B9C0CB", text = "#1B1D21", line = "#5B616B"}
-      Highlight.DarkPalette -> Mermaid.Colors {fill = "#23262B", border = "#4A505A", text = "#E6E8EB", line = "#9AA0A9"}
 
 css :: Text
 css = mconcat

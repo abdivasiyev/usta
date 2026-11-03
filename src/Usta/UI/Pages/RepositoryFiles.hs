@@ -35,6 +35,7 @@ import qualified Usta.UI.Components.CodeView as CodeView
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.ImageView as ImageView
 import qualified Usta.UI.Components.PdfView as PdfView
+import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Highlight as Highlight
 import Usta.Types.Tree (Entry (..))
@@ -236,6 +237,19 @@ fileView place e bytes = do
   #append box header
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "file-card"]]
   body <- case content of
+    Text text | markdown -> do
+      stack <- GI.new Gtk.Stack []
+      rendered <- Markdown.new text
+      Gtk.widgetAddCssClass rendered "rendered"
+      void $ Gtk.stackAddNamed stack rendered (Just "rendered")
+      source <- CodeView.new e.path text
+      void $ Gtk.stackAddNamed stack source (Just "source")
+      toggle <- GI.new Gtk.ToggleButton [#label := "Source"]
+      void $ GI.on toggle #toggled $ do
+        on <- GI.get toggle #active
+        Gtk.stackSetVisibleChildName stack (if on then "source" else "rendered")
+      Gtk.boxInsertChildAfter header toggle (Just facts)
+      Gtk.toWidget stack
     Text text -> CodeView.new e.path text
     Image -> do
       image <- ImageView.texture bytes
@@ -249,6 +263,7 @@ fileView place e bytes = do
   #append box card
   Gtk.toWidget box
   where
+    markdown = any (`T.isSuffixOf` T.toLower e.path) [".md", ".markdown"]
     linesOf content = case content of
       Text text -> [T.pack (show (length (T.lines text))) <> " lines"]
       _ -> []
@@ -307,4 +322,5 @@ css = mconcat
   , "}"
   , "box.u-files-tab box.file-card { overflow: hidden; }"
   , "box.u-files-tab label.note { padding: 24px; }"
+  , "box.u-files-tab .rendered { padding: 20px 24px; }"
   ]

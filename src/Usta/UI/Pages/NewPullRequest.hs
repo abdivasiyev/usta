@@ -27,7 +27,7 @@ import qualified GI.Gtk as Gtk
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
-import qualified Usta.UI.Components.Segmented as Segmented
+import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.Types.Discussion (NewPull (..))
 import Usta.Types.Parse (parse)
@@ -113,7 +113,7 @@ new actions m = do
 
   titleEntry <- GI.new Gtk.Entry [#placeholderText := "What it does, e.g. feat: render the main window", #cssClasses := ["title-entry"]]
   Gtk.toWidget titleEntry >>= field "Title" >>= #append main
-  (editorBox, buffer) <- editor ""
+  (editorBox, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 160}
   #append main editorBox
   contentsSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append main contentsSlot
@@ -275,46 +275,6 @@ contents into from commits paths = do
   pure box
   where
     count n noun = T.pack (show n) <> " " <> noun <> (if n == 1 then "" else "s")
-
--- | Markdown description with Write and Preview tabs.
-editor :: Text -> IO (Gtk.Box, Gtk.TextBuffer)
-editor text = do
-  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
-  (tabs, buttons) <- Segmented.new ["Write", "Preview"] 0
-  Gtk.widgetAddCssClass tabs "editor-tabs"
-  #append box tabs
-
-  buffer <- GI.new Gtk.TextBuffer []
-  Gtk.textBufferSetText buffer text (-1)
-  view <- GI.new Gtk.TextView [ #buffer := buffer
-                              , #wrapMode := Gtk.WrapModeWordChar
-                              , #heightRequest := 160
-                              , #topMargin := 12
-                              , #bottomMargin := 12
-                              , #leftMargin := 12
-                              , #rightMargin := 12
-                              , #monospace := True
-                              , #cssClasses := ["editor"]
-                              ]
-  rendered <- label "" ["preview"]
-  GI.set rendered [#wrap := True, #yalign := 0]
-  stack <- GI.new Gtk.Stack []
-  void $ Gtk.stackAddNamed stack view (Just "write")
-  void $ Gtk.stackAddNamed stack rendered (Just "preview")
-  #append box stack
-
-  -- Preview shows the text as it will read; Markdown rendering comes later.
-  forM_ (zip ["write", "preview"] buttons) $ \(name, button) ->
-    void $ GI.on button #toggled $ do
-      active <- GI.get button #active
-      when active $ do
-        when (name == "preview") $ do
-          start <- Gtk.textBufferGetStartIter buffer
-          end <- Gtk.textBufferGetEndIter buffer
-          current <- Gtk.textBufferGetText buffer start end False
-          GI.set rendered [#label := current]
-        Gtk.stackSetVisibleChildName stack name
-  pure (box, buffer)
 
 -- | A small caption above an input.
 field :: Text -> Gtk.Widget -> IO Gtk.Box

@@ -80,6 +80,7 @@ executable usta
     Usta.UI.Components.Badge
     Usta.UI.Components.Button
     Usta.UI.Components.Card
+    Usta.UI.Components.CodeView
     Usta.UI.Components.CommandPalette
     Usta.UI.Components.Diff
     Usta.UI.Components.Forge
@@ -109,6 +110,7 @@ executable usta
     Usta.UI.Pages.PullRequest.Files
     Usta.UI.Pages.PullRequests
     Usta.UI.Pages.Repositories
+    Usta.UI.Pages.RepositoryFiles
     Usta.UI.Pages.Settings
     Usta.UI.Pages.Welcome
     Usta.UI.Platform
@@ -126,6 +128,7 @@ executable usta
     directory,
     esqueleto,
     filepath,
+    gi-gdk4,
     gi-gio,
     gi-glib,
     gi-gtk4,

@@ -9,16 +9,22 @@ module Usta.UI.Pages.PullRequest.Conversation
   , Thread (..)
   , MergeState (..)
   , Model (..)
+  , Actions (..)
+  , fromDiscussion
   , sample
   , new
   , css
   ) where
 
-import Control.Monad (forM_, unless)
+import Control.Concurrent (forkIO)
+import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
+import Data.Maybe (isJust)
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Avatar as Avatar
@@ -26,7 +32,14 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
+import Usta.UI.Format (Clock, ago)
+import Usta.UI.Pages.Issue (Comment (..))
+import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
+import qualified Usta.Types.Commit as C
+import qualified Usta.Types.Discussion as D
+import qualified Usta.Types.Label as L
+import Usta.Types.Parse (unparse)
 
 -- | Something that happened on the pull request. Add a constructor and a
 -- case in 'eventRow' for a new kind.
@@ -48,20 +61,23 @@ data Thread = Thread
   , resolved :: Bool
   }
 
+-- | What the merge box knows.
 type MergeState :: Type
-data MergeState = MergeState
-  { checksPassed :: Bool
-  , approvalsMissing :: Int
+newtype MergeState = MergeState
+  { checksPassed :: Maybe Bool
+    -- ^ 'Nothing' when the repository runs no checks.
   }
 
 type Model :: Type
 data Model = Model
-  { openedBy :: Text
-  , openedAgo :: Text
-  , description :: Text
+  { opening :: Comment
+    -- ^ The description.
+  , comments :: [Comment]
   , events :: [Event]
   , threads :: [Thread]
-  , merge :: MergeState
+  , merge :: Maybe MergeState
+    -- ^ 'Nothing' once it is merged or closed.
+  , closed :: Bool
   , source :: Text
   , target :: Text
   , reviewers :: [(Tone, Text)]
@@ -69,22 +85,74 @@ data Model = Model
   , linkedIssues :: [Text]
   }
 
-new :: Model -> IO Gtk.Widget
-new m = do
+-- | What the merge box and the comment box do. Each runs off the main
+-- thread; a 'Left' is said under the box, and a 'Right' runs 'refresh'.
+type Actions :: Type
+data Actions = Actions
+  { comment :: Text -> IO (Either Text ())
+  , setClosed :: Bool -> IO (Either Text ())
+  , merge :: D.Merge -> Bool -> IO (Either Text ())
+    -- ^ 'True' deletes the branch after.
+  , refresh :: IO ()
+  }
+
+-- | The pull request as the forge has it, with its commits, its branches
+-- (head and base), and whether its checks passed.
+fromDiscussion :: Clock -> D.Discussion -> [C.Commit] -> (Text, Text) -> Maybe Bool -> Model
+fromDiscussion c d commits (from, into) checks = Model
+  { opening = said "opened this " d.opening
+  , comments = map (said "commented ") d.comments
+  , events = [Committed (T.take 7 (unparse x.sha)) x.subject | x <- commits]
+  , threads = []
+  , merge = if d.closed then Nothing else Just MergeState {checksPassed = checks}
+  , closed = d.closed && not d.merged
+  , source = from
+  , target = into
+  , reviewers = []
+  , labels = [(labelTone l.color, l.name) | l <- d.labels]
+  , linkedIssues = []
+  }
+  where
+    said verb x = Comment
+      { author = unparse x.author
+      , initials = T.toUpper (T.take 2 (unparse x.author))
+      , when' = verb <> ago c x.createdAt
+      , body = x.body
+      }
+
+new :: Actions -> Model -> IO Gtk.Widget
+new actions m = do
   columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                            , #vexpand := True
                             , #cssClasses := ["u-conversation"]
                             ]
   main <- vbox 16
   GI.set main [#hexpand := True, #cssClasses := ["main"]]
 
-  descriptionCard m >>= #append main
+  commentCard m.opening >>= #append main
+  forM_ m.comments $ \x -> commentCard x >>= #append main
   timeline <- vbox 10
   Gtk.widgetAddCssClass timeline "timeline"
   forM_ m.events $ \e -> eventRow e >>= #append timeline
   #append main timeline
   forM_ m.threads $ \t -> threadCard t >>= #append main
-  mergeBox m.merge >>= #append main
-  commentBox >>= #append main
+  problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
+  -- Buttons wait for the forge, so a second click sends nothing twice.
+  let run buttons act = do
+        GI.set buttons [#sensitive := False]
+        GI.set problem [#visible := False]
+        void $ forkIO $ do
+          result <- act
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            case result of
+              Right () -> actions.refresh
+              Left text -> do
+                GI.set problem [#label := text, #visible := True]
+                GI.set buttons [#sensitive := True]
+            pure False
+  forM_ m.merge $ \s -> mergeBox run actions s >>= #append main
+  commentBox run actions m >>= #append main
+  #append main problem
 
   -- Keep the reading column a comfortable width on wide windows.
   clamp <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True]
@@ -98,19 +166,21 @@ new m = do
   details m >>= #append columns
   Gtk.toWidget columns
 
-descriptionCard :: Model -> IO Gtk.Box
-descriptionCard m = do
+commentCard :: Comment -> IO Gtk.Box
+commentCard x = do
   card <- Card.new
   top <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 10
                         , #cssClasses := ["card-header"]
                         ]
-  Avatar.new 24 "AA" >>= #append top
-  label m.openedBy ["strong"] >>= #append top
-  label ("opened this " <> m.openedAgo) ["muted"] >>= #append top
+  Avatar.new 24 x.initials >>= #append top
+  label x.author ["strong"] >>= #append top
+  label x.when' ["muted"] >>= #append top
   #append card top
-  text <- label m.description ["card-body"]
-  GI.set text [#wrap := True]
+  text <- if T.null (T.strip x.body)
+    then label "No description." ["card-body", "muted"]
+    else label x.body ["card-body"]
+  GI.set text [#wrap := True, #selectable := True]
   #append card text
   pure card
 
@@ -162,39 +232,45 @@ threadCard t = do
   #append card comment
   pure card
 
-mergeBox :: MergeState -> IO Gtk.Box
-mergeBox s = do
+-- | @run@ disables the buttons while an action runs.
+mergeBox :: (Gtk.Box -> IO (Either Text ()) -> IO ()) -> Actions -> MergeState -> IO Gtk.Box
+mergeBox run actions s = do
   card <- Card.new
   Gtk.widgetAddCssClass card "merge-box"
-  status <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["merge-row"]]
-  if s.checksPassed
-    then do
-      Icon.toned 16 Success Icon.Check >>= #append status
-      label "All checks have passed" [] >>= #append status
-    else do
-      Icon.toned 16 Danger Icon.Cross >>= #append status
-      label "Some checks failed" [] >>= #append status
-  #append card status
-  unless (s.approvalsMissing == 0) $ do
-    waiting <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["merge-row"]]
-    Badge.dot Warning >>= #append waiting
-    label "Waiting for 1 approving review" [] >>= #append waiting
-    #append card waiting
-  actions <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["merge-row"]]
-  Gtk.dropDownNewFromStrings ["Squash and merge", "Create a merge commit", "Rebase and merge"]
-    >>= #append actions
-  GI.new Gtk.CheckButton [#label := "Delete branch after merge", #active := True] >>= #append actions
+  forM_ s.checksPassed $ \passed -> do
+    status <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["merge-row"]]
+    if passed
+      then do
+        Icon.toned 16 Success Icon.Check >>= #append status
+        label "All checks have passed" [] >>= #append status
+      else do
+        Icon.toned 16 Danger Icon.Cross >>= #append status
+        label "Some checks failed" [] >>= #append status
+    #append card status
+  buttons <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["merge-row"]]
+  -- In the order of [minBound ..]: Squash, MergeCommit, Rebase.
+  how <- Gtk.dropDownNewFromStrings ["Squash and merge", "Create a merge commit", "Rebase and merge"]
+  #append buttons how
+  delete <- GI.new Gtk.CheckButton [#label := "Delete branch after merge", #active := True]
+  #append buttons delete
   mergeButton <- Button.new Button.defaults { Button.label = Just "Merge", Button.variant = Button.Primary }
+  -- The forge decides the rest (approvals, protected branches) and says so.
   GI.set mergeButton [ #hexpand := True
                      , #halign := Gtk.AlignEnd
-                     , #sensitive := s.approvalsMissing == 0 && s.checksPassed
+                     , #sensitive := s.checksPassed /= Just False
                      ]
-  #append actions mergeButton
-  #append card actions
+  void $ GI.on mergeButton #clicked $ do
+    chosen <- Gtk.dropDownGetSelected how
+    deleting <- GI.get delete #active
+    let ways = [minBound .. maxBound] :: [D.Merge]
+    when (fromIntegral chosen < length ways) $
+      run buttons (actions.merge (ways !! fromIntegral chosen) deleting)
+  #append buttons mergeButton
+  #append card buttons
   pure card
 
-commentBox :: IO Gtk.Box
-commentBox = do
+commentBox :: (Gtk.Box -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box
+commentBox run actions m = do
   box <- vbox 8
   label "Add a comment" ["strong"] >>= #append box
   editor <- GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
@@ -210,9 +286,18 @@ commentBox = do
                             , #spacing := 8
                             , #halign := Gtk.AlignEnd
                             ]
-  Button.new Button.defaults { Button.label = Just "Close pull request" } >>= #append buttons
-  Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
-    >>= #append buttons
+  -- A merged pull request can only be commented on.
+  when (m.closed || isJust m.merge) $ do
+    close <- Button.new Button.defaults
+      { Button.label = Just (if m.closed then "Reopen pull request" else "Close pull request") }
+    void $ GI.on close #clicked $ run buttons (actions.setClosed (not m.closed))
+    #append buttons close
+  send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
+  void $ GI.on send #clicked $ do
+    buffer <- Gtk.textViewGetBuffer editor
+    text <- maybe "" id <$> GI.get buffer #text
+    unless (T.null (T.strip text)) $ run buttons (actions.comment text)
+  #append buttons send
   #append box buttons
   pure box
 
@@ -227,7 +312,8 @@ details m = do
     label "→" ["muted"] >>= #append row
     label m.target ["chip", "mono"] >>= #append row
     #append box row
-  section side "Reviewers" $ \box ->
+  -- Sections usta has nothing for are left out.
+  unless (null m.reviewers) $ section side "Reviewers" $ \box ->
     forM_ m.reviewers $ \(tone, name) -> do
       row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
       Badge.dot tone >>= #append row
@@ -236,8 +322,9 @@ details m = do
   section side "Labels" $ \box -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
     forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
+    when (null m.labels) $ label "None" ["muted"] >>= #append row
     #append box row
-  section side "Linked issues" $ \box ->
+  unless (null m.linkedIssues) $ section side "Linked issues" $ \box ->
     forM_ m.linkedIssues $ \issue -> label issue ["link"] >>= #append box
   pure side
   where
@@ -256,9 +343,9 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 sample :: Model
 sample = Model
-  { openedBy = "abdivasiyev"
-  , openedAgo = "5 min ago"
-  , description = "Adds the GTK4 bindings so the next PR can open the main window.\n\n• gi-gtk4 in usta.cabal\n• Same dependency in the flake derivation"
+  { opening = Comment "abdivasiyev" "AA" "opened this 5 min ago"
+      "Adds the GTK4 bindings so the next PR can open the main window.\n\n• gi-gtk4 in usta.cabal\n• Same dependency in the flake derivation"
+  , comments = []
   , events =
       [ Committed "e1c90fa" "feat: add gi-gtk4 dependency"
       , CheckFinished True "nix build"
@@ -269,7 +356,8 @@ sample = Model
           "Add wrapGAppsHook4 here once Main opens a window, otherwise the app can't find the GSettings schemas."
           False
       ]
-  , merge = MergeState { checksPassed = True, approvalsMissing = 1 }
+  , merge = Just MergeState {checksPassed = Just True}
+  , closed = False
   , source = "feat/gtk4-dep"
   , target = "master"
   , reviewers = [(Warning, "abdivasiyev")]
@@ -283,6 +371,7 @@ css = mconcat
   , "box.u-conversation box.details { padding: 20px 16px; }"
   , "box.u-conversation label.strong { font-weight: 600; }"
   , "box.u-conversation label.link { color: var(--accent); }"
+  , "box.u-conversation label.problem { color: var(--danger); font-size: 13px; }"
   , "box.u-conversation label.hash { color: var(--accent); }"
   , "box.u-conversation box.card-header {"
   , "  padding: 10px 14px; border-bottom: 1px solid var(--border-subtle);"

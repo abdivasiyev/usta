@@ -19,6 +19,7 @@ module Usta.Diagram.Scene
   , Item (..)
   , Scene (..)
   , scene
+  , extent
   , translate
   ) where
 
@@ -145,14 +146,18 @@ scene margin items = Scene
     top = minimum (0 : map snd boxes)
     right = maximum (0 : map fst boxes)
     bottom = maximum (0 : map snd boxes)
-    extent item = case item of
-      Rect {at = p, size = s} -> [(p.x, p.y), (p.x + s.w, p.y + s.h)]
-      Polygon {points = ps} -> [(p.x, p.y) | p <- ps]
-      Ellipse {center = c, rx = a, ry = b} -> [(c.x - a, c.y - b), (c.x + a, c.y + b)]
-      Wedge {center = c, r = a} -> [(c.x - a, c.y - a), (c.x + a, c.y + a)]
-      Path {start = p, segments = ss} -> (p.x, p.y) : concatMap ends ss
-      -- Text is measured when drawn; layouts leave room for it.
-      Text {at = p} -> [(p.x, p.y)]
+
+-- | The corners an item covers. Text counts only its anchor point here;
+-- the window measures it and makes room.
+extent :: Item -> [(Double, Double)]
+extent item = case item of
+  Rect {at = p, size = s} -> [(p.x, p.y), (p.x + s.w, p.y + s.h)]
+  Polygon {points = ps} -> [(p.x, p.y) | p <- ps]
+  Ellipse {center = c, rx = a, ry = b} -> [(c.x - a, c.y - b), (c.x + a, c.y + b)]
+  Wedge {center = c, r = a} -> [(c.x - a, c.y - a), (c.x + a, c.y + a)]
+  Path {start = p, segments = ss} -> (p.x, p.y) : concatMap ends ss
+  Text {at = p} -> [(p.x, p.y)]
+  where
     ends s = case s of
       LineTo p -> [(p.x, p.y)]
       CurveTo a b c -> [(a.x, a.y), (b.x, b.y), (c.x, c.y)]

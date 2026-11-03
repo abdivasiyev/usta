@@ -21,6 +21,7 @@ executable usta
     Usta.DB.Issue
     Usta.DB.Notification
     Usta.DB.PullRequest
+    Usta.DB.Repository
     Usta.DB.Schema
     Usta.DB.Schema.Account
     Usta.DB.Schema.Issue

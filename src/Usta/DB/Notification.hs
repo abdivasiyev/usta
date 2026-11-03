@@ -5,7 +5,7 @@
 module Usta.DB.Notification
   ( InboxItem (..)
   , saveNotifications
-  , markRead
+  , setUnread
   , setDone
   , inbox
   ) where
@@ -92,12 +92,13 @@ saveNotifications account notifications = do
         [NotificationDone Persist.=. False]
     pure ()
 
--- | Marks the thread read in the cache; telling the forge is sync's job.
-markRead :: AccountId -> ThreadId -> Result ()
-markRead account thread =
+-- | Marks the thread read or unread in the cache, as usta just told the
+-- forge; the next sync would say the same.
+setUnread :: AccountId -> ThreadId -> Bool -> Result ()
+setUnread account thread unread =
   Persist.updateWhere
     [NotificationAccountId Persist.==. account, NotificationThreadId Persist.==. thread]
-    [NotificationUnread Persist.=. False]
+    [NotificationUnread Persist.=. unread]
 
 -- | Marks the thread done in usta, or brings it back to the inbox. Usta
 -- keeps this itself: a forge only knows read and unread.

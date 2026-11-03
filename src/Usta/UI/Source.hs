@@ -14,6 +14,7 @@ module Usta.UI.Source
   , withDetails
   ) where
 
+import Control.Exception (try)
 import Data.Kind (Type)
 import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Text (Text)
@@ -35,6 +36,8 @@ import qualified Usta.DB.Issue as DB
 import qualified Usta.DB.Notification as DB
 import qualified Usta.DB.PullRequest as DB
 import qualified Usta.DB.Repository as DB
+import Usta.Forge (Failure (..))
+import qualified Usta.Forge as Forge
 import Usta.Mirrors (Mirrors (..))
 import qualified Usta.Mirrors as Mirrors
 import Usta.Sync (Status, Sync (..))
@@ -80,6 +83,9 @@ data Source = Source
     -- ^ Likewise for each account's sync state, starting with the last
     -- one each account reported before.
   , syncNow :: IO ()
+  , setDone :: Inbox.Notification -> Bool -> IO (Either Text ())
+    -- ^ "Mark as done" ('True', which also marks it read on the forge) or
+    -- "Move to inbox" ('False', which marks it unread again).
   , signIn :: Kind -> Host -> Token -> IO (Either Text ())
     -- ^ 'Left' says, for the user, why it did not work.
   , remove :: AccountId -> IO (Either Text ())
@@ -122,7 +128,7 @@ fromDatabase pool changes statuses sync = Source
             (Nothing, N.IssueSubject n) ->
               concat [issue.involvement | (key, issue) <- issues, key == i.accountId, issue.ref.repo == i.notification.repo, issue.ref.number == n]
             _ -> []
-      pure (mapMaybe (\i -> Inbox.fromNotification c i.forge i.notification i.pullRequest (involvementOf i)) items)
+      pure (mapMaybe (\i -> Inbox.fromNotification c i.forge i.notification i.pullRequest (involvementOf i) i.done) items)
   , pullRequests = do
       c <- clock
       kindOf <- kinds
@@ -143,6 +149,7 @@ fromDatabase pool changes statuses sync = Source
   , onChange = \act -> subscribe changes (act . (.resource))
   , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
   , syncNow = sync.syncNow
+  , setDone = \_ _ -> pure (Left unavailable)
   , signIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
@@ -174,6 +181,7 @@ samples = Source
   , onChange = const (pure ())
   , onStatus = const (pure ())
   , syncNow = pure ()
+  , setDone = \_ _ -> pure (Left unavailable)
   , signIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
@@ -190,12 +198,42 @@ samples = Source
 unavailable :: Text
 unavailable = "Signing in is not available here."
 
--- | Signs in and out through @accounts@.
-withAccounts :: Accounts -> Source -> Source
-withAccounts accounts source = source
+-- | Signs in and out through @accounts@, and tells their forges what the
+-- user did with a notification.
+withAccounts :: ConnectionPool -> Accounts -> Source -> Source
+withAccounts pool accounts source = source
   { signIn = \kind host token -> either (Left . describe) (const (Right ())) <$> accounts.signIn kind host token
   , remove = \key -> either (Left . describe) Right <$> accounts.remove key
+  , setDone = \n done -> do
+      items <- run pool DB.inbox
+      case [i | i <- items, matches n i] of
+        [] -> pure (Left "That notification is not in the cache any more.")
+        i : _ -> do
+          forge <- accounts.forgeOf i.accountId
+          let thread = i.notification.threadId
+              tell f = if done then f.markRead thread else f.markUnread thread
+          told <- maybe (pure (Left SignedOut)) (try . tell) forge
+          case told of
+            Left problem -> pure (Left (said problem))
+            Right () -> do
+              run pool $ do
+                DB.setUnread i.accountId thread (not done)
+                DB.setDone i.accountId thread done
+              pure (Right ())
   }
+  where
+    matches n i =
+      unparse i.notification.host == n.host
+        && unparse i.notification.repo == n.repo
+        && numberOf i.notification.subject == Just n.number
+    numberOf subject = case subject of
+      N.PullRequestSubject number -> Just (unparse number)
+      N.IssueSubject number -> Just (unparse number)
+      N.OtherSubject -> Nothing
+    said problem = case problem of
+      Offline -> "The forge could not be reached."
+      SignedOut -> "The forge refused the account's token; sign in again."
+      Refused message -> "The forge said: " <> message
 
 -- | The repositories with their mirrors' state, choosing a mirror through
 -- @accounts@, and word of each mirror's progress from @statuses@.

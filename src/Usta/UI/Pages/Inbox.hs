@@ -74,6 +74,8 @@ data Notification = Notification
   , reason :: Maybe Reason
     -- ^ 'Nothing' when the forge's reason has no badge, or it gives none.
   , unread :: Bool
+  , done :: Bool
+    -- ^ Marked done in usta.
   , age :: Text
   , branch :: Maybe (Text, Text)
     -- ^ Source and target branch, for pull requests.
@@ -347,8 +349,9 @@ changesCard cs = do
 -- about when that is synced, and how the item involves the user (for a
 -- forge that does not say why it notified). 'Nothing' for a release, commit or discussion,
 -- which the inbox does not show yet.
-fromNotification :: Clock -> Forge.Kind -> N.Notification -> Maybe P.PullRequest -> [Involvement] -> Maybe Notification
-fromNotification c forge n pr involvement = do
+-- | @done@ says it was marked done in usta.
+fromNotification :: Clock -> Forge.Kind -> N.Notification -> Maybe P.PullRequest -> [Involvement] -> Bool -> Maybe Notification
+fromNotification c forge n pr involvement done = do
   kind <- case n.subject of
     N.PullRequestSubject _
       | fmap (.state) pr == Just P.Merged -> Just MergedPullRequest
@@ -368,6 +371,7 @@ fromNotification c forge n pr involvement = do
     , title = n.title
     , reason = badge kind
     , unread = n.unread
+    , done = done
     , age = short c n.updatedAt
     , branch = fmap (\p -> (p.headBranch, p.baseBranch)) pr
     , opened = case pr of
@@ -426,11 +430,11 @@ sample =
   ]
   where
     pr f r num t why new' age br op ch rv cs =
-      Notification PullRequest f (hostOf f) r num t (Just why) new' age (Just br) op ch rv cs
+      Notification PullRequest f (hostOf f) r num t (Just why) new' False age (Just br) op ch rv cs
     merged f r num t age =
-      Notification MergedPullRequest f (hostOf f) r num t (Just WasMerged) False age Nothing ("merged " <> age <> " ago") Nothing Nothing []
+      Notification MergedPullRequest f (hostOf f) r num t (Just WasMerged) False False age Nothing ("merged " <> age <> " ago") Nothing Nothing []
     issue f r num t why new' age =
-      Notification Issue f (hostOf f) r num t (Just why) new' age Nothing ("opened " <> age <> " ago") Nothing Nothing []
+      Notification Issue f (hostOf f) r num t (Just why) new' False age Nothing ("opened " <> age <> " ago") Nothing Nothing []
     hostOf f = case f of
       Forge.GitHub -> "github.com"
       Forge.GitLab -> "gitlab.com"

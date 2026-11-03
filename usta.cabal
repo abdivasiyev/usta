@@ -44,6 +44,7 @@ executable usta
     Usta.Diagram.Entity
     Usta.Diagram.Flowchart
     Usta.Diagram.Gantt
+    Usta.Diagram.Journey
     Usta.Diagram.Layered
     Usta.Diagram.Pie
     Usta.Diagram.Quadrant
@@ -51,6 +52,7 @@ executable usta
     Usta.Diagram.Scene
     Usta.Diagram.Sequence
     Usta.Diagram.State
+    Usta.Diagram.Timeline
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api

@@ -4,6 +4,13 @@
 -- by the layered layout, with curved links clipped to each shape.
 module Usta.Diagram.Flowchart
   ( draw
+  , Sized (..)
+  , boxFor
+  , shape
+  , edgeOf
+  , penOf
+  , nodeFont
+  , labelFont
   ) where
 
 import Data.Kind (Type)

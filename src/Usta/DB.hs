@@ -48,11 +48,14 @@ databaseFile = do
   pure (folder </> "usta.db")
 
 -- | Opens the cache at @file@, brings its schema up to date, and closes it
--- when @action@ returns. Foreign keys are on and the file is in WAL mode
--- (persistent-sqlite's defaults), so sync can write while screens read.
+-- when @action@ returns. Foreign keys are on (persistent-sqlite's default).
+--
+-- One connection, so queries take turns: a save reads before it writes,
+-- and two such transactions on separate connections make SQLite answer
+-- "database is locked" at once rather than wait.
 withDatabase :: FilePath -> (ConnectionPool -> IO a) -> IO a
 withDatabase file action =
-  runNoLoggingT $ withSqlitePoolInfo (mkSqliteConnectionInfo (Text.pack file)) 4 $ \pool -> liftIO $ do
+  runNoLoggingT $ withSqlitePoolInfo (mkSqliteConnectionInfo (Text.pack file)) 1 $ \pool -> liftIO $ do
     _ <- runSqlPool (runMigrationQuiet migrateAll) pool
     action pool
 

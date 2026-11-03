@@ -10,6 +10,10 @@ module Usta.Forge.Forgejo.Api
   , CommitsQuery (..)
   , RefQuery (..)
   , RawText
+  , RawBytes
+  , TreeQuery (..)
+  , ApiTree (..)
+  , ApiTreeEntry (..)
   , DiffOf (..)
   , CommitDiffOf (..)
   , Entry (..)
@@ -48,6 +52,7 @@ module Usta.Forge.Forgejo.Api
   ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.!=), (.:), (.:?), (.=))
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Aeson.Types (Parser)
@@ -74,6 +79,7 @@ import Usta.Types.Parse (parseM, unparse)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Servant.NamedQueryParam (Named (..), RecordQueryParam, ToQuery)
 import Usta.Types.ThreadId (ThreadId)
+import qualified Usta.Types.Tree as Tree
 
 -- | Paths under @/api/v1@.
 type Routes :: Type -> Type
@@ -151,6 +157,13 @@ data Routes mode = Routes
   , compare
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "compare"
            :> Capture "basehead" BaseHead :> Get '[JSON] Comparison
+  , tree
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "git" :> "trees"
+           :> Capture "ref" Text :> RecordQueryParam TreeQuery :> Get '[JSON] ApiTree
+  , file
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "raw" :> CaptureAll "path" Text
+           :> RecordQueryParam RefQuery :> Get '[RawBytes] ByteString
+    -- ^ The path goes one folder per segment, so its slashes stay slashes.
   }
   deriving stock (Generic)
 
@@ -245,6 +258,48 @@ instance Accept RawText where
 
 instance MimeUnrender RawText Text where
   mimeUnrender _ = Right . decodeUtf8Lenient . BL.toStrict
+
+-- | A file as it is, whatever type the forge says it has.
+type RawBytes :: Type
+data RawBytes
+
+instance Accept RawBytes where
+  contentTypes _ = "*/*" :| []
+
+instance MimeUnrender RawBytes ByteString where
+  mimeUnrender _ = Right . BL.toStrict
+
+-- | One page of a tree, with every folder below it.
+type TreeQuery :: Type
+data TreeQuery = TreeQuery
+  { recursive :: Bool
+  , page :: Maybe Int
+  , perPage :: Named "per_page" (Maybe Int)
+  }
+  deriving stock (Generic)
+
+instance ToQuery TreeQuery
+
+type ApiTree :: Type
+data ApiTree = ApiTree
+  { entries :: [ApiTreeEntry]
+  , totalCount :: Int
+  }
+
+instance FromJSON ApiTree where
+  parseJSON = withObject "Tree" $ \o -> ApiTree <$> o .:? "tree" .!= [] <*> o .:? "total_count" .!= 0
+
+type ApiTreeEntry :: Type
+newtype ApiTreeEntry = ApiTreeEntry {entry :: Tree.Entry}
+
+instance FromJSON ApiTreeEntry where
+  parseJSON = withObject "TreeEntry" $ \o -> do
+    path <- o .: "path"
+    kind <- o .: "type" :: Parser Text
+    size <- o .:? "size"
+    pure $ ApiTreeEntry $ if kind == "blob"
+      then Tree.Entry {path = path, kind = Tree.File, size = size}
+      else Tree.Entry {path = path, kind = Tree.Folder, size = Nothing}
 
 -- | The path segment "3.diff": pull request 3 as a diff.
 type DiffOf :: Type

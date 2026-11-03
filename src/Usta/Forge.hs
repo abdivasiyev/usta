@@ -13,7 +13,7 @@ import Data.Text (Text)
 
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
-import Usta.Types.Discussion (Comment, Discussion, Merge, Verdict)
+import Usta.Types.Discussion (Comment, Discussion, Merge, NewIssue, NewPull, Verdict)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Notification (Notification)
@@ -57,6 +57,11 @@ data Forge = Forge
     -- ^ Merges a pull request; 'True' deletes its branch after.
   , review :: RepoName -> Number -> Verdict -> Text -> IO ()
     -- ^ Submits a review with its comment.
+  , createIssue :: RepoName -> NewIssue -> IO Number
+  , createPull :: RepoName -> NewPull -> IO Number
+  , branches :: RepoName -> IO [Text]
+  , labels :: RepoName -> IO [Text]
+    -- ^ The names of the labels the repository defines.
   }
 
 -- | A repository's clone URLs. The forge gives them because only it knows

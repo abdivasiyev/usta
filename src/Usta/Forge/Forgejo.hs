@@ -13,24 +13,28 @@ module Usta.Forge.Forgejo
   ) where
 
 import Control.Exception (throwIO)
+import Control.Monad (unless)
 import Data.ByteString (ByteString)
+import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Kind (Type)
 import Data.List (nub, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Ord (Down (..))
+import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time (UTCTime, addUTCTime, getCurrentTime, nominalDay)
 import qualified Network.HTTP.Client as HTTP
 import Servant.Client (BaseUrl, ClientM)
+import Data.Traversable (for)
 import Text.Read (readMaybe)
 
 import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import Usta.Types.Diff (parseDiff)
-import Usta.Types.Discussion (Discussion (..))
+import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
@@ -79,6 +83,23 @@ forgejo manager base host token = do
         () <$ run client (Api.api.merge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete})
     , review = \repo n verdict text ->
         () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview {verdict = verdict, body = text})
+    , createIssue = \repo new -> do
+        ids <- labelIds client repo new.labels
+        created <- run client $ Api.api.createIssue (owner repo) (shortName repo) Api.CreateIssue
+          {title = new.title, body = new.body, labels = ids, assignees = new.assignees}
+        pure created.number
+    , createPull = \repo new -> do
+        ids <- labelIds client repo new.labels
+        -- Forgejo takes a title starting with "WIP:" for a draft.
+        let title = if new.draft then "WIP: " <> new.title else new.title
+        created <- run client $ Api.api.createPull (owner repo) (shortName repo) Api.CreatePull
+          {title = title, body = new.body, head = new.from, base = new.into, labels = ids}
+        unless (null new.reviewers) $
+          () <$ run client (Api.api.requestReviewers (owner repo) (shortName repo) created.number (Api.Reviewers new.reviewers))
+        pure created.number
+    , branches = \repo -> map (.name) <$> run client
+        (everyPage (\page limit -> Api.api.branches (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+    , labels = \repo -> map (.name) <$> repoLabels client repo
     , cloneUrls = \repo -> do
         r <- run client (Api.api.repository (owner repo) (shortName repo))
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}
@@ -109,6 +130,19 @@ authorization :: Token -> ByteString
 authorization token = "token " <> encodeUtf8 (unparse token)
 
 -- | Every page of a list, 50 at a time.
+repoLabels :: Client -> RepoName -> IO [Api.RepoLabel]
+repoLabels client repo = run client
+  (everyPage (\page limit -> Api.api.labels (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+
+-- | The ids of the labels named; a name the repository lacks is refused.
+labelIds :: Client -> RepoName -> [Text] -> IO [Int64]
+labelIds _ _ [] = pure []
+labelIds client repo names = do
+  known <- repoLabels client repo
+  for names $ \name -> case [l.id | l <- known, l.name == name] of
+    found : _ -> pure found
+    [] -> throwIO (Refused ("The repository has no label " <> name <> "."))
+
 everyPage :: (Maybe Int -> Maybe Int -> ClientM [a]) -> ClientM [a]
 everyPage fetch = go 1
   where

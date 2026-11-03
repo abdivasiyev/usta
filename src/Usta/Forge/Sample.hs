@@ -109,6 +109,10 @@ new now account = do
         , F.setClosed = \_ _ _ -> refuse
         , F.merge = \_ _ _ _ -> refuse
         , F.review = \_ _ _ _ -> refuse
+        , F.createIssue = \_ _ -> refuse
+        , F.createPull = \_ _ -> refuse
+        , F.branches = \_ -> pure ["master"]
+        , F.labels = \_ -> pure []
         , F.markUnread = \thread -> do
             failIfTold ref
             atomicModifyIORef' ref $ \s ->

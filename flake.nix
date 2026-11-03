@@ -33,11 +33,15 @@
           directory
           esqueleto
           filepath
+          gi-cairo
+          gi-cairo-connector
+          gi-cairo-render
           gi-gdk4
           gi-gio
           gi-glib
           gi-gtk4
           gi-pango
+          gi-poppler
           haskell-gi-base
           http-api-data
           http-client

@@ -66,6 +66,7 @@ import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
 import qualified Usta.UI.Source as Source
 import Usta.Details (From (..))
+import qualified Usta.Types.Diff as Changes
 import qualified Usta.Types.Discussion as D
 import Usta.Preferences (Preferences (..), Theme (..))
 import Usta.Types.Discussion (Merge (..))
@@ -266,7 +267,27 @@ buildAt start given app = do
             either (Settings.notice anchor (if done then "Not marked done" else "Not moved to the inbox"))
               (const (join (readIORef inboxRef))) result
             pure False
-      inboxActions = Inbox.Actions {open = openNotification, setDone = setDone}
+      -- The preview's description, latest comments and files, from the
+      -- forge; a comment is new when it came after the user's own last one.
+      previewDetails n = do
+        discussed <- source.discussion n.host n.repo n.number
+        changed <- if n.kind == Inbox.Issue then pure (Right []) else fmap (map change . snd) <$> source.pullFiles n.host n.repo n.number
+        me <- maybe "" (.login) . find (\a -> a.host == n.host) <$> source.accounts
+        c <- clock
+        pure $ do
+          d <- discussed
+          let everyone = d.opening : d.comments
+              mineAt = [x.createdAt | x <- everyone, unparse x.author == me]
+              fresh x = n.unread && unparse x.author /= me && all (< x.createdAt) mineAt
+              toSaid x = Inbox.Said {author = unparse x.author, when' = ago c x.createdAt, body = x.body, new = fresh x}
+          pure Inbox.Details
+            { description = (toSaid d.opening) {Inbox.new = False}
+            , latest = map toSaid (reverse (take 2 (reverse d.comments)))
+            , comments = length d.comments
+            , files = either (const []) id changed
+            }
+      change f = Inbox.Change f.path (length [() | Changes.Insertion {} <- f.lines]) (length [() | Changes.Deletion {} <- f.lines])
+      inboxActions = Inbox.Actions {open = openNotification, setDone = setDone, details = previewDetails}
   initial <- source.inbox
   inboxPages <- forM inboxViews $ \(page, view) -> (,) page <$> Inbox.new view inboxActions initial
   -- Each reload tells the desktop about what is new since the last one,

@@ -23,6 +23,7 @@ import Usta.DB.Schema.Account (AccountId)
 import Usta.Forge (Forge)
 import Usta.Forge.Http (apiUrl)
 import qualified Usta.Forge.Sample as Sample
+import qualified Usta.Git.Credential as Credential
 import qualified Usta.Keyring as Keyring
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
@@ -35,11 +36,13 @@ import qualified Usta.UI.Window as Window
 
 -- | @usta --gallery@ opens the component gallery instead of the app;
 -- @usta --welcome@ and @usta --first-sync@ preview the first-run states;
--- @usta --sample@ runs the whole app against sample forges.
+-- @usta --sample@ runs the whole app against sample forges;
+-- @usta git-credential get@ is git's credential helper for mirrors.
 main :: IO ()
 main = getArgs >>= choose
   where
     choose args
+      | ["git-credential", action] <- args = Credential.helper Keyring.system action
       | has "--gallery" = runApp (void . Gallery.build)
       | has "--welcome" = runApp (void . Window.buildAt Window.FirstRun Source.samples)
       | has "--first-sync" = runApp (void . Window.buildAt Window.FirstSync Source.samples)

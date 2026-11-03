@@ -121,6 +121,7 @@ executable usta
     directory,
     esqueleto,
     filepath,
+    gi-gio,
     gi-glib,
     gi-gtk4,
     gi-pango,

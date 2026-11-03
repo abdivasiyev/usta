@@ -11,6 +11,7 @@ module Usta.UI.Source
   , samples
   , withAccounts
   , withMirrors
+  , withDetails
   ) where
 
 import Data.Kind (Type)
@@ -26,6 +27,9 @@ import Usta.Bus (Bus, Change (..), subscribe)
 import Usta.DB (run)
 import Usta.DB.Account (listAccounts)
 import Usta.DB.Mirror (choiceFor)
+import Usta.Details (Details, From)
+-- Qualified, since Source has fields of the same names.
+import qualified Usta.Details as Details
 import Usta.DB.Schema.Account (AccountId)
 import qualified Usta.DB.Issue as DB
 import qualified Usta.DB.Notification as DB
@@ -36,11 +40,18 @@ import qualified Usta.Mirrors as Mirrors
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
+import Usta.Types.Commit (Commit, Sha)
+import Usta.Types.Diff (FileDiff)
+import Usta.Types.Number (Number)
+import Usta.Types.RepoName (RepoName)
 import Usta.Types.Host (Host)
 import Usta.Types.Mirror (Choice (..))
 -- For the repositories' fields.
 import qualified Usta.Types.Repository as R
-import Usta.Types.Parse (unparse)
+import Usta.Types.Parse (parse, unparse)
+-- For the pull requests' fields.
+import qualified Usta.Types.PullRequest as P
+import Usta.Types.Ref (Ref (..))
 import Usta.Types.Resource (Resource)
 import Usta.Types.Token (Token)
 import Usta.UI.Format (ago, clock)
@@ -77,6 +88,13 @@ data Source = Source
   , mirrorOrigins :: Text -> Text -> IO (Either Text Repositories.Origins)
     -- ^ Where a mirror of the repository on a host, by name, would clone
     -- from; for the mirror dialog.
+  , pullFiles :: Text -> Text -> Int -> IO (Either Text (From, [FileDiff]))
+    -- ^ A pull request's changes, by host, repository and number.
+  , pullCommits :: Text -> Text -> Int -> IO (Either Text (From, [Commit]))
+  , commitDiff :: Text -> Text -> Sha -> IO (Either Text (From, [FileDiff]))
+  , recentCommits :: Text -> Text -> Text -> IO (Either Text (From, [Commit]))
+    -- ^ A branch's last commits, by host, repository and branch.
+  , readme :: Text -> Text -> Text -> IO (Either Text (From, Maybe (Text, Text)))
   }
 
 -- | A signed-in account, as the window names it.
@@ -121,6 +139,11 @@ fromDatabase pool changes statuses sync = Source
   , mirror = \_ _ _ -> pure (Left unavailable)
   , onMirrorStatus = const (pure ())
   , mirrorOrigins = \_ _ -> pure (Left unavailable)
+  , pullFiles = \_ _ _ -> pure (Left unavailable)
+  , pullCommits = \_ _ _ -> pure (Left unavailable)
+  , commitDiff = \_ _ _ -> pure (Left unavailable)
+  , recentCommits = \_ _ _ -> pure (Left unavailable)
+  , readme = \_ _ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -147,6 +170,11 @@ samples = Source
   , mirror = \_ _ _ -> pure (Left unavailable)
   , onMirrorStatus = const (pure ())
   , mirrorOrigins = \_ _ -> pure (Left unavailable)
+  , pullFiles = \_ _ _ -> pure (Left unavailable)
+  , pullCommits = \_ _ _ -> pure (Left unavailable)
+  , commitDiff = \_ _ _ -> pure (Left unavailable)
+  , recentCommits = \_ _ _ -> pure (Left unavailable)
+  , readme = \_ _ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -221,3 +249,31 @@ withMirrors pool accounts mirrors statuses source = source
       (Just (Mirrored _ _), Just (Mirrors.Failed message)) ->
         view {Repositories.mirror = (Danger, "Failed"), Repositories.mirrorDetail = Just message, Repositories.canMirror = True}
       (Just (Mirrored _ _), Nothing) -> view {Repositories.mirror = (Neutral, "Waiting to fetch")}
+
+-- | Pull requests' and branches' contents through @details@, each found by
+-- the account that has its repository in the cache.
+withDetails :: ConnectionPool -> Details -> Source -> Source
+withDetails pool details source = source
+  { pullFiles = \host repo n -> pullOf host repo n details.pullFiles
+  , pullCommits = \host repo n -> pullOf host repo n details.pullCommits
+  , commitDiff = \host repo sha -> repoOf host repo (\key name -> details.commitDiff key name sha)
+  , recentCommits = \host repo branch -> repoOf host repo (\key name -> details.recentCommits key name branch)
+  , readme = \host repo branch -> repoOf host repo (\key name -> details.readme key name branch)
+  }
+  where
+    pullOf :: Text -> Text -> Int -> (AccountId -> RepoName -> Number -> IO (Either Text a)) -> IO (Either Text a)
+    pullOf host repo n ask = case parse n of
+      Left _ -> pure (Left gone)
+      Right number -> repoOf host repo (\key name -> ask key name number)
+    -- The repository may be the user's own or one they only have pull
+    -- requests in.
+    repoOf :: Text -> Text -> (AccountId -> RepoName -> IO (Either Text a)) -> IO (Either Text a)
+    repoOf host repo ask = do
+      repos <- run pool DB.repositories
+      prs <- run pool DB.pullRequests
+      let keys = [key | (key, r) <- repos, unparse r.host == host, unparse r.name == repo]
+            <> [key | (key, pr) <- prs, unparse pr.ref.host == host, unparse pr.ref.repo == repo]
+      case (keys, parse repo) of
+        (key : _, Right name) -> ask key name
+        _ -> pure (Left gone)
+    gone = "That repository is not in the cache any more."

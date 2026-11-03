@@ -21,6 +21,7 @@ module Usta.Git
   , resolve
   , diff
   , history
+  , commitDiff
   , recent
   , readme
   ) where
@@ -108,6 +109,13 @@ resolve path ref = do
 diff :: FilePath -> Sha -> Sha -> IO [FileDiff]
 diff path base tip = do
   out <- git ["-C", path, "diff", "--no-ext-diff", "--find-renames", "--end-of-options", revs base <> "..." <> revs tip]
+  either (throwIO . GitError) pure (parseDiff out)
+
+-- | What one commit changes: against its first parent for a merge, and
+-- everything for the first commit.
+commitDiff :: FilePath -> Sha -> IO [FileDiff]
+commitDiff path sha = do
+  out <- git ["-C", path, "diff-tree", "-p", "--no-commit-id", "--root", "-M", "-m", "--first-parent", "--end-of-options", revs sha]
   either (throwIO . GitError) pure (parseDiff out)
 
 -- | The commits @tip@ has that @base@ does not, oldest first.

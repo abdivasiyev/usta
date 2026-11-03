@@ -34,6 +34,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.CodeView as CodeView
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.ImageView as ImageView
+import qualified Usta.UI.Components.PdfView as PdfView
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Highlight as Highlight
 import Usta.Types.Tree (Entry (..))
@@ -241,6 +242,7 @@ fileView place e bytes = do
       case image of
         Just t -> ImageView.new t
         Nothing -> note "This image is in a format usta cannot show."
+    Pdf -> PdfView.new e.path bytes >>= either note pure
     TooLarge -> note "Too large to show here; open it in the browser."
     _ -> note "Binary file not shown."
   #append card body

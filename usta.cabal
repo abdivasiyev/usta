@@ -44,6 +44,8 @@ executable usta
     Usta.Diagram.Entity
     Usta.Diagram.Flowchart
     Usta.Diagram.Layered
+    Usta.Diagram.Pie
+    Usta.Diagram.Quadrant
     Usta.Diagram.Route
     Usta.Diagram.Scene
     Usta.Diagram.Sequence

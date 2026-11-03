@@ -270,7 +270,8 @@ fileView follow place e bytes = do
     Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
   #append header browser
   #append box header
-  card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "file-card"]]
+  -- Clipped, so the file's own background keeps the card's round corners.
+  card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #overflow := Gtk.OverflowHidden, #cssClasses := ["u-card", "file-card"]]
   body <- case content of
     Text text | markdown -> do
       stack <- GI.new Gtk.Stack []
@@ -356,7 +357,6 @@ css = mconcat
   , "box.u-files-tab label.language {"
   , "  background: var(--accent-bg); color: var(--accent-soft); padding: 1px 8px; border-radius: 10px; font-size: 12px;"
   , "}"
-  , "box.u-files-tab box.file-card { overflow: hidden; }"
   , "box.u-files-tab label.note { padding: 24px; }"
   , "box.u-files-tab .rendered { padding: 20px 24px; }"
   ]

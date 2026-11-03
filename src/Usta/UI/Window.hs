@@ -17,7 +17,9 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
+import System.Directory (getHomeDirectory)
 import qualified Data.Text as T
+import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
@@ -169,8 +171,6 @@ buildAt start source app = do
       addAccountThen after = Gtk.toWidget screens >>= \anchor ->
         AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn after
       openAddAccount = addAccountThen (pure ())
-      -- Accounts and preferences are real; the mirror and cache buttons
-      -- are not wired yet.
       openSettings = do
         known <- readIORef states
         accounts <- source.accounts
@@ -188,8 +188,16 @@ buildAt start source app = do
                     source.signIn openSettings
               }
         chosen <- source.preferences
+        folder <- source.mirrorsFolder
+        home <- getHomeDirectory
         let model = (Settings.sample shortcuts)
               { Settings.accounts = map row accounts
+              , Settings.mirrorPath = maybe (T.pack folder) ("~" <>) (T.stripPrefix (T.pack home) (T.pack folder))
+              , Settings.onShowMirrors = do
+                  launcher <- Gio.fileNewForPath folder >>= Gtk.fileLauncherNew . Just
+                  Gtk.fileLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+              , Settings.onPrune = source.pruneMirrors
+              , Settings.onClearCache = source.clearCache
               , Settings.preferences = chosen
               , Settings.onPreferences = \p -> do
                   Style.setTheme p.theme

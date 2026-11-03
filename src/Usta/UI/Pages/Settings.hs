@@ -13,6 +13,7 @@ module Usta.UI.Pages.Settings
   , css
   ) where
 
+import Control.Concurrent (forkIO)
 import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -20,6 +21,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.IORef (newIORef, readIORef, writeIORef)
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Badge as Badge
@@ -55,6 +57,10 @@ data Model = Model
     -- ^ Runs with every change of the sync interval, theme or
     -- notifications, which the caller saves and applies.
   , mirrorPath :: Text
+  , onShowMirrors :: IO ()
+  , onPrune :: IO (Either Text Int)
+  , onClearCache :: IO (Either Text ())
+    -- ^ Both run off the main thread, after the user confirmed.
   , shortcuts :: [(Text, Text)]
     -- ^ Keys and what they do, as the shortcut strip shows them.
   }
@@ -170,11 +176,23 @@ section s m change onAddAccount = do
             when (i < length intervals) $ change (\p -> p {interval = intervals !! i})
           setting "Check for updates" [plain "How often usta asks your forges for new activity"]
             =<< sequence [Gtk.toWidget interval]
-      , setting "Local git mirrors"
-          [plain "Diffs are computed from bare clones in ", code m.mirrorPath]
-          =<< sequence [button "Show in folder" Button.Secondary, button "Prune unused" Button.Secondary]
-      , setting "Offline cache" [plain "Pull requests, issues and comments stored in a local database"]
-          =<< sequence [button "Clear cache" Button.Danger]
+      , do
+          folder <- button "Show in folder" Button.Secondary (const m.onShowMirrors)
+          prune <- button "Prune unused" Button.Secondary $ \anchor ->
+            confirm anchor "Prune unused mirrors?"
+              "Deletes the clones of repositories that no longer have a mirror, such as a removed account's."
+              "Prune" $ offThread m.onPrune $ \result -> case result of
+                Right 0 -> notice anchor "Nothing to prune" "Every clone belongs to a mirror you chose."
+                Right n -> notice anchor "Mirrors pruned" (T.pack (show n) <> (if n == 1 then " unused clone was" else " unused clones were") <> " deleted.")
+                Left text -> notice anchor "The mirrors were not pruned" text
+          setting "Local git mirrors" [plain "Diffs are computed from bare clones in ", code m.mirrorPath] [folder, prune]
+      , do
+          clear <- button "Clear cache" Button.Danger $ \anchor ->
+            confirm anchor "Clear the cache?"
+              "Everything synced is fetched again from your forges. Notifications marked done come back to the inbox."
+              "Clear cache" $ offThread m.onClearCache $
+                either (notice anchor "The cache was not cleared") (const (pure ()))
+          setting "Offline cache" [plain "Pull requests, issues and comments stored in a local database"] [clear]
       ]
     Notifications -> sequence
       [ setting "Desktop notifications" [plain "Review requests, mentions and failed checks"]
@@ -337,9 +355,19 @@ modal anchor title text = do
   GI.set dialog [#child := body]
   pure (dialog, footer)
 
-button :: Text -> Button.Variant -> IO Gtk.Widget
-button text variant =
-  Button.new Button.defaults { Button.label = Just text, Button.variant = variant } >>= Gtk.toWidget
+-- | @onClick@ gets the button, for a dialog over its window.
+button :: Text -> Button.Variant -> (Gtk.Widget -> IO ()) -> IO Gtk.Widget
+button text variant onClick = do
+  b <- Button.new Button.defaults { Button.label = Just text, Button.variant = variant }
+  widget <- Gtk.toWidget b
+  void $ GI.on b #clicked (onClick widget)
+  pure widget
+
+-- | Runs @act@ off the main thread, then @done@ with its result on it.
+offThread :: IO a -> (a -> IO ()) -> IO ()
+offThread act done = void $ forkIO $ do
+  result <- act
+  void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (done result >> pure False)
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
@@ -353,6 +381,9 @@ sample keys = Model
   , preferences = Preferences.defaults
   , onPreferences = const (pure ())
   , mirrorPath = "~/Library/Caches/usta/mirrors"
+  , onShowMirrors = pure ()
+  , onPrune = pure (Right 0)
+  , onClearCache = pure (Right ())
   , shortcuts = keys
   }
   where

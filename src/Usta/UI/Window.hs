@@ -16,6 +16,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Avatar as Avatar
@@ -52,6 +53,8 @@ import qualified Usta.UI.Pages.Settings as Settings
 import qualified Usta.UI.Pages.Welcome as Welcome
 import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Sidebar as Sidebar
+import Usta.UI.Source (Source (..))
+import qualified Usta.Types.Resource as Resource
 import Usta.UI.Style (Tone (..))
 import qualified Usta.UI.Style as Style
 
@@ -67,11 +70,13 @@ data Start
     -- ^ Accounts connected, the cache still empty.
   deriving (Eq)
 
-build :: Gtk.Application -> IO Gtk.ApplicationWindow
+build :: Source -> Gtk.Application -> IO Gtk.ApplicationWindow
 build = buildAt Ready
 
-buildAt :: Start -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildAt start app = do
+-- | The pages show @source@'s lists, reload the ones that change, and
+-- reload all of them each minute so "5 min ago" stays true.
+buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
+buildAt start source app = do
   -- Two screens: "main" (sidebar and pages) and "detail" (a full-width
   -- screen such as one pull request or the new pull request form).
   screens <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
@@ -99,28 +104,37 @@ buildAt start app = do
         | otherwise = SyncStatus.Synced "1 min ago"
   header <- headerBar Platform.current syncState openSettings (join (readIORef paletteOpener))
 
+  let openNotification n
+        | n.kind == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
+        | otherwise = openPullRequest "Inbox" (notificationSummary n)
+  inboxPage <- source.inbox >>= Inbox.new openNotification
+  pullRequestPage <- source.pullRequests >>= PullRequests.new openNewPullRequest
+    (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))
+  issuePage <- source.issues >>= Issues.new openNewIssue (openIssue "Issues" . issueDetail)
+  -- The forms open with sample fields until they take the repository.
+  repositoryPage <- source.repositories >>= Repositories.new (const openNewIssue) (const openNewPullRequest)
+  let reload resource = case resource of
+        Resource.Notifications -> source.inbox >>= inboxPage.update
+        -- Inbox rows show their pull request's checks and review.
+        Resource.PullRequests -> do
+          source.inbox >>= inboxPage.update
+          source.pullRequests >>= pullRequestPage.update
+        Resource.Issues -> source.issues >>= issuePage.update
+        Resource.Repositories -> source.repositories >>= repositoryPage.update
+  source.onChange reload
+  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $
+    mapM_ reload [minBound .. maxBound] >> pure True
+
   pages <- GI.new Gtk.Stack [#hexpand := True, #vexpand := True]
   forM_ [minBound .. maxBound] $ \page -> do
     content <- case page of
       Sidebar.Inbox | start == FirstSync ->
         Inbox.syncing "First sync: fetching notifications from 2 forges. Items appear as they arrive."
           >>= Gtk.toWidget
-      Sidebar.Inbox ->
-        let open n
-              | n.kind == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
-              | otherwise = openPullRequest "Inbox" (notificationSummary n)
-        in Inbox.new open Inbox.sample >>= Gtk.toWidget . (.widget)
-      Sidebar.PullRequests ->
-        PullRequests.new openNewPullRequest
-          (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))
-          PullRequests.sample
-          >>= Gtk.toWidget . (.widget)
-      Sidebar.Issues ->
-        Issues.new openNewIssue (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget . (.widget)
-      -- The forms open with sample fields until they take the repository.
-      Sidebar.Repositories ->
-        Repositories.new (const openNewIssue) (const openNewPullRequest) Repositories.sample
-          >>= Gtk.toWidget . (.widget)
+      Sidebar.Inbox -> Gtk.toWidget inboxPage.widget
+      Sidebar.PullRequests -> Gtk.toWidget pullRequestPage.widget
+      Sidebar.Issues -> Gtk.toWidget issuePage.widget
+      Sidebar.Repositories -> Gtk.toWidget repositoryPage.widget
       -- The other pages get their screens next; until then a placeholder.
       _ -> GI.new Gtk.Label [#label := Sidebar.pageTitle page, #cssClasses := ["muted"]]
              >>= Gtk.toWidget
@@ -170,7 +184,7 @@ buildAt start app = do
             keys = Platform.shortcut Platform.current
             command title detail action = CommandPalette.Item CommandPalette.Command title detail action
             commands =
-              [ command "Sync now" (keys "R") (pure ())
+              [ command "Sync now" (keys "R") source.syncNow
               , command "New pull request" (keys "Shift P") openNewPullRequest
               , command "New issue" (keys "Shift I") openNewIssue
               , command "Add forge account" "" openAddAccount
@@ -178,9 +192,9 @@ buildAt start app = do
               , command themeTitle "" $
                   forM_ settings $ \s -> GI.set s [#gtkInterfaceColorScheme := nextScheme]
               ]
-            pullRequests = map (paletteItem openPullRequest) PullRequests.sample
-            issues = map (issueItem openIssue) Issues.sample
-            repositories = map (repositoryItem (showPage Sidebar.Repositories)) Repositories.sample
+        pullRequests <- map (paletteItem openPullRequest) <$> source.pullRequests
+        issues <- map (issueItem openIssue) <$> source.issues
+        repositories <- map (repositoryItem (showPage Sidebar.Repositories)) <$> source.repositories
         pure CommandPalette.Model
           { CommandPalette.recent = take 1 pullRequests <> take 1 issues <> take 1 (drop 1 repositories)
           , CommandPalette.items = pullRequests <> issues <> repositories <> commands

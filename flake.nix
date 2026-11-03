@@ -52,6 +52,8 @@
           time
           typed-process
         ];
+        # The keyring: Keychain Services ship with macOS's SDK.
+        executablePkgconfigDepends = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [pkgs.libsecret];
         license = pkgs.lib.licenses.asl20;
         mainProgram = "usta";
       }).overrideAttrs (old: {

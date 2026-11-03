@@ -36,6 +36,7 @@ executable usta
     Usta.DB.SyncCursor
     Usta.Forge
     Usta.Forge.Sample
+    Usta.Keyring
     Usta.Sync
     Usta.Types.Account
     Usta.Types.Count
@@ -130,3 +131,11 @@ executable usta
     NoFieldSelectors
     OverloadedRecordDot
   ghc-options: -Wall -threaded
+  c-sources: cbits/keyring.c
+
+  if os(darwin)
+    frameworks:
+      CoreFoundation
+      Security
+  else
+    pkgconfig-depends: libsecret-1

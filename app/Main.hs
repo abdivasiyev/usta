@@ -10,16 +10,20 @@ import Data.GI.Base
 import Data.Time (getCurrentTime)
 import Database.Persist.Sql (ConnectionPool)
 import GI.Gtk.Objects.Application (Application (..))
+import Network.HTTP.Client.TLS (newTlsManager)
 import System.Directory (getTemporaryDirectory, removePathForcibly)
 import System.Environment (getArgs)
 import System.FilePath ((</>))
 
+import qualified Usta.Accounts as Accounts
 import Usta.Bus (newBus)
 import Usta.DB (databaseFile, run, withDatabase)
 import Usta.DB.Account (listAccounts, saveAccount)
 import Usta.DB.Schema.Account (AccountId)
 import Usta.Forge (Forge)
+import Usta.Forge.Http (apiUrl)
 import qualified Usta.Forge.Sample as Sample
+import qualified Usta.Keyring as Keyring
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind (..))
@@ -51,15 +55,27 @@ runApp open = do
                          ]
   void $ #run app Nothing
 
--- | The real cache. There is no forge adapter yet, so nothing syncs: the
--- pages show what the cache already has.
+-- | The real cache, with every saved account syncing on its keyring
+-- token. Only Forgejo accounts sync until the other forges get clients.
 cache :: IO ()
 cache = do
   file <- databaseFile
+  manager <- newTlsManager
   withDatabase file $ \pool -> do
-    accounts <- run pool listAccounts
-    source <- fromPool pool []
-    let start = if null accounts then Window.FirstRun else Window.Ready
+    saved <- run pool listAccounts
+    changes <- newBus
+    statuses <- newBus
+    sync <- Sync.start Sync.Settings {pool = pool, changes = changes, statuses = statuses, every = 60} []
+    _ <- Accounts.connect Accounts.Settings
+      { manager = manager
+      , keyring = Keyring.system
+      , pool = pool
+      , changes = changes
+      , sync = sync
+      , forgejoApi = \host -> apiUrl host "/api/v1"
+      }
+    let source = Source.fromDatabase pool changes statuses sync
+        start = if null saved then Window.FirstRun else Window.Ready
     runApp (void . Window.buildAt start source)
 
 -- | Two sample accounts in a fresh cache file, synced each minute. Every

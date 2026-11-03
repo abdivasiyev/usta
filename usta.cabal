@@ -16,6 +16,7 @@ executable usta
     src
 
   other-modules:
+    Usta.Accounts
     Usta.Bus
     Usta.DB
     Usta.DB.Account

@@ -13,7 +13,7 @@ module Usta.UI.Pages.NewPullRequest
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -25,8 +25,10 @@ import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Button as Button
+import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Segmented as Segmented
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.Types.Discussion (NewPull (..))
 import Usta.Types.Parse (parse)
 
@@ -51,6 +53,9 @@ data Model = Model
 type Actions :: Type
 data Actions = Actions
   { branchesOf :: Place -> IO (Either Text [Text])
+  , compareOf :: Place -> Text -> Text -> IO (Either Text ([(Text, Text)], [Text]))
+    -- ^ Into and from: the commits (short hash and subject) and the
+    -- paths the pull request would have.
   , create :: Place -> NewPull -> IO (Either Text Int)
   , opened :: Place -> Int -> Text -> (Text, Text) -> IO ()
     -- ^ With the new pull request's number, title and branches (head
@@ -110,6 +115,8 @@ new actions m = do
   Gtk.toWidget titleEntry >>= field "Title" >>= #append main
   (editorBox, buffer) <- editor ""
   #append main editorBox
+  contentsSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  #append main contentsSlot
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
                                       , #hexpand := True
                                       , #hscrollbarPolicy := Gtk.PolicyTypeNever
@@ -208,14 +215,66 @@ new actions m = do
                     pure False
           (_, _, _, Left _) -> GI.set problem [#label := "A reviewer is not a user name."]
           _ -> GI.set problem [#label := "Choose the repository and both branches."]
+  -- Each change of branch asks again; only the latest answer is shown.
+  asked <- newIORef (0 :: Int)
+  let preview = do
+        index <- fromIntegral <$> Gtk.dropDownGetSelected repo
+        base <- selected into
+        tip <- selected from
+        turn <- (+ 1) <$> readIORef asked
+        writeIORef asked turn
+        let replace widget = do
+              old <- Gtk.widgetGetFirstChild contentsSlot
+              forM_ old (Gtk.boxRemove contentsSlot)
+              forM_ widget (#append contentsSlot)
+        case (placeAt index, base, tip) of
+          (Just place, Just b, Just t) | b /= t -> do
+            Skeleton.block 88 >>= replace . Just
+            void $ forkIO $ do
+              found <- actions.compareOf place b t
+              void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                latest <- readIORef asked
+                when (latest == turn) $ case found of
+                  Right (commits, paths) -> contents b t commits paths >>= Gtk.toWidget >>= replace . Just
+                  Left text -> label text ["small", "muted"] >>= Gtk.toWidget >>= replace . Just
+                pure False
+          _ -> replace Nothing
   Gtk.dropDownSetSelected repo (fromIntegral m.chosen)
   void $ GI.on repo (GI.PropertyNotify #selected) (const load)
+  forM_ [into, from] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const preview)
   load
   void $ GI.on createButton #clicked (submit False)
   void $ GI.on draftButton #clicked (submit True)
   Gtk.toWidget page
   where
     names' = filter (not . T.null) . map T.strip . T.splitOn ","
+
+-- | What the pull request would contain: its commits and changed paths.
+contents :: Text -> Text -> [(Text, Text)] -> [Text] -> IO Gtk.Box
+contents into from commits paths = do
+  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+  if null commits
+    then label (from <> " has no commits that " <> into <> " lacks: there is nothing to merge.") ["small", "muted"]
+           >>= #append box
+    else do
+      Card.sectionTitle (count (length commits) "commit" <> " · " <> count (length paths) "file" <> " changed")
+        >>= #append box
+      card <- Card.new
+      forM_ commits $ \(short, subject) -> do
+        row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["content-row"]]
+        label short ["mono", "hash"] >>= #append row
+        label subject [] >>= #append row
+        #append card row
+      unless (null paths) $ do
+        files <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["content-row"]]
+        names <- label (T.intercalate " · " paths) ["mono"]
+        GI.set names [#hexpand := True, #wrap := True]
+        #append files names
+        #append card files
+      #append box card
+  pure box
+  where
+    count n noun = T.pack (show n) <> " " <> noun <> (if n == 1 then "" else "s")
 
 -- | Markdown description with Write and Preview tabs.
 editor :: Text -> IO (Gtk.Box, Gtk.TextBuffer)

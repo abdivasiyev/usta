@@ -118,6 +118,9 @@ data Source = Source
   , createPull :: Text -> Text -> NewPull -> IO (Either Text Int)
   , branches :: Text -> Text -> IO (Either Text [Text])
   , labels :: Text -> Text -> IO (Either Text [Text])
+  , compare :: Text -> Text -> Text -> Text -> IO (Either Text ([Commit], [Text]))
+    -- ^ By host, repository, base branch and branch: the commits and
+    -- paths a pull request between them would have.
   }
 
 -- | A signed-in account, as the window names it.
@@ -183,6 +186,7 @@ fromDatabase pool changes statuses sync = Source
   , createPull = \_ _ _ -> pure (Left unavailable)
   , branches = \_ _ -> pure (Left unavailable)
   , labels = \_ _ -> pure (Left unavailable)
+  , compare = \_ _ _ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -224,6 +228,7 @@ samples = Source
   , createPull = \_ _ _ -> pure (Left unavailable)
   , branches = \_ _ -> pure (Left unavailable)
   , labels = \_ _ -> pure (Left unavailable)
+  , compare = \_ _ _ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -262,6 +267,7 @@ withAccounts pool accounts source = source
   , createPull = \host repo new -> changing (onRepo host repo (\f name -> unparse <$> f.createPull name new))
   , branches = \host repo -> onRepo host repo (\f name -> f.branches name)
   , labels = \host repo -> onRepo host repo (\f name -> f.labels name)
+  , compare = \host repo into from -> onRepo host repo (\f name -> f.compare name into from)
   }
   where
     onRepo :: Text -> Text -> (Forge.Forge -> RepoName -> IO a) -> IO (Either Text a)

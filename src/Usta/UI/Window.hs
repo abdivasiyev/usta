@@ -122,6 +122,9 @@ buildAt start source app = do
               }
         NewPullRequest.new NewPullRequest.Actions
           { branchesOf = \p -> source.branches p.host p.repo
+          , compareOf = \p into from -> fmap
+              (\(cs, paths) -> ([(T.take 7 (unparse c.sha), c.subject) | c <- cs], paths))
+              <$> source.compare p.host p.repo into from
           , create = \p -> source.createPull p.host p.repo
           , opened = opened
           , cancel = backToMain

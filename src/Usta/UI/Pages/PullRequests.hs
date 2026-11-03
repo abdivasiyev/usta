@@ -28,6 +28,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
+import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Format (Clock, short)
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Involvement (Involvement (..))
@@ -105,8 +106,9 @@ inTab t pr = case t of
 
 -- | @onNew@ runs for "New pull request"; @onOpen@ when a row is clicked
 -- or activated with Enter.
-new :: IO () -> (PullRequest -> IO ()) -> [PullRequest] -> IO Gtk.Box
+new :: IO () -> (PullRequest -> IO ()) -> [PullRequest] -> IO (Page PullRequest)
 new onNew onOpen prs = do
+  items <- newIORef prs
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 14
                          , #hexpand := True
@@ -127,11 +129,11 @@ new onNew onOpen prs = do
   #append page heading
 
   -- Tab labels carry their counts, e.g. "Review requested  2".
-  let tabText t = case length (filter (inTab t) prs) of
+  let tabText shown t = case length (filter (inTab t) shown) of
         0 -> tabLabel t
         n | t == AllTab -> tabLabel t
           | otherwise -> tabLabel t <> "  " <> T.pack (show n)
-  (tabs, tabButtons) <- Segmented.new (map tabText [minBound ..]) 0
+  (tabs, tabButtons) <- Segmented.new (map (tabText prs) [minBound ..]) 0
   Gtk.widgetAddCssClass tabs "tabs"
 
   filters <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
@@ -152,22 +154,20 @@ new onNew onOpen prs = do
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeNone
                              , #cssClasses := ["u-pr-list"]
                              ]
-  forM_ prs $ \pr -> do
-    row <- GI.new Gtk.ListBoxRow [#activatable := True]
-    content <- pullRequestRow pr
-    GI.set row [#child := content]
-    #append list row
+  refill list pullRequestRow prs
   empty <- GI.new Gtk.Label [#label := "Nothing here", #cssClasses := ["muted", "empty"]]
   Gtk.listBoxSetPlaceholder list (Just empty)
   void $ GI.on list #rowActivated $ \row -> do
     index <- Gtk.listBoxRowGetIndex row
-    onOpen (prs !! fromIntegral index)
+    shown <- readIORef items
+    onOpen (shown !! fromIntegral index)
 
   current <- newIORef ReviewTab
   Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
     tab <- readIORef current
     index <- Gtk.listBoxRowGetIndex row
-    pure (inTab tab (prs !! fromIntegral index))
+    shown <- readIORef items
+    pure (inTab tab (shown !! fromIntegral index))
   forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
     void $ GI.on button #toggled $ do
       active <- GI.get button #active
@@ -184,7 +184,14 @@ new onNew onOpen prs = do
                                       , #valign := Gtk.AlignStart
                                       ]
   #append page scroll
-  pure page
+  pure Page
+    { widget = page
+    , update = \shown -> do
+        writeIORef items shown
+        refill list pullRequestRow shown
+        forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
+          GI.set button [#label := tabText shown tab]
+    }
 
 pullRequestRow :: PullRequest -> IO Gtk.Box
 pullRequestRow pr = do

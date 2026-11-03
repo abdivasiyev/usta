@@ -32,6 +32,7 @@ import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Components.SyncStatus as SyncStatus
+import Usta.UI.Page (Page (..))
 import qualified Usta.UI.Pages.AddAccount as AddAccount
 import qualified Usta.UI.Pages.Inbox as Inbox
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
@@ -113,7 +114,7 @@ buildAt start app = do
         PullRequests.new openNewPullRequest
           (\pr -> openPullRequestWith pr.fetching "Pull requests" (summaryOf pr))
           PullRequests.sample
-          >>= Gtk.toWidget
+          >>= Gtk.toWidget . (.widget)
       Sidebar.Issues ->
         Issues.new openNewIssue (openIssue "Issues" . issueDetail) Issues.sample >>= Gtk.toWidget
       -- The forms open with sample fields until they take the repository.

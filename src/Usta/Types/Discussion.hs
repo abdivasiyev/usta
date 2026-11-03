@@ -5,6 +5,8 @@ module Usta.Types.Discussion
   , Discussion (..)
   , Merge (..)
   , Verdict (..)
+  , NewIssue (..)
+  , NewPull (..)
   ) where
 
 import Data.Kind (Type)
@@ -46,6 +48,31 @@ data Merge
   | MergeCommit
   | Rebase
   deriving stock (Eq, Show, Enum, Bounded)
+
+-- | An issue to file, as the form fills it in.
+type NewIssue :: Type
+data NewIssue = NewIssue
+  { title :: Text
+  , body :: Text
+  , labels :: [Text]
+    -- ^ By name; the repository must have them.
+  , assignees :: [Login]
+  }
+  deriving stock (Eq, Show)
+
+-- | A pull request to open.
+type NewPull :: Type
+data NewPull = NewPull
+  { title :: Text
+  , body :: Text
+  , from :: Text
+    -- ^ The branch with the changes.
+  , into :: Text
+  , labels :: [Text]
+  , reviewers :: [Login]
+  , draft :: Bool
+  }
+  deriving stock (Eq, Show)
 
 -- | What a review says.
 type Verdict :: Type

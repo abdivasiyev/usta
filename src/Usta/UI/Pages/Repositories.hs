@@ -482,30 +482,21 @@ askMirror anchor r chooseMirror lookUp = do
                 showProblem message
                 GI.set go [#sensitive := False]
       later act = void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (act >> pure False)
-      answer choice = do
+      answer button other doing choice = do
         writeIORef busy True
-        GI.set go [#sensitive := False, #label := "Starting…"]
-        GI.set decline [#sensitive := False]
-        void $ forkIO $ do
-          outcome <- try (chooseMirror r choice)
-          let result = case outcome of
-                Left (_ :: SomeException) -> Left "Choosing the mirror failed unexpectedly."
-                Right done -> done
-          later $ case result of
-            Right () -> Gtk.windowDestroy dialog
-            Left message -> do
-              writeIORef busy False
-              GI.set go [#label := "Mirror"]
-              GI.set decline [#sensitive := True]
-              showProblem message
-              refresh
+        Button.busy button [other] doing (try (chooseMirror r choice)) $ \outcome -> do
+          writeIORef busy False
+          case outcome of
+            Right (Right ()) -> Gtk.windowDestroy dialog
+            Right (Left message) -> showProblem message >> refresh
+            Left (_ :: SomeException) -> showProblem "Choosing the mirror failed unexpectedly." >> refresh
   forM_ [viaHttps, viaSsh] $ \b -> void $ GI.on b #toggled refresh
   void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
-  void $ GI.on decline #clicked (answer Declined)
+  void $ GI.on decline #clicked (answer decline go "Saving…" Declined)
   void $ GI.on go #clicked $ do
     full <- GI.get everything #active
     https <- GI.get viaHttps #active
-    answer (Mirrored (if full then Git.Full else Git.Partial) (if https then Https else Ssh))
+    answer go decline "Starting…" (Mirrored (if full then Git.Full else Git.Partial) (if https then Https else Ssh))
   void $ forkIO $ do
     outcome <- try (lookUp r)
     let result = case outcome of

@@ -7,6 +7,7 @@
 module Usta.UI.Platform
   ( Platform (..)
   , current
+  , canNotify
   , shortcut
   , configureHeaderBar
   ) where
@@ -15,7 +16,7 @@ import Data.GI.Base (AttrOp ((:=)), set)
 import Data.Text (Text)
 import qualified GI.Gtk as Gtk
 
-import Usta.Types.Platform (Platform (..), current)
+import Usta.Types.Platform (Platform (..), canNotify, current)
 
 -- | A shortcut on the primary modifier: "⌘K" on macOS, "Ctrl K" elsewhere.
 -- Keybindings themselves use GTK's @<Primary>@, which maps the same way.

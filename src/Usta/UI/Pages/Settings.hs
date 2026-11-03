@@ -63,6 +63,8 @@ data Model = Model
     -- ^ Both run off the main thread, after the user confirmed.
   , shortcuts :: [(Text, Text)]
     -- ^ Keys and what they do, as the shortcut strip shows them.
+  , canNotify :: Bool
+    -- ^ 'False' when the desktop would not show usta's notifications.
   }
 
 type Section :: Type
@@ -195,7 +197,9 @@ section s m change onAddAccount = do
           setting "Offline cache" [plain "Pull requests, issues and comments stored in a local database"] [clear]
       ]
     Notifications -> sequence
-      [ setting "Desktop notifications" [plain "Review requests, mentions and failed checks"]
+      [ setting "Desktop notifications"
+          [plain (if m.canNotify then "Review requests, mentions and failed checks"
+                  else "On macOS they show once usta is installed as an app; this copy runs outside one")]
           =<< sequence [switch m.preferences.notify (\on p -> p {notify = on})]
       , setting "Only when usta is in the background" [plain "Stay quiet while you are looking at the app"]
           =<< sequence [switch m.preferences.onlyInBackground (\on p -> p {onlyInBackground = on})]
@@ -385,6 +389,7 @@ sample keys = Model
   , onPrune = pure (Right 0)
   , onClearCache = pure (Right ())
   , shortcuts = keys
+  , canNotify = True
   }
   where
     account kind host auth = Account

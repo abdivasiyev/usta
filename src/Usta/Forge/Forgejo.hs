@@ -25,7 +25,7 @@ import qualified Network.HTTP.Client as HTTP
 import Servant.Client (BaseUrl, ClientM)
 import Text.Read (readMaybe)
 
-import Usta.Forge (Fetched (..), Forge (..))
+import Usta.Forge (CloneUrls (..), Fetched (..), Forge (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import Usta.Types.Host (Host)
@@ -55,6 +55,9 @@ forgejo manager base host token = do
     , issues = const (Fetched Nothing <$> issuesOf client host)
     , repositories = const (Fetched Nothing <$> repositoriesOf client host)
     , markRead = \thread -> () <$ run client (Api.api.markRead thread)
+    , cloneUrls = \repo -> do
+        r <- run client (Api.api.repository (owner repo) (shortName repo))
+        pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}
     }
 
 -- | Who @token@ signs in as; throws 'Usta.Forge.SignedOut' when Forgejo

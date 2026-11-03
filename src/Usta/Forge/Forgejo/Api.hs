@@ -51,6 +51,7 @@ type Routes :: Type -> Type
 data Routes mode = Routes
   { me :: mode :- "user" :> Get '[JSON] User
   , repositories :: mode :- "user" :> "repos" :> RecordQueryParam ListQuery :> Get '[JSON] [Repository]
+  , repository :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> Get '[JSON] Repository
   , notifications :: mode :- "notifications" :> RecordQueryParam NotificationQuery :> Get '[JSON] [Thread]
   , markRead
       :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId
@@ -142,6 +143,9 @@ data Repository = Repository
   , openIssues :: Count
   , openPullRequests :: Count
   , updatedAt :: UTCTime
+  , cloneUrl :: Text
+  , sshUrl :: Maybe Text
+    -- ^ 'Nothing' when ssh is turned off; Forgejo then sends "".
   }
 
 instance FromJSON Repository where
@@ -153,6 +157,10 @@ instance FromJSON Repository where
     <*> o .: "open_issues_count"
     <*> o .: "open_pr_counter"
     <*> o .: "updated_at"
+    <*> o .: "clone_url"
+    <*> (nonEmpty <$> o .:? "ssh_url" .!= "")
+    where
+      nonEmpty t = if T.null t then Nothing else Just t
 
 -- | The repository a thread or an issue is in.
 type RepositoryRef :: Type

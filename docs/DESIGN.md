@@ -297,6 +297,27 @@ Dark screens use the same layouts with the dark token values.
 
     ![Blame, find and go to file](design/files-tools.png)
 
+24. **Releases and tags.** Releases with Latest and Pre-release marks,
+    their notes rendered, and assets to download; tags beside them.
+
+    ![Releases and tags](design/repository-releases.png)
+
+25. **Actions.** The repository's workflow runs, filtered by workflow,
+    branch and status; a run shows its jobs, and its logs open in the same
+    viewer as a pull request's Checks. Re-run and Cancel show only when
+    the forge allows them.
+
+    ![Actions](design/repository-actions.png)
+
+26. **Search on the forge and the offline queue.** `Ctrl K` searches the
+    synced cache first, then the forges themselves (issues, pull requests,
+    code and repositories, closed ones too), filtered with chips. Without
+    a connection, comments and actions wait in order and go out once the
+    forge answers; the header shows how many wait, and each can be
+    discarded.
+
+    ![Search on the forge and the offline queue](design/forge-search.png)
+
 ## Loading states
 
 Cached data always shows first. Loading UI appears only when there is

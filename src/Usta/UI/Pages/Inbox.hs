@@ -69,6 +69,7 @@ reasonBadge reason = case reason of
 -- | A changed file: path, lines added, lines removed.
 type Change :: Type
 data Change = Change Text Int Int
+  deriving stock (Eq)
 
 type Notification :: Type
 data Notification = Notification
@@ -91,6 +92,7 @@ data Notification = Notification
   , review :: Maybe (Tone, Text)
   , changes :: [Change]
   }
+  deriving stock (Eq)
 
 -- | Which notifications a page lists.
 type View :: Type
@@ -182,16 +184,23 @@ new view actions notifications = do
   readIORef items >>= refill list notificationRow
 
   selectedKey <- newIORef Nothing
-  void $ GI.on list #rowSelected $ \selected -> case selected of
-    Nothing -> Gtk.scrolledWindowSetChild previewScroll (Nothing :: Maybe Gtk.Widget)
-    Just row -> do
+  -- What the preview shows. A sync refills the list and selects the same
+  -- notification again; the preview is drawn anew only when it changed,
+  -- so its scroll position stays.
+  previewed <- newIORef Nothing
+  void $ GI.on list #rowSelected $ \selected -> forM_ selected $ \row -> do
       index <- Gtk.listBoxRowGetIndex row
       shown <- readIORef items
       when (index >= 0 && fromIntegral index < length shown) $ do
         let n = shown !! fromIntegral index
         writeIORef selectedKey (Just (key n))
-        content <- preview actions n
-        GI.set previewScroll [#child := content]
+        before <- readIORef previewed
+        -- How long ago changes every minute; that alone is no reason to redraw.
+        let timeless x = x {age = "", opened = ""}
+        when (fmap timeless before /= Just (timeless n)) $ do
+          writeIORef previewed (Just n)
+          content <- preview actions n
+          GI.set previewScroll [#child := content]
 
   -- With the list focused: j and k move, e marks done (or moves back to
   -- the inbox), o opens the forge's page, and Enter opens it here.
@@ -282,6 +291,9 @@ new view actions notifications = do
         let shown = filter (lists view) everything
         writeIORef items shown
         refill list notificationRow shown
+        when (null shown) $ do
+          Gtk.scrolledWindowSetChild previewScroll (Nothing :: Maybe Gtk.Widget)
+          writeIORef previewed Nothing
         readIORef current >>= apply
         select
     }

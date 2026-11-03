@@ -1,9 +1,7 @@
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE NoFieldSelectors #-}
 
 -- | The @accounts@ table: one row per forge account usta is signed in to.
 -- The token is not stored here; it lives in the system keyring.

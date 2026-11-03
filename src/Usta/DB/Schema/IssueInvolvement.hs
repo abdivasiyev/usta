@@ -1,9 +1,7 @@
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE NoFieldSelectors #-}
 
 -- | The @issue_involvements@ table: how the account an issue was synced for
 -- is involved in it, one row per way. Deleted with the issue.

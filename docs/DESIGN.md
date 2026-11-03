@@ -245,6 +245,34 @@ Dark screens use the same layouts with the dark token values.
 
     ![Editing, reactions and timeline](design/conversation-editing.png)
 
+### Review and triage
+
+18. **Reviewers, labels and state.** The sidebar lists reviewers with
+    their state (approved, changes requested, waiting) and the approvals
+    branch protection needs; re-request or remove a request in place.
+    Request review opens a picker with search, people who changed these
+    files before, collaborators and teams. Assignees, labels and milestone
+    each have their own picker. The merge box shows only the states that
+    apply: draft (Ready for review), behind the base branch (Update branch
+    by merge or rebase), conflicts (with the files, and Check out
+    locally), and merging automatically once checks and approvals pass.
+
+    ![Reviewers, labels and state](design/pull-request-people.png)
+
+19. **Labels.** The picker filters as you type, shows each label's colour
+    and description, and offers to create a label with the name typed.
+    Creating or editing a label takes a name, an optional description and
+    a colour (swatches or hex) with a live preview; Manage labels lists
+    them with their open counts.
+
+    ![Labels](design/labels.png)
+
+20. **Check out locally.** A worktree of the local mirror (small, shares
+    its objects) or a separate clone, in a folder you choose, on a local
+    branch that tracks the pull request's, so `git push` updates it.
+
+    ![Check out locally](design/check-out.png)
+
 ## Loading states
 
 Cached data always shows first. Loading UI appears only when there is

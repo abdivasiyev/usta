@@ -155,7 +155,7 @@ buildAt start source app = do
       drawSidebar = do
         model <- sidebarModel
         page <- readIORef shownPage
-        Sidebar.new model page (\p -> writeIORef shownPage p >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName p))
+        Sidebar.new model page (\p -> writeIORef shownPage p >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName p)) openAddAccount
           >>= Gtk.toWidget >>= replaceChild sidebarSlot
       drawSyncChip = do
         known <- readIORef states

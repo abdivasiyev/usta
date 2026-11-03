@@ -81,9 +81,9 @@ sample = Model
   }
 
 -- | @onSelect@ runs when a page entry is clicked; that entry becomes the
--- highlighted one.
-new :: Model -> Page -> (Page -> IO ()) -> IO Gtk.Box
-new model selected onSelect = do
+-- highlighted one. @onAddForge@ runs for "+ Add forge".
+new :: Model -> Page -> (Page -> IO ()) -> IO () -> IO Gtk.Box
+new model selected onSelect onAddForge = do
   sidebar <- vbox 20
   Gtk.widgetAddCssClass sidebar "u-sidebar"
   -- Entries expand to push counts right; don't let that widen the sidebar.
@@ -125,8 +125,9 @@ new model selected onSelect = do
             ForgeDone -> ("Done", "done")
       forM_ row $ \r -> GI.new Gtk.Label [#label := text, #cssClasses := ["sync-state", cls]] >>= #append r
     #append forgeGroup item
-  NavItem.new NavItem.defaults { NavItem.label = "+ Add forge", NavItem.link = True }
-    >>= #append forgeGroup
+  addForge <- NavItem.new NavItem.defaults { NavItem.label = "+ Add forge", NavItem.link = True }
+  void $ GI.on addForge #clicked onAddForge
+  #append forgeGroup addForge
   #append sidebar forgeGroup
 
   when (not (null model.pinned)) $ do

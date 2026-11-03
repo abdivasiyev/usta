@@ -3,10 +3,14 @@
 -- | A 'Forge' for one Forgejo account: what sync asks, answered from
 -- Forgejo's API in usta's types.
 --
--- Forgejo sends no ETags on these lists, so every sync fetches them whole.
+-- Forgejo sends no ETags on these lists. A full sync fetches them whole;
+-- the others ask only for what was updated since the last one, in any
+-- state, so a pull request merged or an issue closed meanwhile comes too.
 -- Each pull request costs extra calls (its branches, reviews and checks);
--- branches and reviews are kept until the pull request changes, checks
--- are asked every time, since a CI run does not change the pull request.
+-- branches and reviews are kept until the pull request changes. Checks
+-- are asked for each one that changed, and again for those whose checks
+-- were still running, since a CI run does not change the pull request.
+-- The repository list comes only with a full sync.
 module Usta.Forge.Forgejo
   ( forgejo
   , whoAmI
@@ -16,10 +20,11 @@ import Control.Exception (throwIO)
 import Control.Monad (unless)
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.List (nub, sortOn)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -30,7 +35,7 @@ import Servant.Client (BaseUrl, ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import Usta.Types.Diff (parseDiff)
@@ -56,11 +61,14 @@ forgejo :: HTTP.Manager -> BaseUrl -> Host -> Token -> IO Forge
 forgejo manager base host token = do
   let client = connect manager base (authorization token)
   details <- newIORef Map.empty
+  running <- newIORef Map.empty
   pure Forge
-    { notifications = const (Fetched Nothing <$> notificationsOf client host)
-    , pullRequests = const (Fetched Nothing <$> pullRequestsOf client details host)
-    , issues = const (Fetched Nothing <$> issuesOf client host)
-    , repositories = const (Fetched Nothing <$> repositoriesOf client host)
+    { notifications = \known -> Fetched Nothing <$> notificationsOf client host known.since
+    , pullRequests = \known -> Fetched Nothing <$> pullRequestsOf client details running host known.since
+    , issues = \known -> Fetched Nothing <$> issuesOf client host known.since
+    , repositories = \known -> case known.since of
+        Just _ -> pure NotModified
+        Nothing -> Fetched Nothing <$> repositoriesOf client host
     , markRead = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Read)))
     , markUnread = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Unread)))
     , discussion = \repo n -> do
@@ -165,12 +173,13 @@ everyPage fetch = go 1
       if length items < perPage then pure items else (items <>) <$> go (n + 1)
     perPage = 50
 
--- | The last 30 days of notifications, read ones too.
-notificationsOf :: Client -> Host -> IO [N.Notification]
-notificationsOf client host = do
+-- | The last 30 days of notifications, read ones too; only those updated
+-- after @since@, when given.
+notificationsOf :: Client -> Host -> Maybe UTCTime -> IO [N.Notification]
+notificationsOf client host since = do
   month <- addUTCTime (-30 * nominalDay) <$> getCurrentTime
   threads <- run client $ everyPage $ \page limit ->
-    Api.api.notifications Api.NotificationQuery {all = True, since = Just month, page = page, limit = limit}
+    Api.api.notifications Api.NotificationQuery {all = True, since = Just (maybe month (max month) since), page = page, limit = limit}
   traverse (fromThread host) threads
 
 fromThread :: Host -> Api.Thread -> IO N.Notification
@@ -238,11 +247,23 @@ data Details = Details
   , review :: Maybe P.Review
   }
 
-pullRequestsOf :: Client -> IORef (Map.Map (RepoName, Number) Details) -> Host -> IO [P.PullRequest]
-pullRequestsOf client cache host = do
-  found <- searchAll client Api.Pulls Api.Open Nothing ways
-  traverse one found
+-- | The open pull requests involving the user, or, after @since@, those
+-- updated since in any state and those whose checks were still running,
+-- which @running@ keeps.
+pullRequestsOf
+  :: Client -> IORef (Map.Map (RepoName, Number) Details) -> IORef (Map.Map (RepoName, Number) (Api.Issue, [Involvement]))
+  -> Host -> Maybe UTCTime -> IO [P.PullRequest]
+pullRequestsOf client cache running host since = do
+  changed <- searchAll client Api.Pulls (maybe Api.Open (const Api.AnyState) since) since ways
+  waiting <- readIORef running
+  let seen = Set.fromList [keyOf i | (i, _) <- changed]
+      again = [entry | since /= Nothing, (key, entry) <- Map.toList waiting, key `Set.notMember` seen]
+      asked = changed <> again
+  found <- traverse one asked
+  writeIORef running (Map.fromList [(keyOf i, entry) | (entry@(i, _), pr) <- zip asked found, pr.checks == Just P.ChecksRunning])
+  pure found
   where
+    keyOf i = (i.repository.fullName, i.number)
     one (i, involvement) = do
       let key = (i.repository.fullName, i.number)
           (o, r) = (owner i.repository.fullName, shortName i.repository.fullName)
@@ -300,14 +321,16 @@ checksOf combined
       "error" -> Just P.ChecksFailed
       _ -> Just P.ChecksPassed
 
--- | Open issues involving the user, and those closed in the last 14 days.
-issuesOf :: Client -> Host -> IO [I.Issue]
-issuesOf client host = do
+-- | Open issues involving the user, and those closed in the last 14 days;
+-- after @since@, those updated since in any state.
+issuesOf :: Client -> Host -> Maybe UTCTime -> IO [I.Issue]
+issuesOf client host since = do
   fortnight <- addUTCTime (-14 * nominalDay) <$> getCurrentTime
   let mine = [w | w <- ways, w.involvement /= AsReviewer]
-  open <- searchAll client Api.Issues Api.Open Nothing mine
-  closed <- searchAll client Api.Issues Api.Closed (Just fortnight) mine
-  pure (map fromIssue (open <> closed))
+  found <- case since of
+    Just t -> searchAll client Api.Issues Api.AnyState (Just t) mine
+    Nothing -> (<>) <$> searchAll client Api.Issues Api.Open Nothing mine <*> searchAll client Api.Issues Api.Closed (Just fortnight) mine
+  pure (map fromIssue found)
   where
     fromIssue (i, involvement) = I.Issue
       { ref = Ref {host = host, repo = i.repository.fullName, number = i.number}

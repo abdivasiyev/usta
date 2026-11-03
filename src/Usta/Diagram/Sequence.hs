@@ -5,6 +5,10 @@
 -- loop / alt / opt / par / critical / break / rect blocks around them.
 module Usta.Diagram.Sequence
   ( Sequence (..)
+  , Who (..)
+  , Event (..)
+  , Line (..)
+  , Tip (..)
   , parse
   , draw
   ) where

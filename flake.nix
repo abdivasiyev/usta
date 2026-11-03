@@ -74,13 +74,13 @@
   in {
     packages = forAllSystems (pkgs: {
       usta = ustaFor pkgs;
-      default = self.packages.${pkgs.system}.usta;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.usta;
     });
 
     apps = forAllSystems (pkgs: {
       default = {
         type = "app";
-        program = "${self.packages.${pkgs.system}.usta}/bin/usta";
+        program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.usta}/bin/usta";
       };
     });
 

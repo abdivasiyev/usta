@@ -16,8 +16,10 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
 import Data.Kind (Type)
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.Segmented as Segmented
 
 type Config :: Type
@@ -52,18 +54,16 @@ new cfg = do
                               , #rightMargin := 12
                               , #cssClasses := ["editor"]
                               ]
-  rendered <- GI.new Gtk.Label [ #wrap := True
-                               , #xalign := 0
-                               , #yalign := 0
-                               , #heightRequest := cfg.height
-                               , #cssClasses := ["preview"]
-                               ]
+  rendered <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                             , #heightRequest := cfg.height
+                             , #cssClasses := ["preview"]
+                             ]
   stack <- GI.new Gtk.Stack []
   void $ Gtk.stackAddNamed stack view (Just "write")
   void $ Gtk.stackAddNamed stack rendered (Just "preview")
   #append box stack
 
-  -- Preview shows the text as it will read; Markdown rendering comes later.
+  -- Preview renders the text as the forge will show it.
   forM_ (zip ["write", "preview"] buttons) $ \(name, button) ->
     void $ GI.on button #toggled $ do
       active <- GI.get button #active
@@ -72,7 +72,11 @@ new cfg = do
           start <- Gtk.textBufferGetStartIter buffer
           end <- Gtk.textBufferGetEndIter buffer
           current <- Gtk.textBufferGetText buffer start end False
-          GI.set rendered [#label := current]
+          Gtk.widgetGetFirstChild rendered >>= mapM_ (Gtk.boxRemove rendered)
+          shown <- if T.null (T.strip current)
+            then GI.new Gtk.Label [#label := "Nothing to preview.", #xalign := 0, #cssClasses := ["muted"]] >>= Gtk.toWidget
+            else Markdown.new current
+          #append rendered shown
         Gtk.stackSetVisibleChildName stack name
 
   forM_ cfg.hint $ \h ->
@@ -86,7 +90,7 @@ css = mconcat
   , "  font-family: 'JetBrains Mono', monospace; font-size: 13px;"
   , "}"
   , "box.u-markdown-editor textview.editor text { background: var(--surface); color: var(--text); }"
-  , "box.u-markdown-editor label.preview {"
+  , "box.u-markdown-editor box.preview {"
   , "  padding: 12px; border: 1px solid var(--input-border); border-radius: 8px;"
   , "  background: var(--surface);"
   , "}"

@@ -320,6 +320,7 @@ overview actions r = do
         let result = either (\(_ :: SomeException) -> Left "Loading failed unexpectedly.") id loaded
         void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
           clear contents
+          Skeleton.appear contents
           case result of
             Right c -> sections r c contents
             Left message -> label message ["muted"] >>= #append contents

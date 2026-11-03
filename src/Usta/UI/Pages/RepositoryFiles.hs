@@ -33,6 +33,7 @@ import System.FilePath (takeExtension)
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.CodeView as CodeView
 import qualified Usta.UI.Components.Forge as Forge
+import qualified Usta.UI.Components.ImageView as ImageView
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Highlight as Highlight
 import Usta.Types.Tree (Entry (..))
@@ -207,7 +208,14 @@ fileView place e bytes = do
     badge <- label (Highlight.languageName l) ["language"]
     GI.set badge [#valign := Gtk.AlignCenter]
     #append header badge
-  facts <- label (T.intercalate " · " (linesOf content <> [size (B.length bytes)])) ["muted"]
+  dimensions <- case content of
+    Image -> ImageView.texture bytes >>= traverse ImageView.size
+    _ -> pure Nothing
+  let kind = case content of
+        Image -> [T.toUpper (T.drop 1 (T.pack (takeExtension (T.unpack e.path))))]
+        _ -> []
+      pixels = [T.pack (show w) <> " × " <> T.pack (show h) | Just (w, h) <- [dimensions]]
+  facts <- label (T.intercalate " · " (kind <> linesOf content <> pixels <> [size (B.length bytes)])) ["muted"]
   GI.set facts [#hexpand := True]
   #append header facts
   case content of
@@ -228,6 +236,11 @@ fileView place e bytes = do
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "file-card"]]
   body <- case content of
     Text text -> CodeView.new e.path text
+    Image -> do
+      image <- ImageView.texture bytes
+      case image of
+        Just t -> ImageView.new t
+        Nothing -> note "This image is in a format usta cannot show."
     TooLarge -> note "Too large to show here; open it in the browser."
     _ -> note "Binary file not shown."
   #append card body

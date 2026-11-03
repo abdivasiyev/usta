@@ -42,6 +42,7 @@ executable usta
     Usta.Diagram
     Usta.Diagram.Flowchart
     Usta.Diagram.Layered
+    Usta.Diagram.Route
     Usta.Diagram.Scene
     Usta.Diagram.Sequence
     Usta.Forge

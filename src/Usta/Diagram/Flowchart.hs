@@ -11,6 +11,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import Data.Traversable (for)
 
+import qualified Usta.Diagram.Route as Route
 import Usta.Diagram.Layered (Box (..), Layout (..), Link (..), Placed (..), Routed (..), layered, spacing)
 import Usta.Diagram.Scene hiding (Head (..))
 import Usta.Diagram.Scene (Head (Arrow, NoHead))
@@ -56,11 +57,11 @@ draw measure chart = do
       edge e label ps = case ps of
         first : _ | Just (c0, s0) <- shapeAt e.from, Just (c1, s1) <- shapeAt e.to ->
           let inner = drop 1 (take (length ps - 1) ps)
-              start = clip c0 s0 (headOr (last' c1 ps) inner) 0
-              finish = clip c1 s1 (lastOr first inner) (if e.arrow then 2 else 0)
+              start = edgeOf c0 s0 (headOr (last' c1 ps) inner) 0
+              finish = edgeOf c1 s1 (lastOr first inner) (if e.arrow then 2 else 0)
               path = start : inner <> [finish]
-           in [ Path {start = start, segments = smooth path, line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead} ]
-                <> maybe [] (labelAt (middle path)) ((,) <$> e.label <*> label)
+           in [ Path {start = start, segments = Route.smooth path, line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead} ]
+                <> maybe [] (labelAt (Route.middle path)) ((,) <$> e.label <*> label)
         _ -> []
       loop e label c s =
         let side = c.x + s.box.w / 2
@@ -143,38 +144,14 @@ shape c s =
             , Ellipse {center = Point c.x (t + cap), rx = b.w / 2, ry = cap, fill = paper, edge = border}
             ]
 
--- | Where the line from @c@ toward @toward@ leaves the shape, @extra@
--- pixels further out (room for an arrowhead's tip).
-clip :: Point -> Sized -> Point -> Double -> Point
-clip c s toward extra = Point (c.x + ux * (t + extra)) (c.y + uy * (t + extra))
+-- | Where a link leaves the node's outline.
+edgeOf :: Point -> Sized -> Point -> Double -> Point
+edgeOf c s = Route.clip outline c s.box
   where
-    dx = toward.x - c.x
-    dy = toward.y - c.y
-    len = max 0.001 (sqrt (dx * dx + dy * dy))
-    (ux, uy) = (dx / len, dy / len)
-    hw = s.box.w / 2
-    hh = s.box.h / 2
-    t = case s.node.shape of
-      Diamond -> 1 / max 0.001 (abs ux / hw + abs uy / hh)
-      Circle -> hw
-      _ -> min (if abs ux < 0.001 then 1 / 0 else hw / abs ux) (if abs uy < 0.001 then 1 / 0 else hh / abs uy)
-
--- | A curve through the points (Catmull-Rom as Béziers); straight when
--- there are only two.
-smooth :: [Point] -> [Segment]
-smooth ps = case ps of
-  [_, b] -> [LineTo b]
-  _ -> [CurveTo (ahead i) (behind (i + 1)) (at' (i + 1)) | i <- [0 .. length ps - 2]]
-  where
-    n = length ps
-    at' i = ps !! max 0 (min (n - 1) i)
-    ahead i = let a = at' (i - 1); b = at' (i + 1); p = at' i in Point (p.x + (b.x - a.x) / 6) (p.y + (b.y - a.y) / 6)
-    behind i = let a = at' (i - 1); b = at' (i + 1); p = at' i in Point (p.x - (b.x - a.x) / 6) (p.y - (b.y - a.y) / 6)
-
-middle :: [Point] -> Point
-middle ps
-  | odd (length ps) = ps !! (length ps `div` 2)
-  | otherwise = let a = ps !! (length ps `div` 2 - 1); b = ps !! (length ps `div` 2) in Point ((a.x + b.x) / 2) ((a.y + b.y) / 2)
+    outline = case s.node.shape of
+      Diamond -> Route.Rhombus
+      Circle -> Route.Round
+      _ -> Route.Boxy
 
 penOf :: Stroke -> Pen
 penOf stroke = case stroke of

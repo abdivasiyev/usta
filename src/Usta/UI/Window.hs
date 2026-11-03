@@ -120,7 +120,24 @@ buildAt start source app = do
             showClosed d.closed
             Issue.thread actions (Issue.fromDiscussion c d model))
           >>= showDetail
-      openNewIssue = Gtk.toWidget screens >>= \anchor -> NewIssue.open anchor NewIssue.sample
+      -- In @at@ (host and repository) when given, else the first one.
+      openNewIssueIn at = do
+        anchor <- Gtk.toWidget screens
+        repos <- source.repositories
+        accounts <- source.accounts
+        let places =
+              [ NewIssue.Place {forge = r.forge, host = r.host, repo = r.name, login = a.login}
+              | r <- repos, a <- take 1 [a | a <- accounts, a.host == r.host]
+              ]
+            chosen = length (takeWhile (\p -> Just (p.host, p.repo) /= at) places)
+            opened p number title = openIssue "Issues" Issue.Model
+              { Issue.forge = p.forge, Issue.host = p.host, Issue.repo = p.repo, Issue.number = number
+              , Issue.title = title, Issue.closed = False, Issue.comments = [], Issue.events = []
+              , Issue.assignees = [], Issue.labels = [], Issue.milestone = Nothing, Issue.linkedPullRequests = []
+              }
+        NewIssue.open anchor (\p -> source.createIssue p.host p.repo) opened
+          NewIssue.Model {places = places, chosen = if chosen < length places then chosen else 0}
+      openNewIssue = openNewIssueIn Nothing
       addAccountThen after = Gtk.toWidget screens >>= \anchor ->
         AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn after
       openAddAccount = addAccountThen (pure ())
@@ -192,7 +209,7 @@ buildAt start source app = do
             , readme = fmap (\(name, text) -> (name, Repositories.readmeBlocks text)) file
             }
   repositoryPage <- source.repositories >>= Repositories.new Repositories.Actions
-    { newIssue = const openNewIssue
+    { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))
     , newPullRequest = const openNewPullRequest
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name

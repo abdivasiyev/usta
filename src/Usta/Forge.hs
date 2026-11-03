@@ -62,6 +62,9 @@ data Forge = Forge
   , branches :: RepoName -> IO [Text]
   , labels :: RepoName -> IO [Text]
     -- ^ The names of the labels the repository defines.
+  , compare :: RepoName -> Text -> Text -> IO ([Commit], [Text])
+    -- ^ What a branch has that the base branch does not: its commits,
+    -- oldest first, and the paths they change.
   }
 
 -- | A repository's clone URLs. The forge gives them because only it knows

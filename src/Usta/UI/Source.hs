@@ -51,6 +51,9 @@ import qualified Usta.Types.Repository as R
 import Usta.Types.Parse (parse, unparse)
 -- For the pull requests' fields.
 import qualified Usta.Types.PullRequest as P
+import qualified Usta.Types.Notification as N
+-- For the issues' fields.
+import qualified Usta.Types.Issue as I
 import Usta.Types.Ref (Ref (..))
 import Usta.Types.Resource (Resource)
 import Usta.Types.Token (Token)
@@ -113,7 +116,13 @@ fromDatabase pool changes statuses sync = Source
   { inbox = do
       c <- clock
       items <- run pool DB.inbox
-      pure (mapMaybe (\i -> Inbox.fromNotification c i.forge i.notification i.pullRequest) items)
+      issues <- run pool DB.issues
+      let involvementOf i = case (i.pullRequest, i.notification.subject) of
+            (Just pr, _) -> pr.involvement
+            (Nothing, N.IssueSubject n) ->
+              concat [issue.involvement | (key, issue) <- issues, key == i.accountId, issue.ref.repo == i.notification.repo, issue.ref.number == n]
+            _ -> []
+      pure (mapMaybe (\i -> Inbox.fromNotification c i.forge i.notification i.pullRequest (involvementOf i)) items)
   , pullRequests = do
       c <- clock
       kindOf <- kinds

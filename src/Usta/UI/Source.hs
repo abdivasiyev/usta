@@ -3,6 +3,7 @@
 -- serves the mock lists, for the first-run previews.
 module Usta.UI.Source
   ( Source (..)
+  , Connected (..)
   , fromDatabase
   , samples
   ) where
@@ -10,11 +11,12 @@ module Usta.UI.Source
 import Data.Kind (Type)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
-import Database.Persist.Sql (ConnectionPool)
+import Database.Persist.Sql (ConnectionPool, toSqlKey)
 
 import Usta.Bus (Bus, Change (..), subscribe)
 import Usta.DB (run)
 import Usta.DB.Account (listAccounts)
+import Usta.DB.Schema.Account (AccountId)
 import qualified Usta.DB.Issue as DB
 import qualified Usta.DB.Notification as DB
 import qualified Usta.DB.PullRequest as DB
@@ -38,14 +40,21 @@ data Source = Source
   , pullRequests :: IO [PullRequests.PullRequest]
   , issues :: IO [Issues.Issue]
   , repositories :: IO [Repositories.Repository]
-  , forges :: IO [(Kind, Text)]
-    -- ^ Each connected forge and its host.
+  , accounts :: IO [Connected]
   , onChange :: (Resource -> IO ()) -> IO ()
     -- ^ Runs the action on the GTK main thread whenever a list was saved
     -- anew.
   , onStatus :: (Status -> IO ()) -> IO ()
     -- ^ Likewise for each account's sync state.
   , syncNow :: IO ()
+  }
+
+-- | A signed-in account, as the window names it.
+type Connected :: Type
+data Connected = Connected
+  { accountId :: AccountId
+  , forge :: Kind
+  , host :: Text
   }
 
 -- | The lists as the cache has them, with the times formatted against the
@@ -70,9 +79,9 @@ fromDatabase pool changes statuses sync = Source
       kindOf <- kinds
       rows <- run pool DB.repositories
       pure [Repositories.fromRepository kind r | (key, r) <- rows, Just kind <- [kindOf key]]
-  , forges = do
-      accounts <- run pool listAccounts
-      pure [(a.forge, unparse a.host) | (_, a) <- accounts]
+  , accounts = do
+      rows <- run pool listAccounts
+      pure [Connected {accountId = key, forge = a.forge, host = unparse a.host} | (key, a) <- rows]
   , onChange = \act -> subscribe changes (act . (.resource))
   , onStatus = subscribe statuses
   , syncNow = sync.syncNow
@@ -89,7 +98,7 @@ samples = Source
   , pullRequests = pure PullRequests.sample
   , issues = pure Issues.sample
   , repositories = pure Repositories.sample
-  , forges = pure Sidebar.sample.forges
+  , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
   , onChange = const (pure ())
   , onStatus = const (pure ())
   , syncNow = pure ()

@@ -86,6 +86,8 @@ data Actions = Actions
   , version :: Bool -> Text -> IO (Either Text ByteString)
     -- ^ A file as it was before the pull request ('True') or is in it.
   , refresh :: IO ()
+  , reply :: Th.Thread -> Text -> IO (Either Text ())
+    -- ^ Adds a note to a thread.
   }
 
 -- | One changed file as shown in both columns.
@@ -150,7 +152,7 @@ new actions m = do
   placedRef <- newIORef []
   entries <- forM m.files $ \f -> do
     placed <- forM [(t, at) | t <- m.threads.threads, t.path == f.path, Just at <- [place f.diffLines t]] $ \(t, (index, outdated)) -> do
-      drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock}
+      drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock, reply = actions.reply t}
       pure (index, (t, outdated, drawn))
     modifyIORef' placedRef (<> map snd placed)
     let attached = [(index, drawn.widget) | (index, (_, _, drawn)) <- placed]

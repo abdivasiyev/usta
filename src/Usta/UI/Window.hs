@@ -584,6 +584,7 @@ tabContent source reopen fetch summary showState tab = case tab of
         , version = \old path ->
             fmap snd <$> source.file summary.host summary.repo ((if old then snd else fst) summary.branches) path
         , refresh = reopen
+        , reply = source.reply summary.host summary.repo summary.number
         }
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
           {Files.threads = threads, Files.me = me}

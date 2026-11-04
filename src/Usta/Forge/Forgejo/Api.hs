@@ -26,6 +26,8 @@ module Usta.Forge.Forgejo.Api
   , IssueEdit (..)
   , MergeOption (..)
   , PullEdit (..)
+  , LabelIds (..)
+  , NewLabel (..)
   , TimelineEvent (..)
   , Style (..)
   , BranchProtection (..)
@@ -202,6 +204,12 @@ data Routes mode = Routes
   , labels
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels"
            :> RecordQueryParam ListQuery :> Get '[JSON] [RepoLabel]
+  , setIssueLabels
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "labels" :> ReqBody '[JSON] LabelIds :> Put '[JSON] [Label]
+  , createLabel
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels"
+           :> ReqBody '[JSON] NewLabel :> Verb 'POST 201 '[JSON] RepoLabel
   , compare
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "compare"
            :> Capture "basehead" BaseHead :> Get '[JSON] Comparison
@@ -661,10 +669,27 @@ type RepoLabel :: Type
 data RepoLabel = RepoLabel
   { id :: Int64
   , name :: Text
+  , color :: Color
+  , description :: Text
   }
 
 instance FromJSON RepoLabel where
-  parseJSON = withObject "Label" $ \o -> RepoLabel <$> o .: "id" <*> o .: "name"
+  parseJSON = withObject "Label" $ \o -> RepoLabel
+    <$> o .: "id" <*> o .: "name" <*> o .: "color" <*> o .:? "description" .!= ""
+
+-- | The labels an issue or pull request has, all at once, by id.
+type LabelIds :: Type
+newtype LabelIds = LabelIds {labels :: [Int64]}
+
+instance ToJSON LabelIds where
+  toJSON l = object ["labels" .= l.labels]
+
+-- | A label to create: Forgejo takes the colour with its @#@.
+type NewLabel :: Type
+data NewLabel = NewLabel {name :: Text, color :: Color, description :: Text}
+
+instance ToJSON NewLabel where
+  toJSON l = object ["name" .= l.name, "color" .= ("#" <> unparse l.color), "description" .= l.description]
 
 type IssueType :: Type
 data IssueType = Issues | Pulls

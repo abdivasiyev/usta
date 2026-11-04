@@ -6,6 +6,7 @@
 module Usta.Types.Label
   ( Color
   , Label (..)
+  , Definition (..)
   ) where
 
 import Data.Aeson (FromJSON)
@@ -39,5 +40,15 @@ type Label :: Type
 data Label = Label
   { name :: Text
   , color :: Color
+  }
+  deriving stock (Eq, Show)
+
+-- | A label as the repository defines it, to choose from or create.
+type Definition :: Type
+data Definition = Definition
+  { name :: Text
+  , color :: Color
+  , description :: Text
+    -- ^ May be empty.
   }
   deriving stock (Eq, Show)

@@ -44,6 +44,7 @@ data Icon
   | Diagram
   | Smile
   | Fit
+  | Fullscreen
   deriving (Eq, Show, Enum, Bounded)
 
 -- | An icon at the given size in pixels, in the surrounding text color.
@@ -123,6 +124,7 @@ source icon = case icon of
     [ stroke "rect" "x='3' y='5' width='18' height='14' rx='2'"
     , stroke "path" "d='M8 12h8'"
     ]
+  Fullscreen -> line [ stroke "path" "d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'" ]
   where
     svg64 parts = mconcat
       ([ "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'>" ]

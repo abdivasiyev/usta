@@ -16,16 +16,18 @@ module Usta.UI.Pages.PullRequest.Conversation
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (filterM, forM, forM_, unless, void, when)
 import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Maybe (isJust)
 import Data.Text (Text)
+import Data.Time (UTCTime (..), fromGregorian, utc)
 import qualified Data.Text as T
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
@@ -35,7 +37,8 @@ import qualified Usta.UI.Components.Thread as Thread
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
-import Usta.UI.Format (Clock, ago)
+import qualified Usta.UI.Components.Skeleton as Skeleton
+import Usta.UI.Format (Clock (..), ago)
 import Usta.UI.Pages.Issue (Comment (..))
 import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
@@ -43,7 +46,7 @@ import qualified Usta.Types.Commit as C
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
 import Usta.Types.Parse (unparse)
-import Usta.Types.Reviewer (Reviewer (..), Stance (..), Who (..))
+import Usta.Types.Reviewer (Candidate (..), Reviewer (..), Stance (..), Who (..))
 
 -- | Something that happened on the pull request. Add a constructor and a
 -- case in 'eventRow' for a new kind.
@@ -78,6 +81,7 @@ data Model = Model
   , reviewers :: [Reviewer]
   , labels :: [(Tone, Text)]
   , linkedIssues :: [Text]
+  , clock :: Clock
   }
 
 -- | What the merge box and the comment box do. Each runs off the main
@@ -90,7 +94,7 @@ data Actions = Actions
     -- ^ 'True' deletes the branch after.
   , requestReview :: [Who] -> IO (Either Text ())
   , unrequestReview :: Who -> IO (Either Text ())
-  , candidates :: IO (Either Text [Who])
+  , candidates :: IO (Either Text [Candidate])
     -- ^ Who can be asked to review.
   , refresh :: IO ()
   }
@@ -110,6 +114,7 @@ fromDiscussion c d commits (from, into) checks = Model
   , reviewers = []
   , labels = [(labelTone l.color, l.name) | l <- d.labels]
   , linkedIssues = []
+  , clock = c
   }
   where
     said verb x = Comment
@@ -305,92 +310,213 @@ details run actions m = do
       fill box
       #append side box
 
--- | A popover under @anchor@ for asking people and teams to review:
--- search, then collaborators and teams, those already reviewing checked.
+-- | A popover under @anchor@ for asking people and teams to review, as
+-- the design draws it: search, then those who changed the files before,
+-- collaborators and teams. Those already reviewing are ticked for good.
 -- Gives what opens it; the candidates load each time it opens.
 requestPicker :: Actions -> Model -> Gtk.Button -> IO (IO ())
 requestPicker actions m anchor = do
-  box <- vbox 8
-  GI.set box [#widthRequest := 300, #cssClasses := ["u-request-review"]]
-  label "Request a review" ["title"] >>= #append box
-  search <- GI.new Gtk.SearchEntry [#placeholderText := "Search people and teams"]
-  #append box search
-  list <- vbox 2
-  scroll <- GI.new Gtk.ScrolledWindow [#child := list, #maxContentHeight := 320, #propagateNaturalHeight := True, #hscrollbarPolicy := Gtk.PolicyTypeNever]
-  #append box scroll
-  problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
-  #append box problem
-  buttons <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd]
+  outer <- vbox 0
+  GI.set outer [#widthRequest := 360, #cssClasses := ["u-request-review"]]
+  top <- vbox 10
+  GI.set top [#cssClasses := ["top"]]
+  label "Request a review" ["picker-title"] >>= #append top
+  search <- GI.new Gtk.SearchEntry [#placeholderText := "Search people and teams", #cssClasses := ["search"]]
+  #append top search
+  list <- vbox 0
+  GI.set list [#cssClasses := ["rows"]]
+  scroll <- GI.new Gtk.ScrolledWindow [ #child := list, #maxContentHeight := 380, #propagateNaturalHeight := True
+                                      , #hscrollbarPolicy := Gtk.PolicyTypeNever ]
+  #append top scroll
+  #append outer top
+  bottom <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["bottom"]]
+  counter <- label "" ["muted", "small"]
+  GI.set counter [#hexpand := True]
   cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
   send <- Button.new Button.defaults {Button.label = Just "Request", Button.variant = Button.Primary}
-  #append buttons cancel >> #append buttons send
-  #append box buttons
-  popover <- GI.new Gtk.Popover [#child := box, #position := Gtk.PositionTypeBottom]
+  mapM_ (Gtk.widgetAddCssClass cancel) ["small"]
+  mapM_ (Gtk.widgetAddCssClass send) ["small"]
+  #append bottom counter >> #append bottom cancel >> #append bottom send
+  #append outer bottom
+  popover <- GI.new Gtk.Popover [#child := outer, #position := Gtk.PositionTypeBottom, #hasArrow := False, #cssClasses := ["u-request-review-pop"]]
   Gtk.widgetSetParent popover anchor
   void $ GI.on anchor #destroy (Gtk.widgetUnparent popover)
 
   chosen <- newIORef []
-  let already = [r.who | r <- m.reviewers]
+  -- Each row with what it is matched against and how it redraws.
+  rows <- newIORef []
+  let already = [(r.who, r.stance) | r <- m.reviewers]
       nameOf w = case w of
         Person l -> unparse l
-        Team t -> "team: " <> t
+        Team t -> t
       count = do
         n <- length <$> readIORef chosen
-        GI.set send [#label := if n == 0 then "Request" else "Request " <> T.pack (show n), #sensitive := n > 0]
-      clear = Gtk.widgetGetFirstChild list >>= mapM_ (\c -> Gtk.boxRemove list c >> clear)
-      fill whos = do
+        let more = if null already then "" else " more"
+        GI.set send [ #label := if n == 0 then "Request" else "Request " <> T.pack (show n) <> more
+                    , #sensitive := n > 0 ]
+      footer typed shown = GI.set counter [#label := case () of
+        _ | not (T.null typed) -> T.pack (show shown) <> (if shown == 1 then " match" else " matches")
+          | null already -> ""
+          | otherwise -> T.pack (show (length already)) <> " asked already"]
+      clear = do
+        writeIORef rows []
+        Gtk.widgetGetFirstChild list >>= mapM_ (\c -> Gtk.boxRemove list c >> clear)
+      message title text retry = do
         clear
-        let people = [w | w@(Person l) <- whos, unparse l /= m.opening.author]
-            teams = [w | w@(Team _) <- whos]
-        forM_ [("Collaborators", people), ("Teams", teams)] $ \(heading, group) ->
-          unless (null group) $ do
-            label heading ["lbl"] >>= #append list
-            forM_ group $ \w -> do
-              check <- GI.new Gtk.CheckButton [#label := nameOf w, #cssClasses := ["candidate"]]
-              when (w `elem` already) $ GI.set check [#active := True, #sensitive := False, #tooltipText := "Already reviewing"]
-              void $ GI.on check #toggled $ do
-                on' <- GI.get check #active
-                modifyIORef chosen (\xs -> if on' then w : xs else filter (/= w) xs)
-                count
-              #append list check
-        when (null people && null teams) $ label "Nobody else can be asked here." ["muted"] >>= #append list
+        box <- vbox 6
+        GI.set box [#cssClasses := ["message"] <> ["failed" | isJust retry]]
+        label title ["message-title"] >>= #append box
+        t <- label text ["muted", "small"]
+        GI.set t [#wrap := True]
+        #append box t
+        forM_ retry $ \again -> do
+          b <- Button.new Button.defaults {Button.label = Just "Try again"}
+          Gtk.widgetAddCssClass b "small"
+          GI.set b [#halign := Gtk.AlignStart]
+          void $ GI.on b #clicked again
+          #append box b
+        #append list box
+      loading = do
+        clear
+        forM_ [120, 90, 140] $ \w -> do
+          shape <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["shape"]]
+          Skeleton.bar 16 16 >>= #append shape
+          Skeleton.circle 24 >>= #append shape
+          Skeleton.bar w 10 >>= \b -> GI.set b [#valign := Gtk.AlignCenter] >> #append shape b
+          #append list shape
+      row c = do
+        let fixed = lookup c.who already
+            sub = case (c.who, c.changed) of
+              (_, files@(_ : _)) -> "changed " <> T.intercalate ", " (take 2 files) <> maybe "" (\t -> " · " <> ago m.clock t) c.lastChanged
+              _ -> c.about
+            tag = case (fixed, c.members) of
+              (Just st, _) -> Just (stanceTag st, "state")
+              (_, Just n) -> Just (T.pack (show n) <> (if n == 1 then " person" else " people"), "plain")
+              _ -> Nothing
+        button <- GI.new Gtk.Button [#cssClasses := ["candidate"] <> ["fixed" | isJust fixed], #sensitive := not (isJust fixed)]
+        content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
+        check <- GI.new Gtk.Box [#valign := Gtk.AlignCenter, #cssClasses := ["check"]]
+        mark <- Icon.new 11 Icon.Check
+        GI.set mark [#visible := isJust fixed]
+        #append check mark
+        #append content check
+        Avatar.new 24 (T.toUpper (T.take 2 (nameOf c.who))) >>= #append content
+        texts <- vbox 0
+        GI.set texts [#hexpand := True, #valign := Gtk.AlignCenter]
+        name <- GI.new Gtk.Label [#xalign := 0, #useMarkup := True, #ellipsize := Pango.EllipsizeModeEnd, #cssClasses := ["name"]]
+        #append texts name
+        unless (T.null sub) $ do
+          l <- label sub ["muted", "small"]
+          GI.set l [#ellipsize := Pango.EllipsizeModeEnd]
+          #append texts l
+        #append content texts
+        newTag <- label "new" ["tag", "new"]
+        GI.set newTag [#visible := False]
+        #append content newTag
+        forM_ tag $ \(text, kind) -> label text ["tag", kind] >>= #append content
+        GI.set button [#child := content]
+        let draw typed = GI.set name [#label := marked typed (prefix c.who) (nameOf c.who)]
+            toggle = do
+              on' <- (c.who `elem`) <$> readIORef chosen
+              modifyIORef chosen (\xs -> if on' then filter (/= c.who) xs else c.who : xs)
+              GI.set mark [#visible := not on']
+              GI.set newTag [#visible := not on']
+              (if on' then Gtk.widgetRemoveCssClass else Gtk.widgetAddCssClass) button "chosen"
+              count
+        void $ GI.on button #clicked toggle
+        draw ""
+        pure (button, T.toLower (nameOf c.who <> " " <> c.about), draw)
+      fill cs = do
+        clear
+        let mine = [c | c <- cs, notAuthor c.who]
+            groups =
+              [ ("Suggested · changed these files before", [c | c <- mine, isPerson c.who, not (null c.changed)])
+              , ("Collaborators", [c | c <- mine, isPerson c.who, null c.changed])
+              , ("Teams", [c | c <- mine, not (isPerson c.who)]) ]
+        if null mine || all (\c -> isJust (lookup c.who already)) mine
+          then message "Everyone who can review is asked already" "Add people to the repository on the forge to ask more." Nothing
+          else forM_ groups $ \(heading, group) -> unless (null group) $ do
+            h <- label (T.toUpper heading) ["lbl"]
+            #append list h
+            made <- forM group row
+            forM_ made $ \(b, _, _) -> #append list b
+            modifyIORef rows (<> [(h, made)])
+        footer "" 0
       filterBy = do
-        typed <- T.toLower <$> GI.get search #text
-        rows <- children list
-        forM_ rows $ \row -> do
-          c <- GI.castTo Gtk.CheckButton row
-          forM_ c $ \check -> do
-            text <- maybe "" T.toLower <$> Gtk.checkButtonGetLabel check
-            Gtk.widgetSetVisible check (typed `T.isInfixOf` text)
-      open = do
-        writeIORef chosen []
-        count
-        GI.set problem [#visible := False]
-        GI.set search [#text := ""]
-        clear
-        label "Loading…" ["muted"] >>= #append list
-        Gtk.popoverPopup popover
-        void (Gtk.widgetGrabFocus search)
+        typed <- T.toLower . T.strip <$> GI.get search #text
+        groups <- readIORef rows
+        shown <- forM groups $ \(h, made) -> do
+          hits <- forM made $ \(b, haystack, draw) -> do
+            let hit = typed `T.isInfixOf` haystack
+            Gtk.widgetSetVisible b hit
+            draw typed
+            pure hit
+          Gtk.widgetSetVisible h (or hits)
+          pure (length (filter id hits))
+        footer typed (sum shown)
+      load = do
+        loading
         void $ forkIO $ do
           got <- actions.candidates
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            case got of
-              Right whos -> fill whos
-              Left text -> clear >> GI.set problem [#label := text, #visible := True]
+            either (\text -> message "Could not load who can review" text (Just load)) fill got
+            filterBy
             pure False
+      open = do
+        writeIORef chosen []
+        count
+        GI.set search [#text := ""]
+        footer "" 0
+        Gtk.popoverPopup popover
+        void (Gtk.widgetGrabFocus search)
+        load
+      sendNow = do
+        whos <- readIORef chosen
+        unless (null whos) $
+          Button.busy send [cancel] "Requesting…" (actions.requestReview whos) $ \case
+            Left text -> message "Could not ask for the review" text Nothing
+            Right () -> Gtk.popoverPopdown popover >> actions.refresh
   void $ GI.on search #searchChanged filterBy
   void $ GI.on cancel #clicked (Gtk.popoverPopdown popover)
-  void $ GI.on send #clicked $ do
-    whos <- readIORef chosen
-    Button.busy send [cancel] "Requesting…" (actions.requestReview whos) $ \case
-      Left text -> GI.set problem [#label := text, #visible := True]
-      Right () -> Gtk.popoverPopdown popover >> actions.refresh
+  void $ GI.on send #clicked sendNow
+  -- Before the rows, so Enter asks wherever the focus is.
+  keys <- GI.new Gtk.ShortcutController [#propagationPhase := Gtk.PropagationPhaseCapture]
+  shortcut keys "<Primary>Return" sendNow
+  shortcut keys "Return" sendNow
+  Gtk.widgetAddController popover keys
+  -- Down from the search goes to the first row shown.
+  down <- GI.new Gtk.ShortcutController []
+  shortcut down "Down" $ do
+    groups <- readIORef rows
+    visible <- filterM Gtk.widgetGetVisible [b | (_, made) <- groups, (b, _, _) <- made]
+    forM_ (take 1 visible) Gtk.widgetGrabFocus
+  Gtk.widgetAddController search down
   pure open
   where
-    children w = Gtk.widgetGetFirstChild w >>= go
-      where
-        go Nothing = pure []
-        go (Just c) = (c :) <$> (Gtk.widgetGetNextSibling c >>= go)
+    notAuthor w = case w of
+      Person l -> unparse l /= m.opening.author
+      Team _ -> True
+    isPerson w = case w of
+      Person _ -> True
+      Team _ -> False
+    prefix w = case w of
+      Person _ -> ""
+      Team _ -> "<span foreground='#5B616B'>team:</span> "
+    stanceTag st = case st of
+      Waiting -> "requested"
+      Approved -> "approved"
+      ChangesRequested -> "changes"
+      Commented -> "commented"
+    -- The name with the typed text marked, as Pango markup.
+    marked typed before name
+      | T.null typed = before <> escape name
+      | otherwise = case T.breakOn typed (T.toLower name) of
+          (pre, hit) | not (T.null hit) ->
+            let (a, rest) = T.splitAt (T.length pre) name
+                (b, c) = T.splitAt (T.length typed) rest
+            in before <> escape a <> "<span background='#FBF0D9' foreground='#1B1D21'>" <> escape b <> "</span>" <> escape c
+          _ -> before <> escape name
+    escape = T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "&" "&amp;"
 
 -- | A reviewer: who, where they stand, and a button that asks them again
 -- once they reviewed, or stops asking while they have not.
@@ -452,15 +578,37 @@ sample = Model
   , reviewers = []
   , labels = [(Accent, "gtk"), (Neutral, "build")]
   , linkedIssues = ["#5 Render the main window with GTK4"]
+  , clock = Clock {now = UTCTime (fromGregorian 2026 1 1) 0, zone = utc}
   }
 
 css :: Text
 css = mconcat
   [ "box.u-conversation button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
-  , "box.u-request-review { padding: 6px; }"
-  , "box.u-request-review label.title { font-weight: 600; }"
-  , "box.u-request-review label.lbl { margin-top: 6px; font-size: 11px; font-weight: 600; color: var(--text-muted); }"
-  , "box.u-request-review label.problem { color: var(--danger); font-size: 12px; }"
+  , "popover.u-request-review-pop > contents { padding: 0; border-radius: 12px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 12px 32px rgba(27,29,33,0.16); }"
+  , "box.u-request-review box.top { padding: 14px 14px 8px; }"
+  , "box.u-request-review label.picker-title { font-size: 15px; font-weight: 600; color: var(--text); }"
+  , "box.u-request-review entry.search, box.u-request-review searchbar entry { min-height: 34px; border-radius: 8px; }"
+  , "box.u-request-review entry.search:focus-within { box-shadow: 0 0 0 2px var(--accent); }"
+  , "box.u-request-review label.lbl { margin: 8px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text-muted); }"
+  , "box.u-request-review button.candidate { min-height: 40px; padding: 4px 8px; border: none; border-radius: 6px; box-shadow: none; background: transparent; background-image: none; color: var(--text); }"
+  , "box.u-request-review button.candidate:hover { background: var(--border-subtle); }"
+  , "box.u-request-review button.candidate:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }"
+  , "box.u-request-review button.candidate.chosen { background: var(--accent-bg); }"
+  , "box.u-request-review button.candidate.fixed { opacity: 0.85; }"
+  , "box.u-request-review box.check { min-width: 16px; min-height: 16px; border-radius: 4px; border: 1.5px solid var(--input-border); background: var(--surface); color: #FFFFFF; }"
+  , "box.u-request-review button.chosen box.check { border-color: var(--accent); background: var(--accent); }"
+  , "box.u-request-review button.fixed box.check { border-color: var(--border); background: var(--border); }"
+  , "box.u-request-review label.name { font-weight: 500; }"
+  , "box.u-request-review label.small { font-size: 12px; }"
+  , "box.u-request-review label.tag { padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }"
+  , "box.u-request-review label.tag.new { background: var(--accent-bg); color: var(--accent-soft); }"
+  , "box.u-request-review label.tag.state { background: var(--border-subtle); color: var(--text-muted); }"
+  , "box.u-request-review label.tag.plain { color: var(--text-muted); font-weight: 400; }"
+  , "box.u-request-review box.shape { margin: 6px 8px; }"
+  , "box.u-request-review box.message { margin: 8px 6px 6px; }"
+  , "box.u-request-review box.message label.message-title { font-weight: 600; color: var(--text); }"
+  , "box.u-request-review box.bottom { padding: 10px 14px; border-top: 1px solid var(--border-subtle); background: var(--window); border-radius: 0 0 12px 12px; }"
+  , "box.u-request-review button.small { min-height: 28px; padding: 0 10px; font-size: 13px; border-radius: 6px; }"
   , "box.u-conversation box.reviewer label.name { font-weight: 500; }"
   , "box.u-conversation box.reviewer label.small { font-size: 12px; }"
   , "box.u-conversation box.reviewer label.waiting { color: var(--warning); }"

@@ -115,6 +115,7 @@ executable usta
     Usta.Types.Timeline
     Usta.Types.Token
     Usta.UI.Components.AssignPickers
+    Usta.UI.Components.Attach
     Usta.UI.Components.Avatar
     Usta.UI.Components.Badge
     Usta.UI.Components.BranchPicker
@@ -192,6 +193,7 @@ executable usta
     gi-gdk4,
     gi-gio,
     gi-glib,
+    gi-gobject,
     gi-graphene,
     gi-gtk4,
     gi-pango,

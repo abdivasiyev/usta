@@ -25,6 +25,7 @@ import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
 import Usta.UI.Components.CommandPalette (shortcut)
+import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.Segmented as Segmented
@@ -39,10 +40,13 @@ data Config = Config
   , compact :: Bool
     -- ^ For a narrow box, such as the review panel: the toolbar on its own
     -- row under the tabs, with the less used tools under ⋯.
+  , upload :: Maybe Attach.Uploader
+    -- ^ Where attached, pasted and dropped files go; none where there is
+    -- no issue or pull request yet.
   }
 
 defaults :: Config
-defaults = Config { text = "", hint = Nothing, height = 120, compact = False }
+defaults = Config { text = "", hint = Nothing, height = 120, compact = False, upload = Nothing }
 
 -- | The editor and its buffer, to read what was written.
 new :: Config -> IO (Gtk.Box, Gtk.TextBuffer)
@@ -91,6 +95,9 @@ new cfg = do
       #append into b
   GI.new Gtk.Separator [#orientation := Gtk.OrientationVertical] >>= #append tools
   emojiButton view >>= #append tools
+  -- Attached files: the button, a pasted image, or files dropped in.
+  uploading <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["hint"]]
+  forM_ cfg.upload $ \up -> Attach.attach up view uploading >>= #append tools
   when cfg.compact $ do
     moreLabel <- GI.new Gtk.Label [#label := "⋯"]
     moreButton <- GI.new Gtk.MenuButton [#child := moreLabel, #popover := morePopover, #tooltipText := "More tools", #cssClasses := ["tool"]]
@@ -128,6 +135,7 @@ new cfg = do
         set tools [#sensitive := name == "write"]
         when (name == "write") $ void (Gtk.widgetGrabFocus view)
 
+  #append box uploading
   forM_ cfg.hint $ \h ->
     GI.new Gtk.Label [#label := h, #xalign := 0, #cssClasses := ["hint"]] >>= #append box
   pure (box, buffer)

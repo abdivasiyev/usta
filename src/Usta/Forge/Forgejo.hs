@@ -23,7 +23,7 @@ import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.List (nub, sortOn)
-import Data.Maybe (listToMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Ord (Down (..))
@@ -32,13 +32,14 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time (UTCTime, addUTCTime, getCurrentTime, nominalDay)
 import qualified Network.HTTP.Client as HTTP
-import Servant.Client (BaseUrl, ClientM)
+import Servant.Client (BaseUrl (..), ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
 
 import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
+import qualified Usta.Types.Check as C
 import Usta.Types.Diff (parseDiff)
 import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..), Verdict (..))
 import Usta.Types.Host (Host)
@@ -62,6 +63,8 @@ import Usta.Types.Token (Token)
 forgejo :: HTTP.Manager -> BaseUrl -> Host -> Token -> IO Forge
 forgejo manager base host token = do
   let client = connect manager base (authorization token)
+      -- The site's own pages, for what the API lacks.
+      site = connect manager base {baseUrlPath = siteOf base.baseUrlPath} (authorization token)
   details <- newIORef Map.empty
   running <- newIORef Map.empty
   -- Who the token signs in as, asked once, to find the user's reviews.
@@ -147,6 +150,12 @@ forgejo manager base host token = do
         said <- concat <$> traverse (\r -> run client (Api.api.reviewComments (owner repo) (shortName repo) n r.id)) [r | r <- given, r.comments > 0]
         let mine = [t | r <- given, Just u <- [r.user], u.login == login, Just t <- [r.submittedAt]]
         pure Th.Threads {threads = threadsOf said, lastReviewed = if null mine then Nothing else Just (maximum mine)}
+    , checks = \repo n -> do
+        pull <- run client (Api.api.pullRequest (owner repo) (shortName repo) n)
+        combined <- run client (Api.api.status (owner repo) (shortName repo) pull.head.sha)
+        pure (map (checkOf host) combined.statuses)
+    -- The first attempt's: the status links the job, not its attempts.
+    , checkLog = \repo job -> run site (Api.web.jobLog (owner repo) (shortName repo) job.run job.index 1)
     -- Forgejo has no reply to a thread; a comment on the same line joins it.
     , reply = \repo n t text -> () <$ run client (Api.api.review (owner repo) (shortName repo) n
         Api.NewReview {verdict = CommentOnly, body = "", lines = [Api.LineComment {path = t.path, line = t.line, body = text}]})
@@ -351,6 +360,40 @@ reviewOf pull given
     counted = [r | r <- given, not r.stale, not r.dismissed, r.state `elem` ["APPROVED", "REQUEST_CHANGES"]]
     lastBy = Map.fromList [(fmap (unparse . (.login)) r.user, r.state) | r <- counted]
     verdicts = Map.elems lastBy
+
+-- | The site's root from the API's path: "/api/v1" off its end.
+siteOf :: String -> String
+siteOf path = maybe path T.unpack (T.stripSuffix "/api/v1" (T.pack path))
+
+-- | A status as a check. Forgejo Actions says a skipped job "Has been
+-- skipped" in a success, and one waiting "Waiting to run" or "Blocked by
+-- required conditions" in a pending one, like a running one.
+checkOf :: Host -> Api.CommitStatus -> C.Check
+checkOf host s = C.Check
+  { name = fromMaybe s.context (T.stripPrefix "/ " s.context)
+  , state = case s.status of
+      "success" | "skipped" `T.isInfixOf` T.toLower s.description -> C.Skipped
+      "success" -> C.Passed
+      "warning" -> C.Passed
+      "skipped" -> C.Skipped
+      "failure" -> C.Failed
+      "error" -> C.Failed
+      _ | any (`T.isPrefixOf` s.description) ["Waiting", "Blocked"] -> C.Waiting
+        | otherwise -> C.Running
+  , description = s.description
+  , url = case s.targetUrl of
+      "" -> Nothing
+      u | "/" `T.isPrefixOf` u -> Just ("https://" <> unparse host <> u)
+        | otherwise -> Just u
+  , job = jobOf s.targetUrl
+  }
+
+-- | The job a status links, "…/actions/runs/{run}/jobs/{index}".
+jobOf :: Text -> Maybe C.Job
+jobOf u = case reverse (T.splitOn "/" u) of
+  index : "jobs" : run' : "runs" : "actions" : _ ->
+    C.Job <$> readMaybe (T.unpack run') <*> readMaybe (T.unpack index)
+  _ -> Nothing
 
 checksOf :: Api.CombinedStatus -> Maybe P.Checks
 checksOf combined

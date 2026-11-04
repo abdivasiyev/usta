@@ -23,12 +23,16 @@ module Usta.Git
   , history
   , commitDiff
   , recent
+  , page
+  , branches
+  , tags
   , readme
   , tree
   , blob
   ) where
 
-import Control.Exception (Exception, throwIO, try)
+import Control.Exception (Exception, SomeException, throwIO, try)
+import Control.Monad (forM)
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (toLower)
 import Data.Kind (Type)
@@ -45,6 +49,7 @@ import System.FilePath (takeDirectory)
 import System.Process.Typed (proc, readProcess, setEnv)
 import Text.Read (readMaybe)
 
+import Usta.Types.Branch (Branch (..), Tag (..))
 import Usta.Types.Commit (Commit (..), Sha)
 import Usta.Types.Diff (FileDiff, parseDiff)
 import Usta.Types.Parse (parseM, unparse)
@@ -136,6 +141,38 @@ history path base tip =
 recent :: FilePath -> Text -> Int -> IO [Commit]
 recent path ref n =
   git ["-C", path, "log", "-n", show n, format, "--end-of-options", T.unpack ref] >>= commits
+
+-- | Up to @n@ commits on a ref after skipping @skip@, newest first, for
+-- a history read a page at a time.
+page :: FilePath -> Text -> Int -> Int -> IO [Commit]
+page path ref skip n =
+  git ["-C", path, "log", "--skip=" <> show skip, "-n", show n, format, "--end-of-options", T.unpack ref] >>= commits
+
+-- | Every branch, most recently committed first, with how far each is
+-- ahead of and behind @base@.
+branches :: FilePath -> Text -> IO [Branch]
+branches path base = do
+  out <- git ["-C", path, "for-each-ref", "--sort=-committerdate", "--format=%(refname:short)%1f%(committerdate:iso-strict)", "refs/heads"]
+  forM [l | l <- T.lines out, not (T.null l)] $ \line -> do
+    let (name, rest) = T.breakOn "\x1f" line
+    when' <- either (\(_ :: SomeException) -> Nothing) Just <$> try (utcOf (T.unpack (T.drop 1 rest)))
+    counts <- if name == base
+      then pure (Just 0, Just 0)
+      else do
+        counted <- try (git ["-C", path, "rev-list", "--left-right", "--count", "--end-of-options", T.unpack base <> "..." <> T.unpack name])
+        pure $ case either (\(_ :: SomeException) -> []) T.words counted of
+          [behind, ahead] -> (readMaybe (T.unpack ahead), readMaybe (T.unpack behind))
+          _ -> (Nothing, Nothing)
+    pure Branch {name = name, pushed = when', ahead = fst counts, behind = snd counts}
+
+-- | Every tag, newest first.
+tags :: FilePath -> IO [Tag]
+tags path = do
+  out <- git ["-C", path, "for-each-ref", "--sort=-creatordate", "--format=%(refname:short)%1f%(creatordate:iso-strict)", "refs/tags"]
+  forM [l | l <- T.lines out, not (T.null l)] $ \line -> do
+    let (name, rest) = T.breakOn "\x1f" line
+    when' <- either (\(_ :: SomeException) -> Nothing) Just <$> try (utcOf (T.unpack (T.drop 1 rest)))
+    pure Tag {name = name, at = when'}
 
 -- | The README at the top of a ref, with its file name; 'Nothing' when
 -- there is none.

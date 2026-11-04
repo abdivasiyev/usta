@@ -79,6 +79,7 @@ executable usta
     Usta.Preferences
     Usta.Sync
     Usta.Types.Account
+    Usta.Types.Branch
     Usta.Types.Check
     Usta.Types.Commit
     Usta.Types.Count

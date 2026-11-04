@@ -79,6 +79,7 @@ executable usta
     Usta.Keyring
     Usta.Mermaid
     Usta.Mirrors
+    Usta.OAuth
     Usta.Pins
     Usta.Preferences
     Usta.Sync

@@ -157,7 +157,9 @@ data Tab = Tab
 
 -- | The page, and what shows one repository, by host and name, as a pin
 -- in the sidebar asks.
-new :: Actions -> [Repository] -> IO (Page Repository, (Text, Text) -> IO ())
+-- | The page, and what shows one repository (host and name), or a file
+-- in it (branch and path, "#L12" for a line) on its Files tab.
+new :: Actions -> [Repository] -> IO (Page Repository, (Text, Text) -> Maybe (Text, Text) -> IO ())
 new actions repositories = do
   items <- newIORef repositories
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
@@ -175,6 +177,8 @@ new actions repositories = do
                              , #cssClasses := ["u-repo-pane"]
                              ]
   selectedKey <- newIORef Nothing
+  -- What opens a file in the repository shown.
+  opener <- newIORef (\_ _ -> pure ())
   -- A sync refills the list, which drops the selection for a moment and
   -- selects the same repository again: its detail stays as it is, on the
   -- tab, file and scroll position the user left it.
@@ -188,7 +192,9 @@ new actions repositories = do
         clear detail
         GI.set listPane [#visible := True]
         -- Every tab but Overview takes the list's room, as the design draws it.
-        repositoryDetail actions r (\wide -> GI.set listPane [#visible := not wide]) >>= #append detail
+        (shown', openFile) <- repositoryDetail actions r (\wide -> GI.set listPane [#visible := not wide])
+        writeIORef opener openFile
+        #append detail shown'
 
   (search, entry) <- SearchField.new SearchField.defaults
     { SearchField.placeholder = "Filter repositories"
@@ -227,10 +233,11 @@ new actions repositories = do
         row <- Gtk.listBoxGetRowAtIndex list (fromIntegral at)
         Gtk.listBoxSelectRow list row
   select
-  let show' wanted = do
+  let show' wanted file = do
         shown <- readIORef items
-        forM_ (lookup wanted (zip (map key shown) [0 :: Int ..])) $ \i ->
+        forM_ (lookup wanted (zip (map key shown) [0 :: Int ..])) $ \i -> do
           Gtk.listBoxGetRowAtIndex list (fromIntegral i) >>= Gtk.listBoxSelectRow list
+          forM_ file $ \(branch, path) -> readIORef opener >>= \open' -> open' branch path
   pure . (, show') $ Page
     { widget = page
     , update = \shown -> do
@@ -245,19 +252,20 @@ new actions repositories = do
 -- | The Overview, Files and later tabs over the one chosen, with the
 -- branch picker; @onWide@ runs with whether a tab other than Overview is
 -- shown. Choosing a branch draws the tabs again for it, on the same tab.
-repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO Gtk.Box
+repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO (Gtk.Box, Text -> Text -> IO ())
 repositoryDetail actions r onWide = do
   holder <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
-  let draw branch tab = do
+  let drawWith file branch tab = do
         clear holder
-        onBranch actions r {defaultBranch = branch} r.defaultBranch tab draw onWide >>= #append holder
-  draw r.defaultBranch "overview"
-  pure holder
+        onBranch actions r {defaultBranch = branch} r.defaultBranch tab file (drawWith Nothing) onWide >>= #append holder
+  drawWith Nothing r.defaultBranch "overview"
+  pure (holder, \branch path -> drawWith (Just path) branch "overview")
 
 -- | The tabs for @r@ on its 'defaultBranch', the one chosen; @realDefault@
--- is the repository's own; @startTab@ is shown first.
-onBranch :: Actions -> Repository -> Text -> Text -> (Text -> Text -> IO ()) -> (Bool -> IO ()) -> IO Gtk.Box
-onBranch actions r realDefault startTab redraw onWide = do
+-- is the repository's own; @startTab@ is shown first, or the Files tab
+-- on @startFile@.
+onBranch :: Actions -> Repository -> Text -> Text -> Maybe Text -> (Text -> Text -> IO ()) -> (Bool -> IO ()) -> IO Gtk.Box
+onBranch actions r realDefault startTab startFile redraw onWide = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
   tabBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
   stack <- GI.new Gtk.Stack [ #vexpand := True
@@ -315,6 +323,7 @@ onBranch actions r realDefault startTab redraw onWide = do
     writeIORef built True
     actions.files r (Just path) >>= #append filesSlot
     forM_ (take 1 (drop 1 buttons)) $ \b -> GI.set b [#active := True]
+  forM_ startFile $ \path -> readIORef openFiles >>= ($ path)
   #append box tabBar
   #append box stack
   pure box

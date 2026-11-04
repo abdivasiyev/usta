@@ -32,6 +32,7 @@ import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import System.FilePath (takeExtension)
+import Text.Read (readMaybe)
 
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.CodeView as CodeView
@@ -343,7 +344,7 @@ fileView actions follow anchor place e bytes = do
   body <- case content of
     Text text | markdown -> do
       stack <- GI.new Gtk.Stack []
-      rendered <- Markdown.newAt follow anchor text
+      rendered <- Markdown.newAt follow (if isJust line then Nothing else anchor) text
       Gtk.widgetAddCssClass rendered "rendered"
       void $ Gtk.stackAddNamed stack rendered (Just "rendered")
       (source, view) <- CodeView.withView e.path text
@@ -354,10 +355,12 @@ fileView actions follow anchor place e bytes = do
         on <- GI.get toggle #active
         Gtk.stackSetVisibleChildName stack (if on then "source" else "rendered")
       #append toolsRow toggle
+      forM_ line $ \n -> GI.set toggle [#active := True] >> goToLine view n
       Gtk.toWidget stack
     Text text -> do
       (source, view) <- CodeView.withView e.path text
       writeIORef findSlot (Just view)
+      forM_ line (goToLine view)
       pure source
     Image -> do
       image <- ImageView.texture bytes
@@ -383,9 +386,23 @@ fileView actions follow anchor place e bytes = do
   Gtk.toWidget box
   where
     markdown = any (`T.isSuffixOf` T.toLower e.path) [".md", ".markdown"]
+    -- "L12", as a forge link's #L12 asks.
+    line = anchor >>= T.stripPrefix "L" >>= readMaybe . T.unpack
     linesOf content = case content of
       Text text -> [T.pack (show (length (T.lines text))) <> " lines"]
       _ -> []
+
+-- | Scrolls to line @n@ (from 1) and selects it; a mark scrolls once the
+-- view is laid out.
+goToLine :: Gtk.TextView -> Int -> IO ()
+goToLine view n = do
+  buffer <- Gtk.textViewGetBuffer view
+  start <- Gtk.textBufferGetIterAtLine buffer (fromIntegral (n - 1)) >>= \(_, it) -> pure it
+  end <- Gtk.textIterCopy start
+  void (Gtk.textIterForwardToLineEnd end)
+  Gtk.textBufferSelectRange buffer start end
+  mark <- Gtk.textBufferCreateMark buffer Nothing start True
+  Gtk.textViewScrollToMark view mark 0 True 0 0.3
 
 -- | Bytes as people read them: "870 B", "6.1 KB", "1.4 MB".
 size :: Int -> Text

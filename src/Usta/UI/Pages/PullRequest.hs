@@ -67,8 +67,9 @@ tabName = T.toLower . T.pack . show
 -- @tabContent@ builds each tab's screen, given what sets the header's
 -- state badge, for when the forge says otherwise than the list did.
 -- | @checkOut@ opens Check out locally beside the button it is given.
-new :: Text -> IO () -> (Text -> IO (Either Text ())) -> Issue.Watch -> (Gtk.Widget -> IO ()) -> ((State -> IO ()) -> Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
-new backLabel onBack rename watch checkOut tabContent summary = do
+-- | The page on @opening@, its first tab shown.
+new :: Tab -> Text -> IO () -> (Text -> IO (Either Text ())) -> Issue.Watch -> (Gtk.Widget -> IO ()) -> ((State -> IO ()) -> Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
+new opening backLabel onBack rename watch checkOut tabContent summary = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
@@ -86,7 +87,7 @@ new backLabel onBack rename watch checkOut tabContent summary = do
     widget <- tabContent showState tab
     void $ Gtk.stackAddNamed content widget (Just (tabName tab))
 
-  tabBar summary (Gtk.stackSetVisibleChildName content . tabName) >>= #append page
+  tabBar summary opening (Gtk.stackSetVisibleChildName content . tabName) >>= #append page
   #append page content
   pure page
 
@@ -149,8 +150,8 @@ header s backLabel onBack rename watch checkOut = do
     url = "https://" <> s.host <> "/" <> s.repo <> path <> T.pack (show s.number)
 
 -- | Underlined tabs with counts; calls @onSelect@ with the chosen tab.
-tabBar :: Summary -> (Tab -> IO ()) -> IO Gtk.Box
-tabBar s onSelect = do
+tabBar :: Summary -> Tab -> (Tab -> IO ()) -> IO Gtk.Box
+tabBar s opening onSelect = do
   bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 4
                         , #cssClasses := ["pr-tabs"]
@@ -177,6 +178,7 @@ tabBar s onSelect = do
     void $ GI.on button #toggled $ do
       active <- GI.get button #active
       when active (onSelect tab)
+  forM_ (lookup opening buttons) $ \b -> GI.set b [#active := True]
   pure bar
   where
     count tab = case tab of

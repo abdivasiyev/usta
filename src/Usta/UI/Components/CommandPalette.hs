@@ -22,6 +22,9 @@ import Data.List (find, findIndex)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
+import qualified GI.GLib as GLib
+import Control.Exception (SomeException, try)
+import Control.Concurrent (forkIO)
 
 import qualified Usta.UI.Components.Shortcut as Shortcut
 
@@ -44,6 +47,8 @@ data Model = Model
     -- ^ Shown before anything is typed.
   , items :: [Item]
     -- ^ Everything searchable, commands included.
+  , search :: Text -> IO [Item]
+    -- ^ The forges' own search, closed ones too; off the main thread.
   }
 
 -- | What was typed, parsed once: an optional kind prefix and the search term.
@@ -147,11 +152,14 @@ new content model = do
 
   footer <- Shortcut.bar
     [("↑ ↓", "move"), ("Enter", "open"), ("Ctrl Enter", "open in browser")]
-    (Just "Searching local cache")
+    (Just "The local cache first, then the forges")
   Gtk.widgetAddCssClass footer "footer"
   #append palette footer
 
-  current <- newIORef (Model [] [])
+  current <- newIORef (Model [] [] (const (pure [])))
+  -- The forges' answer for a term, and the search waiting to start.
+  remote <- newIORef ("", Nothing :: Maybe [Item])
+  pending <- newIORef Nothing
   shown <- newIORef []
   let chipKind = do
         active <- forM kindChips $ \(c, k) -> do
@@ -166,7 +174,19 @@ new content model = do
         text <- Gtk.editableGetText entry
         selected <- chipKind
         Gtk.listBoxRemoveAll list
-        rows <- fmap concat $ forM (sections selected (parseQuery text) m) $ \(name, xs) -> do
+        let Query typed term = parseQuery text
+            kind = typed <|> selected
+            searchesForges = T.length term >= 3 && kind /= Just Command
+        (asked, answer) <- readIORef remote
+        let forgeSection
+              | not searchesForges = []
+              | asked /= term = [("On the forges · searching…", [])]
+              | otherwise = case answer of
+                  Nothing -> [("On the forges · searching…", [])]
+                  Just found -> [("On the forges", [i | i <- found, maybe True (== i.kind) kind, (i.title, i.detail) `notElem` cached])]
+            local = sections selected (parseQuery text) m
+            cached = [(i.title, i.detail) | (_, xs) <- local, i <- xs]
+        rows <- fmap concat $ forM (local <> forgeSection) $ \(name, xs) -> do
           header <- GI.new Gtk.ListBoxRow [ #selectable := False
                                           , #activatable := False
                                           , #cssClasses := ["header"]
@@ -181,6 +201,20 @@ new content model = do
             pure (row, item)
         writeIORef shown rows
         forM_ (take 1 rows) $ Gtk.listBoxSelectRow list . Just . fst
+        -- A new term waits 400 ms, then asks the forges.
+        when (searchesForges && asked /= term) $ do
+          writeIORef remote (term, Nothing)
+          readIORef pending >>= mapM_ GLib.sourceRemove
+          source <- GLib.timeoutAdd GLib.PRIORITY_DEFAULT 400 $ do
+            writeIORef pending Nothing
+            void $ forkIO $ do
+              found <- either (\(_ :: SomeException) -> []) id <$> try (m.search term)
+              void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                (now', _) <- readIORef remote
+                when (now' == term) $ writeIORef remote (term, Just found) >> refresh
+                pure False
+            pure False
+          writeIORef pending (Just source)
 
       selectedIndex = do
         rows <- readIORef shown

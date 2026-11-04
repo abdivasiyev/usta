@@ -16,7 +16,7 @@ module Usta.UI.Source
   ) where
 
 import Control.Exception (IOException, SomeException, displayException, try)
-import Control.Monad (when)
+import Control.Monad (forM, when)
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.Kind (Type)
@@ -54,6 +54,7 @@ import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Release (Release)
+import Usta.Types.Search (Found)
 import qualified Usta.Types.Insights as Insights
 import Data.Time (UTCTime)
 import Usta.Types.Check (Check, Job, Run)
@@ -198,6 +199,9 @@ data Source = Source
   , tagList :: Text -> Text -> IO (Either Text (From, [Tag]))
   , upload :: Text -> Text -> Int -> Text -> ByteString -> IO (Either Text Text)
     -- ^ By host, repository, number, file name and bytes: where it is served.
+  , searchForges :: Text -> IO [(Kind, Text, Found)]
+    -- ^ Every signed-in forge's own search, with its kind and host; a
+    -- forge that does not answer finds nothing.
   , starred :: Text -> Text -> IO (Either Text Bool)
   , setStarred :: Text -> Text -> Bool -> IO (Either Text ())
   , pins :: IO [(Text, Text)]
@@ -343,6 +347,7 @@ fromDatabase pool changes statuses sync = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
+  , searchForges = \_ -> pure []
   , starred = \_ _ -> pure (Left unavailable)
   , setStarred = \_ _ _ -> pure (Left unavailable)
   , pins = Pins.pins
@@ -437,6 +442,7 @@ samples = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
+  , searchForges = \_ -> pure []
   , starred = \_ _ -> pure (Right False)
   , setStarred = \_ _ _ -> pure (Left unavailable)
   , pins = pure []
@@ -518,6 +524,11 @@ withAccounts pool accounts source = source
   , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
   , releases = \host repo -> onRepo host repo (\f name -> f.releases name)
+  , searchForges = \words' -> do
+      rows <- run pool listAccounts
+      fmap concat $ forM rows $ \(key, a) -> accounts.forgeOf key >>= \case
+        Nothing -> pure []
+        Just f -> either (\(_ :: SomeException) -> []) (map (\x -> (a.forge, unparse a.host, x))) <$> try (f.search words')
   , starred = \host repo -> onRepo host repo (\f name -> f.starred name)
   , setStarred = \host repo on -> onRepo host repo (\f name -> f.setStarred name on)
   , upload = \host repo n file bytes -> onForge host repo n (\f name number -> f.upload name number file bytes)
@@ -674,6 +685,7 @@ tracking track s = s
   , branchList = \h r b -> track (s.branchList h r b)
   , tagList = \h r -> track (s.tagList h r)
   , releases = \h r -> track (s.releases h r)
+  , searchForges = \w -> track (s.searchForges w)
   , starred = \h r -> track (s.starred h r)
   , setStarred = \h r o -> track (s.setStarred h r o)
   , upload = \h r n f b -> track (s.upload h r n f b)

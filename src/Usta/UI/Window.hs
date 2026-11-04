@@ -94,6 +94,7 @@ import Usta.Types.Parse (parse, unparse)
 import qualified Usta.Types.Commit as C
 import Usta.UI.Format (Clock, ago, clock, short)
 import qualified Usta.Forge as Forge
+import qualified Usta.Types.Search as Search
 import qualified Usta.Sync as Sync
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (find)
@@ -633,6 +634,7 @@ buildAt start given app = do
         pure CommandPalette.Model
           { CommandPalette.recent = take 1 pullRequests <> take 1 issues <> take 1 (drop 1 repositories)
           , CommandPalette.items = pullRequests <> issues <> repositories <> commands
+          , CommandPalette.search = \words' -> map (foundItem openPullRequest openIssue (\at -> showPage Sidebar.Repositories >> showRepository at)) <$> source.searchForges words'
           }
   rootWidget <- Gtk.toWidget root
   (withPalette, openPalette) <- CommandPalette.new rootWidget paletteModel
@@ -918,6 +920,27 @@ issueItem open i = CommandPalette.Item CommandPalette.Issue i.title
 repositoryItem :: IO () -> Repositories.Repository -> CommandPalette.Item
 repositoryItem open r = CommandPalette.Item CommandPalette.Repository r.name
   r.host open
+
+-- | What a forge's search found, opened in usta.
+foundItem :: (Text -> PullRequest.Summary -> IO ()) -> (Text -> Issue.Model -> IO ()) -> ((Text, Text) -> IO ())
+          -> (Forge.Kind, Text, Search.Found) -> CommandPalette.Item
+foundItem openPull openIssue' openRepository (forge, host, x) = case (x.kind, x.number) of
+  (Search.PullRequest, Just n) -> CommandPalette.Item CommandPalette.PullRequest x.title (shortRef x.repo n <> closedNote) $
+    openPull "Back" PullRequest.Summary
+      { PullRequest.forge = forge, PullRequest.host = host, PullRequest.repo = x.repo, PullRequest.number = n
+      , PullRequest.title = x.title, PullRequest.state = if x.closed then PullRequest.Closed else PullRequest.Open
+      , PullRequest.comments = 0, PullRequest.files = 0, PullRequest.commits = 0
+      , PullRequest.checks = Nothing, PullRequest.branches = ("", "")
+      }
+  (Search.Issue, Just n) -> CommandPalette.Item CommandPalette.Issue x.title (shortRef x.repo n <> closedNote) $
+    openIssue' "Back" Issue.Model
+      { Issue.forge = forge, Issue.host = host, Issue.repo = x.repo, Issue.number = n
+      , Issue.title = x.title, Issue.closed = x.closed, Issue.comments = [], Issue.events = [], Issue.timeline = []
+      , Issue.assignees = [], Issue.labels = [], Issue.milestone = Nothing, Issue.linkedPullRequests = []
+      }
+  _ -> CommandPalette.Item CommandPalette.Repository x.repo host (openRepository (host, x.repo))
+  where
+    closedNote = if x.closed then " · closed" else ""
 
 -- | A pull request's page on its forge.
 pullUrl :: PullRequest.Summary -> Text

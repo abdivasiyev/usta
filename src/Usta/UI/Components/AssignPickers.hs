@@ -13,6 +13,8 @@ module Usta.UI.Components.AssignPickers
   , Milestones (..)
   , milestone
   , progressText
+  , assigneesSection
+  , milestoneSection
   , css
   ) where
 
@@ -30,6 +32,7 @@ import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Avatar as Avatar
+import qualified Usta.UI.Components.Card as Card
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Icon as Icon
 import Usta.UI.Format (Clock, date)
@@ -268,6 +271,68 @@ milestone m anchor = do
   where
     fraction x = let total = x.openItems + x.closedItems in if total == 0 then 0 else fromIntegral x.closedItems / fromIntegral total
 
+-- | The sidebar's Assignees: who, with Edit; with nobody, "No one" and
+-- "Assign yourself", which assigns you at once. Gives the section and
+-- what opens the picker.
+assigneesSection :: Assignees -> IO (Gtk.Box, IO ())
+assigneesSection a = do
+  section <- box 6
+  (header, edit) <- sectionHead "Assignees" "Edit assignees (a)"
+  #append section header
+  forM_ a.current $ \login -> do
+    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+    Avatar.new 22 (T.toUpper (T.take 2 (unparse login))) >>= #append row
+    label (unparse login) [] >>= #append row
+    #append section row
+  when (null a.current) $ do
+    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+    label "No one" ["muted"] >>= #append row
+    forM_ a.me $ \self -> do
+      label "·" ["muted"] >>= #append row
+      link <- GI.new Gtk.Button [#label := "Assign yourself", #cssClasses := ["link-button"]]
+      void $ GI.on link #clicked $ do
+        GI.set link [#sensitive := False]
+        void $ forkIO $ do
+          result <- a.save [self]
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            either (\e -> GI.set link [#sensitive := True, #tooltipText := e]) (const a.saved) result
+            pure False
+      #append row link
+    #append section row
+  open <- assignees a edit
+  void $ GI.on edit #clicked open
+  pure (section, open)
+
+-- | The sidebar's Milestone: its title, progress and due date, with Edit.
+milestoneSection :: Milestones -> Maybe Milestone -> IO (Gtk.Box, IO ())
+milestoneSection m info = do
+  section <- box 6
+  (header, edit) <- sectionHead "Milestone" "Edit milestone (m)"
+  #append section header
+  case (info, m.current) of
+    (Just x, _) -> do
+      label x.title ["name"] >>= #append section
+      label (progressText m.clock x) ["muted", "small"] >>= #append section
+      let total = x.openItems + x.closedItems
+      GI.new Gtk.ProgressBar [#fraction := (if total == 0 then 0 else fromIntegral x.closedItems / fromIntegral total), #cssClasses := ["milestone-bar"]]
+        >>= #append section
+    (Nothing, Just title) -> label title [] >>= #append section
+    (Nothing, Nothing) -> label "None" ["muted"] >>= #append section
+  open <- milestone m edit
+  void $ GI.on edit #clicked open
+  pure (section, open)
+
+-- | A section's title and its Edit link.
+sectionHead :: Text -> Text -> IO (Gtk.Box, Gtk.Button)
+sectionHead title hint = do
+  header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["u-assign-head"]]
+  t <- Card.sectionTitle title
+  GI.set t [#hexpand := True]
+  #append header t
+  edit <- GI.new Gtk.Button [#label := "Edit", #tooltipText := hint, #cssClasses := ["link-button"]]
+  #append header edit
+  pure (header, edit)
+
 -- | A person to tick: box, avatar, login and full name, and "new".
 personRow :: Text -> Text -> IO (Gtk.Button, Gtk.Image, Gtk.Label)
 personRow login name = do
@@ -319,7 +384,11 @@ clearBox b = Gtk.widgetGetFirstChild b >>= mapM_ (\c -> Gtk.boxRemove b c >> cle
 
 css :: Text
 css = mconcat
-  [ "popover.u-assign-picker-pop > contents { padding: 0; border-radius: 12px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 12px 32px rgba(27,29,33,0.16); }"
+  [ "button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; background-image: none; color: var(--accent); font-size: 13px; }"
+  , "progressbar.milestone-bar, progressbar.milestone-bar trough, progressbar.milestone-bar progress { min-width: 0; }"
+  , "progressbar.milestone-bar trough { min-height: 6px; border-radius: 3px; background: var(--border-subtle); }"
+  , "progressbar.milestone-bar progress { min-height: 6px; border-radius: 3px; background: var(--success); }"
+  , "popover.u-assign-picker-pop > contents { padding: 0; border-radius: 12px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 12px 32px rgba(27,29,33,0.16); }"
   , "box.u-assign-picker box.top { padding: 14px 14px 8px; }"
   , "box.u-assign-picker label.picker-title { font-size: 15px; font-weight: 600; color: var(--text); }"
   , "box.u-assign-picker label.lbl { margin: 8px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text-muted); }"

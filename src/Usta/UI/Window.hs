@@ -74,6 +74,8 @@ import qualified Usta.Types.Discussion as D
 import Usta.Types.Thread (Threads (..))
 import Usta.Preferences (Preferences (..), Theme (..))
 import Usta.Types.Discussion (Merge (..))
+import Usta.Types.Login (Login)
+import Usta.Types.Milestone (Milestone (..))
 import Usta.Types.Parse (parse, unparse)
 -- For the commits' fields.
 import qualified Usta.Types.Commit as C
@@ -185,17 +187,27 @@ buildAt start given app = do
       openNewPullRequest = openNewPullRequestIn Nothing
       -- The header shows at once; the thread loads from the forge under it.
       openIssue backLabel model = do
-        let actions = Issue.Actions
-              { comment = source.comment model.host model.repo model.number
-              , setClosed = source.setClosed model.host model.repo model.number
-              , labels = labelPicker source model.host model.repo model.number (openIssue backLabel model)
-              , refresh = openIssue backLabel model
+        let (h, r, n) = (model.host, model.repo, model.number)
+            refresh = openIssue backLabel model
+            actionsFor d goals me c = Issue.Actions
+              { comment = source.comment h r n
+              , setClosed = source.setClosed h r n
+              , labels = labelPicker source h r n refresh
+              , assigning = assignPicker source h r n refresh me d.assignees
+              , milestoning = milestonePicker source h r n refresh c d.milestone
+              , milestoneNow = find (\g -> Just g.title == d.milestone) goals
+              , refresh = refresh
               }
+            load = do
+              d <- source.discussion h r n
+              goals <- either (const []) id <$> source.milestones h r
+              me <- maybe "" (.login) . find (\a -> a.host == h) <$> source.accounts
+              pure (fmap (\x -> (x, goals, me)) d)
         Issue.new backLabel backToMain model (\showClosed ->
-          loadInto (source.discussion model.host model.repo model.number) $ \d -> do
+          loadInto load $ \(d, goals, me) -> do
             c <- clock
             showClosed d.closed
-            Issue.thread actions (Issue.fromDiscussion c d model))
+            Issue.thread (actionsFor d goals me c) (Issue.fromDiscussion c d model))
           >>= showDetail
       -- In @at@ (host and repository) when given, else the first one.
       openNewIssueIn at = do
@@ -558,9 +570,10 @@ tabContent source reopen fetch summary showState tab = case tab of
           threads <- source.threads host repo n
           reviewers <- either (const []) id <$> source.reviewers host repo n
           ready <- either (const Nothing) Just <$> source.readiness host repo n
+          goals <- either (const []) id <$> source.milestones host repo
           me <- maybe "" (.login) . find (\a -> a.host == host) <$> source.accounts
-          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, (reviewers, ready))) d)
-        actions = Conversation.Actions
+          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, (reviewers, ready, goals))) d)
+        actionsFor d goals me c = Conversation.Actions
           { comment = source.comment host repo n
           , setClosed = source.setClosed host repo n
           , merge = source.merge host repo n
@@ -572,13 +585,16 @@ tabContent source reopen fetch summary showState tab = case tab of
           , unrequestReview = source.unrequestReview host repo n
           , candidates = source.reviewCandidates host repo n
           , labels = labelPicker source host repo n reopen
+          , assigning = assignPicker source host repo n reopen me d.assignees
+          , milestoning = milestonePicker source host repo n reopen c d.milestone
+          , milestoneNow = find (\g -> Just g.title == d.milestone) goals
           , refresh = reopen
           }
         checks = case fmap fst summary.checks of
           Just Success -> Just True
           Just Danger -> Just False
           _ -> Nothing
-    loadInto load $ \(d, commits, threads, me, (reviewers, ready)) -> do
+    loadInto load $ \(d, commits, threads, me, (reviewers, ready, goals)) -> do
       c <- clock
       showState $ case (d.merged, d.closed) of
         (True, _) -> PullRequest.MergedState
@@ -589,7 +605,7 @@ tabContent source reopen fetch summary showState tab = case tab of
             , me = me, clock = c, reply = source.reply host repo n t }
           model = Conversation.fromDiscussion c d commits summary.branches checks
           running = fmap fst summary.checks == Just Warning
-      Conversation.new actions model
+      Conversation.new (actionsFor d goals me c) model
         { Conversation.threads = map shown threads.threads
         , Conversation.reviewers = reviewers
         , Conversation.merge = (\st -> st {Conversation.readiness = ready, Conversation.checksRunning = running}) <$> model.merge
@@ -642,6 +658,30 @@ labelPicker source host repo n refresh current = LabelPicker.Picker
       launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/labels"))
       Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
   , saved = refresh
+  }
+
+-- | The assignees picker of an issue or pull request, for @me@ (a login
+-- as text) and who it is assigned to.
+assignPicker :: Source -> Text -> Text -> Int -> IO () -> Text -> [Login] -> AssignPickers.Assignees
+assignPicker source host repo n refresh me current = AssignPickers.Assignees
+  { current = current
+  , me = either (const Nothing) Just (parse me)
+  , load = source.assignable host repo
+  , save = source.setAssignees host repo n
+  , saved = refresh
+  }
+
+-- | The milestone picker of an issue or pull request.
+milestonePicker :: Source -> Text -> Text -> Int -> IO () -> Clock -> Maybe Text -> AssignPickers.Milestones
+milestonePicker source host repo n refresh c current = AssignPickers.Milestones
+  { current = current
+  , load = source.milestones host repo
+  , save = source.setMilestone host repo n
+  , manage = do
+      launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/milestones"))
+      Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  , saved = refresh
+  , clock = c
   }
 
 -- | The sidebar's pages that list notifications.

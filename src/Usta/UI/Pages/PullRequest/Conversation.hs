@@ -32,6 +32,7 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
+import qualified Usta.UI.Components.AssignPickers as AssignPickers
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Thread as Thread
@@ -48,6 +49,7 @@ import qualified Usta.Types.Commit as C
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
 import Usta.Types.Parse (unparse)
+import Usta.Types.Milestone (Milestone)
 import Usta.Types.Readiness (Readiness (..), UpdateStyle (..))
 import Usta.Types.Reviewer (Candidate (..), Reviewer (..), Stance (..), Who (..))
 
@@ -107,6 +109,10 @@ data Actions = Actions
   , unrequestReview :: Who -> IO (Either Text ())
   , labels :: [Text] -> LabelPicker.Picker
     -- ^ The labels picker, from the labels it has.
+  , assigning :: AssignPickers.Assignees
+  , milestoning :: AssignPickers.Milestones
+  , milestoneNow :: Maybe Milestone
+    -- ^ Its milestone in full, for the progress.
   , candidates :: IO (Either Text [Candidate])
     -- ^ Who can be asked to review.
   , refresh :: IO ()
@@ -365,6 +371,8 @@ details run actions m = do
   when (null m.reviewers) $ label "Nobody yet" ["muted"] >>= #append reviewers
   forM_ m.reviewers $ \r -> reviewerRow run actions r >>= #append reviewers
   #append side reviewers
+  (people, openPeople) <- AssignPickers.assigneesSection actions.assigning
+  #append side people
   open <- requestPicker actions m request
   void $ GI.on request #clicked open
   keys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
@@ -387,6 +395,10 @@ details run actions m = do
   void $ GI.on editLabels #clicked openLabels
   labelKeys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
   shortcut labelKeys "l" openLabels
+  shortcut labelKeys "a" openPeople
+  (goal, openGoal) <- AssignPickers.milestoneSection actions.milestoning actions.milestoneNow
+  #append side goal
+  shortcut labelKeys "m" openGoal
   Gtk.widgetAddController side labelKeys
   unless (null m.linkedIssues) $ section side "Linked issues" $ \box ->
     forM_ m.linkedIssues $ \issue -> label issue ["link"] >>= #append box

@@ -54,6 +54,7 @@ import qualified Usta.Types.PullRequest as P
 import Usta.Types.Ref (Ref (..))
 import qualified Usta.Types.Thread as Th
 import Usta.Types.RepoName (RepoName, owner, shortName)
+import qualified Usta.Types.Readiness as Rd
 import qualified Usta.Types.Reviewer as Rv
 import qualified Usta.Types.Repository as R
 import Usta.Types.Servant.NamedQueryParam (Named (..))
@@ -165,6 +166,27 @@ forgejo manager base host token = do
         () <$ run client (Api.api.requestReviewers (owner repo) (shortName repo) n (requestOf whos))
     , unrequestReview = \repo n who ->
         () <$ run client (Api.api.unrequestReviewers (owner repo) (shortName repo) n (requestOf [who]))
+    , readiness = \repo n -> do
+        let (o, r) = (owner repo, shortName repo)
+        pull <- run client (Api.api.pullRequest o r n)
+        -- The base's commits the head lacks.
+        missing <- run client (Api.api.compare o r (Api.BaseHead pull.head.sha pull.base.sha))
+        -- Only admins may read protections; without them none are asked.
+        rules <- either (\(_ :: Failure) -> []) id <$> try (run client (Api.api.branchProtections o r))
+        pure Rd.Readiness
+          { draft = pull.draft
+          , behind = length missing.commits
+          -- Forgejo calls every draft unmergeable, conflicts or not.
+          , conflicts = not pull.mergeable && not pull.draft
+          , requiredApprovals = maximum (0 : [p.requiredApprovals | p <- rules, matches p.rule pull.base.ref])
+          }
+    , markReady = \repo n -> do
+        pull <- run client (Api.api.pullRequest (owner repo) (shortName repo) n)
+        () <$ run client (Api.api.editPull (owner repo) (shortName repo) n Api.PullEdit {title = unDraft pull.title})
+    , updateBranch = \repo n style -> () <$ run client (Api.api.updatePull (owner repo) (shortName repo) n (Api.Style style))
+    , scheduleMerge = \repo n how delete ->
+        () <$ run client (Api.api.scheduleMerge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete, whenChecksPass = True})
+    , cancelScheduledMerge = \repo n -> () <$ run client (Api.api.cancelAutoMerge (owner repo) (shortName repo) n)
     , reviewCandidates = \repo pr -> do
         let (o, r) = (owner repo, shortName repo)
         people <- run client (everyPage (\page limit -> Api.api.collaborators o r Api.ListQuery {page = page, limit = limit}))
@@ -424,6 +446,29 @@ candidatesOf author people touched teams = sortOn (Down . (.lastChanged)) sugges
     (suggested, others) = partition (not . null . (.changed)) (map person everyone)
     teamCandidates = [Rv.Candidate {who = Rv.Team t.name, about = t.description, changed = [], lastChanged = Nothing, members = size} | (t, size) <- teams]
     fileName = last . (:) "" . T.splitOn "/"
+
+-- | A branch protection's rule against a branch name: the name itself, or
+-- a pattern where @*@ stands for any text.
+matches :: Text -> Text -> Bool
+matches rule name = case T.splitOn "*" rule of
+  [exact] -> exact == name
+  first : rest -> first `T.isPrefixOf` name && go (T.drop (T.length first) name) rest
+  [] -> False
+  where
+    go left parts = case parts of
+      [lastPart] -> lastPart `T.isSuffixOf` left
+      part : more -> case T.breakOn part left of
+        (_, found) | not (T.null part) && T.null found -> False
+                   | otherwise -> go (T.drop (T.length part) found) more
+      [] -> True
+
+-- | A title without Forgejo's draft marks, "WIP:" or "[WIP]".
+unDraft :: Text -> Text
+unDraft title = T.stripStart (go (T.stripStart title))
+  where
+    go t = case [rest | p <- ["wip:", "[wip]"], let (h, rest) = T.splitAt (T.length p) t, T.toLower h == p] of
+      rest : _ -> rest
+      [] -> t
 
 -- | People and teams as Forgejo takes them in a review request.
 requestOf :: [Rv.Who] -> Api.Reviewers

@@ -152,6 +152,10 @@ data Routes mode = Routes
   , merge
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "merge" :> ReqBody '[JSON] MergeOption :> Post '[JSON] NoContent
+  , scheduleMerge
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "merge" :> ReqBody '[JSON] MergeOption :> Verb 'POST 201 '[JSON] NoContent
+    -- ^ The same as 'merge' with 'whenChecksPass': Forgejo answers 201.
   , cancelAutoMerge
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "merge" :> Verb 'DELETE 204 '[JSON] NoContent

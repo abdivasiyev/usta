@@ -18,6 +18,8 @@ data Readiness = Readiness
   , requiredApprovals :: Int
     -- ^ How many approvals the base branch's protection asks for; 0 when
     -- it asks none, or usta may not read it.
+  , scheduled :: Bool
+    -- ^ It merges by itself once the checks pass.
   }
   deriving stock (Eq, Show)
 

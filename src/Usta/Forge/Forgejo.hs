@@ -173,12 +173,16 @@ forgejo manager base host token = do
         missing <- run client (Api.api.compare o r (Api.BaseHead pull.head.sha pull.base.sha))
         -- Only admins may read protections; without them none are asked.
         rules <- either (\(_ :: Failure) -> []) id <$> try (run client (Api.api.branchProtections o r))
+        -- A scheduled merge shows only in the timeline; the latest word holds.
+        events <- run client (everyPage (\page limit -> Api.api.timeline o r n Api.ListQuery {page = page, limit = limit}))
+        let schedule = [e.kind | e <- events, e.kind `elem` ["pull_scheduled_merge", "pull_cancel_scheduled_merge"]]
         pure Rd.Readiness
           { draft = pull.draft
           , behind = length missing.commits
           -- Forgejo calls every draft unmergeable, conflicts or not.
           , conflicts = not pull.mergeable && not pull.draft
           , requiredApprovals = maximum (0 : [p.requiredApprovals | p <- rules, matches p.rule pull.base.ref])
+          , scheduled = not pull.merged && take 1 (reverse schedule) == ["pull_scheduled_merge"]
           }
     , markReady = \repo n -> do
         pull <- run client (Api.api.pullRequest (owner repo) (shortName repo) n)

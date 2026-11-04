@@ -187,6 +187,9 @@ data Source = Source
   , repoIssues :: Text -> Text -> IO (Either Text [I.Issue])
   , runs :: Text -> Text -> IO (Either Text [Run])
     -- ^ A repository's latest CI runs, from the forge.
+  , discardPending :: Text -> Text -> Int -> IO (Either Text Int)
+    -- ^ Deletes the user's review left pending on the forge, by host,
+    -- repository and number.
   }
 
 -- | A signed-in account, as the window names it.
@@ -306,6 +309,7 @@ fromDatabase pool changes statuses sync = Source
   , repoPullRequests = \_ _ -> pure (Left unavailable)
   , repoIssues = \_ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
+  , discardPending = \_ _ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -384,6 +388,7 @@ samples = Source
   , repoPullRequests = \_ _ -> pure (Left unavailable)
   , repoIssues = \_ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
+  , discardPending = \_ _ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -452,6 +457,7 @@ withAccounts pool accounts source = source
   , repoPullRequests = \host repo -> onRepo host repo (\f name -> f.repoPullRequests name)
   , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
+  , discardPending = \host repo n -> onForge host repo n (\f name number -> f.discardPending name number)
   }
   where
     onRepo :: Text -> Text -> (Forge.Forge -> RepoName -> IO a) -> IO (Either Text a)
@@ -600,6 +606,7 @@ tracking track s = s
   , repoPullRequests = \h r -> track (s.repoPullRequests h r)
   , repoIssues = \h r -> track (s.repoIssues h r)
   , runs = \h r -> track (s.runs h r)
+  , discardPending = \h r n -> track (s.discardPending h r n)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors
   }

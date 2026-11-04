@@ -100,6 +100,8 @@ data Actions = Actions
   , refresh :: IO ()
   , reply :: Th.Thread -> Text -> IO (Either Text ())
     -- ^ Adds a note to a thread.
+  , discard :: IO (Either Text ())
+    -- ^ Deletes the user's review left pending on the forge, if any.
   }
 
 -- | One changed file as shown in both columns.
@@ -487,6 +489,19 @@ review actions m listed pendingRef pendingChanged = do
   #append verdict pendingBox
   submit <- Button.new Button.defaults { Button.label = Just "Submit review", Button.variant = Button.Primary }
   #append verdict submit
+  -- Discard asks once, then drops the pending notes and the summary.
+  confirm <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #visible := False, #cssClasses := ["discard-confirm"]]
+  question <- label "" ["small"]
+  GI.set question [#wrap := True]
+  #append confirm question
+  answers <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd]
+  keep <- Button.new Button.defaults {Button.label = Just "Keep it", Button.variant = Button.Flat}
+  gone <- Button.new Button.defaults {Button.label = Just "Discard", Button.variant = Button.Danger}
+  mapM_ (#append answers) [keep, gone]
+  #append confirm answers
+  #append verdict confirm
+  discardButton <- GI.new Gtk.Button [#label := "Discard review", #halign := Gtk.AlignCenter, #visible := False, #cssClasses := ["flat", "discard"]]
+  #append verdict discardButton
   said <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["small"]]
   #append verdict said
   #append side verdict
@@ -502,7 +517,29 @@ review actions m listed pendingRef pendingChanged = do
         GI.set pendingBox [#visible := not (null notes)]
         GI.set pendingTitle [#label := "Pending · " <> counted (length notes)]
         GI.set submit [#label := if null notes then "Submit review" else "Submit review · " <> counted (length notes)]
+        GI.set discardButton [#visible := not (null notes)]
   writeIORef pendingChanged showPending
+  -- A summary being written is something to discard too.
+  void $ GI.on buffer #changed $ do
+    text <- maybe "" id <$> GI.get buffer #text
+    notes <- readIORef pendingRef
+    GI.set discardButton [#visible := not (null notes) || not (T.null (T.strip text))]
+  void $ GI.on discardButton #clicked $ do
+    notes <- readIORef pendingRef
+    GI.set question [#label := "Discard your review? " <> (if null notes then "The summary goes" else "Its " <> counted (length notes) <> " and the summary go") <> "; nothing was sent."]
+    GI.set confirm [#visible := True]
+    GI.set discardButton [#visible := False]
+  void $ GI.on keep #clicked $ GI.set confirm [#visible := False] >> GI.set discardButton [#visible := True]
+  void $ GI.on gone #clicked $ Button.busy gone [keep] "Discarding…" actions.discard $ \result -> do
+    waiting <- readIORef pendingRef
+    forM_ waiting $ \(_, (_, c)) -> Gtk.widgetGetParent c.widget >>= mapM_ (\p -> GI.castTo Gtk.Box p >>= mapM_ (`Gtk.boxRemove` c.widget))
+    writeIORef pendingRef []
+    Gtk.textBufferSetText buffer "" (-1)
+    GI.set confirm [#visible := False]
+    showPending
+    GI.set discardButton [#visible := False]
+    GI.set said [ #visible := True, #cssClasses := ["small", "muted"]
+                , #label := either ("Discarded here; the forge said: " <>) (const "Review discarded.") result ]
 
   -- Every thread, to jump to.
   unless (null listed) $ do
@@ -825,6 +862,9 @@ sample = Model
 
 css :: Text
 css = mconcat
+  [ "box.u-files box.discard-confirm { padding: 10px; border-radius: 8px; background: var(--danger-bg); }"
+  , "box.u-files button.discard { color: var(--danger); }"
+  ] <> mconcat
   [ "box.u-files label.small { font-size: 12px; }"
   , "box.u-files label.strong { font-weight: 600; }"
   , "box.u-files label.added { color: var(--success); }"

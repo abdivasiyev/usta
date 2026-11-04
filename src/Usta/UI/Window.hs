@@ -679,6 +679,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
             fmap snd <$> source.file summary.host summary.repo ((if old then snd else fst) summary.branches) path
         , refresh = reopen
         , reply = source.reply summary.host summary.repo summary.number
+        , discard = fmap (() <$) (source.discardPending summary.host summary.repo summary.number)
         }
         panels
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)

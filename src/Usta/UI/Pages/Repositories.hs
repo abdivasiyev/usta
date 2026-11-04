@@ -33,6 +33,8 @@ import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.BranchPicker as BranchPicker
+import Usta.UI.Format (clock)
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Markdown as Markdown
@@ -45,6 +47,7 @@ import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Git as Git
 import Usta.Types.Mirror (Choice (..), Transport (..))
+import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Parse (unparse)
 import qualified Usta.Types.Repository as R
 
@@ -127,7 +130,12 @@ data Actions = Actions
     -- ^ The Files tab, built the first time it is chosen, or again to
     -- open a file or folder a README links to.
   , tabs :: Repository -> [Tab]
-    -- ^ The tabs after Files, such as Pull requests.
+    -- ^ The tabs after Files, such as Pull requests; @defaultBranch@ is
+    -- the branch chosen in the picker.
+  , branches :: Repository -> Text -> IO (Either Text [Branch])
+    -- ^ With how far each is from the default branch given; off the main
+    -- thread.
+  , tags :: Repository -> IO (Either Text [Tag])
   }
 
 -- | A tab after Files, built the first time it is chosen.
@@ -136,6 +144,8 @@ data Tab = Tab
   { title :: Text
     -- ^ With its count, e.g. "Pull requests  3".
   , build :: IO Gtk.Widget
+  , followsBranch :: Bool
+    -- ^ Shows the chosen branch, so the picker shows beside the tabs.
   }
 
 new :: Actions -> [Repository] -> IO (Page Repository)
@@ -219,10 +229,22 @@ new actions repositories = do
   where
     key r = (r.host, r.name)
 
--- | The Overview, Files and later tabs over the one chosen; @onWide@
--- runs with whether a tab other than Overview is shown.
+-- | The Overview, Files and later tabs over the one chosen, with the
+-- branch picker; @onWide@ runs with whether a tab other than Overview is
+-- shown. Choosing a branch draws the tabs again for it, on the same tab.
 repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO Gtk.Box
 repositoryDetail actions r onWide = do
+  holder <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+  let draw branch tab = do
+        clear holder
+        onBranch actions r {defaultBranch = branch} r.defaultBranch tab draw onWide >>= #append holder
+  draw r.defaultBranch "overview"
+  pure holder
+
+-- | The tabs for @r@ on its 'defaultBranch', the one chosen; @realDefault@
+-- is the repository's own; @startTab@ is shown first.
+onBranch :: Actions -> Repository -> Text -> Text -> (Text -> Text -> IO ()) -> (Bool -> IO ()) -> IO Gtk.Box
+onBranch actions r realDefault startTab redraw onWide = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
   tabBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
   stack <- GI.new Gtk.Stack [ #vexpand := True
@@ -233,16 +255,27 @@ repositoryDetail actions r onWide = do
   overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
   -- The README's links to files open them in the Files tab, once it exists.
   openFiles <- newIORef (const (pure ()))
-  overview actions r (\path -> readIORef openFiles >>= ($ path)) >>= \o -> GI.set overviewScroll [#child := o]
+  overview actions r realDefault (\path -> readIORef openFiles >>= ($ path)) >>= \o -> GI.set overviewScroll [#child := o]
   void $ Gtk.stackAddNamed stack overviewScroll (Just "overview")
   -- Every other tab is built the first time it is chosen.
-  let later = Tab {title = "Files", build = actions.files r Nothing} : actions.tabs r
+  let later = Tab {title = "Files", build = actions.files r Nothing, followsBranch = True} : actions.tabs r
   slots <- forM (zip [1 :: Int ..] later) $ \(i, tab) -> do
     slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
     void $ Gtk.stackAddNamed stack slot (Just (T.pack (show i)))
     built <- newIORef False
     pure (slot, built, tab)
+  current <- newIORef startTab
+  c <- clock
+  picker <- BranchPicker.new BranchPicker.Picker
+    { shown = r.defaultBranch, defaultBranch = realDefault, clock = c
+    , branches = actions.branches r realDefault, tags = actions.tags r
+    , choose = \b -> readIORef current >>= redraw b
+    , note = "Overview, Files and Commits follow the branch"
+    }
+  GI.set picker [#hexpand := True, #halign := Gtk.AlignEnd, #valign := Gtk.AlignCenter]
   let choose name = do
+        writeIORef current name
+        GI.set picker [#visible := name == "overview" || or [tab.followsBranch | (i, (_, _, tab)) <- zip [1 :: Int ..] slots, T.pack (show i) == name]]
         forM_ (zip [1 :: Int ..] slots) $ \(i, (slot, built, tab)) -> when (T.pack (show i) == name) $ do
           done <- readIORef built
           when (not done) $ do
@@ -252,6 +285,7 @@ repositoryDetail actions r onWide = do
         Gtk.stackSetVisibleChildName stack name
   buttons <- forM (("Overview", "overview") : [(tab.title, T.pack (show i)) | (i, (_, _, tab)) <- zip [1 :: Int ..] slots]) $ \(text, name) -> do
     b <- GI.new Gtk.ToggleButton [#label := text, #active := name == "overview"]
+    GI.set b [#name := name]
     void $ GI.on b #toggled $ do
       active <- GI.get b #active
       when active (choose name)
@@ -260,6 +294,9 @@ repositoryDetail actions r onWide = do
   case buttons of
     first : rest -> forM_ rest $ \b -> GI.set b [#group := first]
     [] -> pure ()
+  #append tabBar picker
+  -- Back on the tab that was shown before the branch changed.
+  forM_ buttons $ \b -> GI.get b #name >>= \n -> when (n == startTab && n /= "overview") (GI.set b [#active := True])
   forM_ (take 1 slots) $ \(filesSlot, built, _) -> writeIORef openFiles $ \path -> do
     clear filesSlot
     writeIORef built True
@@ -296,8 +333,10 @@ counts r =
     plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
 
 -- | @follow@ opens a path the README links to.
-overview :: Actions -> Repository -> (Text -> IO ()) -> IO Gtk.Box
-overview actions r follow = do
+-- | @realDefault@ is the repository's default branch; @r@ is on the one
+-- chosen.
+overview :: Actions -> Repository -> Text -> (Text -> IO ()) -> IO Gtk.Box
+overview actions r realDefault follow = do
   pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #cssClasses := ["u-repo"]
@@ -336,7 +375,9 @@ overview actions r follow = do
                           ]
   Card.stat Neutral "Open pull requests" (T.pack (show r.pullRequests)) >>= #append stats
   Card.stat Neutral "Open issues" (T.pack (show r.issues)) >>= #append stats
-  branch <- Card.stat Neutral "Default branch" r.defaultBranch
+  branch <- if r.defaultBranch == realDefault
+    then Card.stat Neutral "Default branch" r.defaultBranch
+    else Card.stat Accent "Viewing branch" r.defaultBranch
   Gtk.widgetAddCssClass branch "branch"
   #append stats branch
   let (mirrorTone, mirrorText) = r.mirror

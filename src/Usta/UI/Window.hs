@@ -54,6 +54,7 @@ import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.RepositoryActions as RepositoryActions
 import qualified Usta.UI.Components.SidePanel as SidePanel
+import qualified Usta.UI.Components.BranchPicker as BranchPicker
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import qualified Usta.UI.Pages.PullRequest.Commits as Commits
 import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
@@ -384,9 +385,12 @@ buildAt start given app = do
         }
         RepositoryFiles.Place {forge = r.forge, host = r.host, repo = r.name, branch = r.defaultBranch}
         opening
+    , branches = \r base -> fmap snd <$> source.branchList r.host r.name base
+    , tags = \r -> fmap snd <$> source.tagList r.host r.name
     , tabs = \r ->
         [ Repositories.Tab
-            { title = counted "Pull requests" r.pullRequests
+            { followsBranch = False
+            , title = counted "Pull requests" r.pullRequests
             , build = do
                 synced <- filter (\pr -> pr.host == r.host && pr.repo == r.name) <$> source.pullRequests
                 let load = do
@@ -396,7 +400,8 @@ buildAt start given app = do
                   >>= Gtk.toWidget
             }
         , Repositories.Tab
-            { title = counted "Issues" r.issues
+            { followsBranch = False
+            , title = counted "Issues" r.issues
             , build = do
                 synced <- filter (\i -> i.host == r.host && i.repo == r.name) <$> source.issues
                 let load = do
@@ -405,7 +410,8 @@ buildAt start given app = do
                 Issues.forRepository synced load (openIssue "Repositories" . issueDetail) >>= Gtk.toWidget
             }
         , Repositories.Tab
-            { title = "Actions"
+            { followsBranch = False
+            , title = "Actions"
             , build = do
                 c <- clock
                 RepositoryActions.new c (source.runs r.host r.name) (source.checkLog r.host r.name)
@@ -988,7 +994,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

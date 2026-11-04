@@ -26,6 +26,8 @@ module Usta.Git
   , page
   , branches
   , tags
+  , changes
+  , graph
   , readme
   , tree
   , blob
@@ -40,7 +42,7 @@ import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8Lenient)
-import Data.Time (UTCTime, zonedTimeToUTC)
+import Data.Time (UTCTime, defaultTimeLocale, formatTime, zonedTimeToUTC)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (getEnvironment, getExecutablePath)
@@ -50,6 +52,7 @@ import System.Process.Typed (proc, readProcess, setEnv)
 import Text.Read (readMaybe)
 
 import Usta.Types.Branch (Branch (..), Tag (..))
+import Usta.Types.Insights (Change (..), Node (..))
 import Usta.Types.Commit (Commit (..), Sha)
 import Usta.Types.Diff (FileDiff, parseDiff)
 import Usta.Types.Parse (parseM, unparse)
@@ -164,6 +167,43 @@ branches path base = do
           [behind, ahead] -> (readMaybe (T.unpack ahead), readMaybe (T.unpack behind))
           _ -> (Nothing, Nothing)
     pure Branch {name = name, pushed = when', ahead = fst counts, behind = snd counts}
+
+-- | Each commit's author, date and lines added and removed on a ref,
+-- newest first, since a time when given.
+changes :: FilePath -> Text -> Maybe UTCTime -> IO [Change]
+changes path ref since = do
+  out <- git (["-C", path, "log", "--no-merges", "--numstat", "--format=%x1e%an%x1f%aI"]
+    <> ["--since=" <> iso t | Just t <- [since]] <> ["--end-of-options", T.unpack ref])
+  fmap concat $ forM (filter (not . T.null . T.strip) (T.splitOn "\x1e" out)) $ \record ->
+    case T.lines record of
+      header : stats | (author, rest) <- T.breakOn "\x1f" header -> do
+        when' <- try (utcOf (T.unpack (T.drop 1 rest)))
+        pure $ case when' of
+          Left (_ :: SomeException) -> []
+          Right t ->
+            -- A binary file's counts are "-", and are left out.
+            let counts = [(a, d) | l <- stats, x : y : _ <- [T.words l], Just a <- [readMaybe (T.unpack x)], Just d <- [readMaybe (T.unpack y) :: Maybe Int]]
+            in [Change {author = author, at = t, added = sum (map fst counts), removed = sum (map snd counts)}]
+      _ -> pure []
+  where
+    iso = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
+
+-- | A page of the graph, newest first in topological order: every branch
+-- and tag, or the given branches only, the first parents only if asked.
+graph :: FilePath -> [Text] -> Bool -> Int -> Int -> IO [Node]
+graph path scope firstParent skip n = do
+  out <- git (["-C", path, "log", "--topo-order", "--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%D%x1e", "--skip=" <> show skip, "-n", show n]
+    <> ["--first-parent" | firstParent]
+    <> (if null scope then ["--branches", "--tags"] else ["--end-of-options"] <> map T.unpack scope))
+  fmap concat $ forM (filter (not . T.null . T.strip) (T.splitOn "\x1e" out)) $ \record ->
+    case T.splitOn "\x1f" (T.dropWhile (== '\n') record) of
+      [sha, parents, author, date, subject, decorations] -> do
+        when' <- try (utcOf (T.unpack date))
+        pure $ case when' of
+          Left (_ :: SomeException) -> []
+          Right t -> [Node { sha = sha, parents = T.words parents, author = author, at = t, subject = subject
+                           , refs = [r | d <- map T.strip (T.splitOn "," decorations), let r = maybe d id (T.stripPrefix "HEAD -> " d), not (T.null r), r /= "HEAD"] }]
+      _ -> pure []
 
 -- | Every tag, newest first.
 tags :: FilePath -> IO [Tag]

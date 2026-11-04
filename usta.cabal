@@ -72,6 +72,7 @@ executable usta
     Usta.Forge.Http
     Usta.Forge.Sample
     Usta.Git
+    Usta.Graph
     Usta.Git.Credential
     Usta.Keyring
     Usta.Mermaid
@@ -89,6 +90,7 @@ executable usta
     Usta.Types.Forge
     Usta.Types.Host
     Usta.Types.Involvement
+    Usta.Types.Insights
     Usta.Types.Issue
     Usta.Types.Label
     Usta.Types.Login

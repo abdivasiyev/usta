@@ -96,6 +96,7 @@ new now account = do
         , F.tags = \_ -> pure []
         , F.releases = \_ -> pure []
         , F.starred = \_ -> pure False
+        , F.search = \_ -> pure []
         , F.setStarred = \_ _ -> pure ()
         , F.upload = \_ _ _ _ -> refuse
         , F.history = \_ _ _ -> pure []

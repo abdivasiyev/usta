@@ -18,6 +18,7 @@ import Data.Time (UTCTime)
 
 import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Release (Release)
+import Usta.Types.Search (Found)
 import Usta.Types.Check (Check, Job, Run)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
@@ -140,6 +141,9 @@ data Forge = Forge
   , upload :: RepoName -> Number -> Text -> ByteString -> IO Text
     -- ^ Attaches a file, by name, to an issue or pull request, and says
     -- where it is served, for a comment to link or show it.
+  , search :: Text -> IO [Found]
+    -- ^ Pull requests, issues and repositories the words are in, closed
+    -- ones too; the forge's own search.
   , starred :: RepoName -> IO Bool
   , setStarred :: RepoName -> Bool -> IO ()
   , releases :: RepoName -> IO [Release]

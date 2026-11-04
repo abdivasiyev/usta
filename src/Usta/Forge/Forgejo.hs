@@ -23,7 +23,7 @@ import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.List (nub, partition, sortOn)
-import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Ord (Down (..))
@@ -44,6 +44,7 @@ import Servant.Multipart.API (FileData (..), MultipartData (..))
 import Servant.Multipart.Client (genBoundary)
 import qualified Usta.Types.Branch as Br
 import qualified Usta.Types.Release as Rel
+import qualified Usta.Types.Search as S
 import qualified Usta.Types.Check as C
 import Usta.Types.Diff (FileDiff (..), parseDiff)
 import qualified Usta.Types.Discussion as D
@@ -305,6 +306,18 @@ forgejo manager base host token = do
         let form = MultipartData [] [FileData "attachment" name (mimeOf name) (BL.fromStrict bytes)]
         (.browserDownloadUrl) <$> run client (Api.api.upload (owner repo) (shortName repo) n (Just name) (boundary, form))
     -- Forgejo answers 404 for a repository the user has not starred.
+    , search = \words' -> do
+        let issuesOf' kind = run client (Api.api.search Api.SearchQuery
+              { q = Just words', kind = Named kind, state = Api.AnyState, since = Nothing, assigned = Nothing
+              , created = Nothing, mentioned = Nothing, reviewRequested = Named Nothing, page = Just 1, limit = Just 10 })
+            found kind i = S.Found { kind = kind, repo = unparse i.repository.fullName, number = Just (unparse i.number)
+                                   , title = i.title, closed = isJust i.closedAt, updated = i.updatedAt }
+        pulls <- issuesOf' Api.Pulls
+        issues <- issuesOf' Api.Issues
+        Api.FoundRepositories repos <- run client (Api.api.searchRepositories (Just words') (Just 10))
+        pure ( map (found S.PullRequest) pulls <> map (found S.Issue) issues
+            <> [ S.Found {kind = S.Repository, repo = unparse r.fullName, number = Nothing, title = r.description, closed = False, updated = r.updatedAt}
+               | r <- repos ] )
     , starred = \repo -> do
         answer <- try (run client (Api.api.isStarred (owner repo) (shortName repo)))
         case answer of
@@ -418,7 +431,8 @@ searchAll client kind state since chosen = do
   where
     keyOf i = (i.repository.fullName, i.number)
     search w page limit = Api.api.search $ w.query Api.SearchQuery
-      { kind = Named kind
+      { q = Nothing
+      , kind = Named kind
       , state = state
       , since = since
       , assigned = Nothing

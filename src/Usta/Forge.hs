@@ -11,6 +11,7 @@ module Usta.Forge
 
 import Control.Exception (Exception)
 import Data.ByteString (ByteString)
+import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
@@ -19,7 +20,7 @@ import Usta.Types.Check (Check, Job)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
-import Usta.Types.Discussion (Comment, Discussion, Merge, NewIssue, NewPull, Verdict)
+import Usta.Types.Discussion (Comment, Discussion, Feeling, Merge, NewIssue, NewPull, Verdict)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Label (Definition)
@@ -99,6 +100,13 @@ data Forge = Forge
     -- ^ An issue's or pull request's description and comments.
   , comment :: RepoName -> Number -> Text -> IO Comment
     -- ^ Posts a comment, and gives it back as the forge saved it.
+  , editComment :: RepoName -> Number -> Maybe Int64 -> Text -> IO ()
+    -- ^ A comment's new text, by its id; 'Nothing' for the description.
+  , deleteComment :: RepoName -> Int64 -> IO ()
+  , editTitle :: RepoName -> Number -> Text -> IO ()
+  , react :: RepoName -> Number -> Maybe Int64 -> Feeling -> Bool -> IO ()
+    -- ^ Adds a reaction ('True') or takes it back, on a comment by its id
+    -- or on the description.
   , setClosed :: RepoName -> Number -> Bool -> IO ()
     -- ^ Closes ('True') or reopens an issue or pull request.
   , merge :: RepoName -> Number -> Merge -> Bool -> IO ()

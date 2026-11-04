@@ -22,6 +22,7 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.List (sortOn)
+import Data.Maybe (isJust)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -34,6 +35,13 @@ import System.FilePath (takeExtension)
 
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.CodeView as CodeView
+import Usta.UI.Components.CommandPalette (shortcut)
+import qualified Usta.UI.Components.Diff as Diff
+import qualified Usta.UI.Components.FileTools as FileTools
+import qualified Usta.UI.Components.Segmented as Segmented
+import Usta.UI.Format (Clock)
+import Usta.Types.Commit (Commit)
+import Usta.Types.Insights (Blamed)
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.ImageView as ImageView
 import qualified Usta.UI.Components.PdfView as PdfView
@@ -58,6 +66,14 @@ data Actions = Actions
   { loadTree :: IO (Either Text (Text, [Entry]))
     -- ^ The entries, with where they came from, e.g. "From the local mirror".
   , loadFile :: Text -> IO (Either Text B.ByteString)
+  , blame :: Text -> IO (Either Text [Blamed])
+  , history :: Text -> IO (Either Text [Commit])
+    -- ^ The commits on the branch that changed a file.
+  , changeAt :: Commit -> Text -> IO (Either Text [Diff.File])
+    -- ^ What a commit did to a file.
+  , newest :: IO (Maybe Text)
+    -- ^ The branch's newest commit, for permalinks.
+  , clock :: IO Clock
   }
 
 -- | What a file holds, as the viewer shows it.
@@ -122,7 +138,11 @@ new actions place start = do
                          ]
   top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["tree-top"]]
   label place.branch ["chip", "mono"] >>= #append top
-  find <- GI.new Gtk.SearchEntry [#placeholderText := "Go to file", #hexpand := True]
+  find <- GI.new Gtk.SearchEntry [#placeholderText := "Go to file  (Ctrl P)", #hexpand := True]
+  -- Ctrl P goes to a file by its name.
+  goKeys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
+  shortcut goKeys "<Primary>p" (void (Gtk.widgetGrabFocus find))
+  Gtk.widgetAddController page goKeys
   #append top find
   #append side top
   list <- GI.new Gtk.ListBox [#selectionMode := Gtk.SelectionModeSingle, #cssClasses := ["tree-list"]]
@@ -159,7 +179,7 @@ new actions place start = do
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
             widget <- case loaded of
               Left problem -> note problem
-              Right bytes -> fileView (mapM_ reveal . linkTarget e.path) anchor place e bytes
+              Right bytes -> fileView actions (mapM_ reveal . linkTarget e.path) anchor place e bytes
             replace viewer widget
             pure False
       -- Opens a file, or a folder in the tree, as a link to it does; a
@@ -246,9 +266,10 @@ treeRow flat expanded e = do
   pure row
 
 -- | The header and the content for one file.
--- | @anchor@ is the heading a Markdown file opens at.
-fileView :: Markdown.Follow -> Maybe Text -> Place -> Entry -> B.ByteString -> IO Gtk.Widget
-fileView follow anchor place e bytes = do
+-- | @anchor@ is the heading a Markdown file opens at. A text file has Code,
+-- Blame and History, a find bar (Ctrl F) and Copy permalink.
+fileView :: Actions -> Markdown.Follow -> Maybe Text -> Place -> Entry -> B.ByteString -> IO Gtk.Widget
+fileView actions follow anchor place e bytes = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12]
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["file-header"]]
   let (folder, name) = T.breakOnEnd "/" e.path
@@ -271,14 +292,22 @@ fileView follow anchor place e bytes = do
   #append header facts
   case content of
     Text text -> do
-      copy <- Button.new Button.defaults { Button.label = Just "Copy" }
+      copy <- Button.new Button.defaults { Button.label = Just "Copy", Button.small = True }
       void $ GI.on copy #clicked $ do
         clipboard <- Gtk.widgetGetClipboard copy
         provider <- GI.toGValue (Just text) >>= Gdk.contentProviderNewForValue
         void (Gdk.clipboardSetContent clipboard (Just provider))
       #append header copy
+      permalink <- Button.new Button.defaults {Button.label = Just "Copy permalink", Button.small = True, Button.tooltip = Just "A link to the file at the branch's newest commit"}
+      void $ GI.on permalink #clicked $ Button.busy permalink ([] :: [Gtk.Button]) "Copying…" actions.newest $ \case
+        Nothing -> pure ()
+        Just sha -> do
+          clipboard <- Gtk.widgetGetClipboard permalink
+          provider <- GI.toGValue (Just (permalinkOf place sha e.path)) >>= Gdk.contentProviderNewForValue
+          void (Gdk.clipboardSetContent clipboard (Just provider))
+      #append header permalink
     _ -> pure ()
-  browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
+  browser <- Button.new Button.defaults { Button.label = Just "Open in browser", Button.small = True }
   void $ GI.on browser #clicked $ do
     launcher <- Gtk.uriLauncherNew (Just (webUrl place e.path))
     Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
@@ -286,21 +315,50 @@ fileView follow anchor place e bytes = do
   #append box header
   -- Clipped, so the file's own background keeps the card's round corners.
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #overflow := Gtk.OverflowHidden, #cssClasses := ["u-card", "file-card"]]
+  -- Code, Blame and History for a text file; the find bar searches the
+  -- code.
+  views <- GI.new Gtk.Stack []
+  findSlot <- newIORef Nothing
+  -- Under the file's name: Code, Blame and History, and Source.
+  toolsRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["file-tools"]]
+  case content of
+    Text _ -> do
+      (choices, choiceButtons) <- Segmented.new ["Code", "Blame", "History"] 0
+      GI.set choices [#valign := Gtk.AlignCenter]
+      #append toolsRow choices
+      built <- newIORef (False, False)
+      forM_ (zip [0 :: Int ..] choiceButtons) $ \(i, b) -> void $ GI.on b #toggled $ do
+        active <- GI.get b #active
+        when active $ do
+          (blamed, histories) <- readIORef built
+          c <- actions.clock
+          when (i == 1 && not blamed) $ do
+            writeIORef built (True, histories)
+            FileTools.blameView c (actions.blame e.path) >>= \w -> void (Gtk.stackAddNamed views w (Just "blame"))
+          when (i == 2 && not histories) $ do
+            writeIORef built (blamed, True)
+            FileTools.historyView c (actions.history e.path) (\x -> actions.changeAt x e.path) >>= \w -> void (Gtk.stackAddNamed views w (Just "history"))
+          Gtk.stackSetVisibleChildName views (case i of 1 -> "blame"; 2 -> "history"; _ -> "code")
+    _ -> pure ()
   body <- case content of
     Text text | markdown -> do
       stack <- GI.new Gtk.Stack []
       rendered <- Markdown.newAt follow anchor text
       Gtk.widgetAddCssClass rendered "rendered"
       void $ Gtk.stackAddNamed stack rendered (Just "rendered")
-      source <- CodeView.new e.path text
+      (source, view) <- CodeView.withView e.path text
+      writeIORef findSlot (Just view)
       void $ Gtk.stackAddNamed stack source (Just "source")
       toggle <- GI.new Gtk.ToggleButton [#label := "Source", #valign := Gtk.AlignCenter, #cssClasses := ["u-toggle"]]
       void $ GI.on toggle #toggled $ do
         on <- GI.get toggle #active
         Gtk.stackSetVisibleChildName stack (if on then "source" else "rendered")
-      Gtk.boxInsertChildAfter header toggle (Just facts)
+      #append toolsRow toggle
       Gtk.toWidget stack
-    Text text -> CodeView.new e.path text
+    Text text -> do
+      (source, view) <- CodeView.withView e.path text
+      writeIORef findSlot (Just view)
+      pure source
     Image -> do
       image <- ImageView.texture bytes
       case image of
@@ -309,7 +367,18 @@ fileView follow anchor place e bytes = do
     Pdf -> PdfView.new e.path bytes >>= either note pure
     TooLarge -> note "Too large to show here; open it in the browser."
     _ -> note "Binary file not shown."
-  #append card body
+  void $ Gtk.stackAddNamed views body (Just "code")
+  hasTools <- Gtk.widgetGetFirstChild toolsRow
+  when (isJust hasTools) $ Gtk.boxInsertChildAfter box toolsRow (Just header)
+  -- Ctrl F opens the find bar over the code.
+  overlay <- GI.new Gtk.Overlay [#child := views]
+  readIORef findSlot >>= mapM_ (\view -> do
+    (bar, open) <- FileTools.findBar view
+    Gtk.overlayAddOverlay overlay bar
+    keys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
+    shortcut keys "<Primary>f" (Gtk.stackSetVisibleChildName views "code" >> open)
+    Gtk.widgetAddController box keys)
+  #append card overlay
   #append box card
   Gtk.toWidget box
   where
@@ -327,6 +396,15 @@ size n
   where
     one :: Double -> Text
     one x = T.pack (show (fromIntegral (round (x * 10) :: Int) / 10 :: Double))
+
+-- | A link to a file at a commit, which stays true as the branch moves.
+permalinkOf :: Place -> Text -> Text -> Text
+permalinkOf place sha path = "https://" <> place.host <> "/" <> place.repo <> middle <> sha <> "/" <> path
+  where
+    middle = case place.forge of
+      Forge.GitHub -> "/blob/"
+      Forge.GitLab -> "/-/blob/"
+      Forge.Forgejo -> "/src/commit/"
 
 webUrl :: Place -> Text -> Text
 webUrl place path = "https://" <> place.host <> "/" <> place.repo <> middle <> place.branch <> "/" <> path

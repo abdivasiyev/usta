@@ -16,6 +16,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Int (Int32)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (groupBy)
 import Data.Function (on)
@@ -37,31 +38,32 @@ import Usta.Types.Parse (unparse)
 -- | The blame, loaded when first shown; @load@ runs off the main thread.
 blameView :: Clock -> IO (Either Text [Blamed]) -> IO Gtk.Widget
 blameView c load = loading load $ \lines' -> do
-  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-blame"]]
+  -- A grid, so the commit, number and code columns line up.
+  grid <- GI.new Gtk.Grid [#cssClasses := ["u-blame"]]
   let numbered = zip [1 :: Int ..] (take 4000 lines')
+      place :: Gtk.IsWidget w => w -> Int32 -> Int -> IO ()
+      place w col row = Gtk.toWidget w >>= \x -> Gtk.gridAttach grid x col (fromIntegral row) 1 1
   forM_ (groupBy ((==) `on` ((.sha) . snd)) numbered) $ \chunk ->
     forM_ (zip [0 :: Int ..] chunk) $ \(k, (n, b)) -> do
-      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["line"] <> ["first" | k == 0]]
-      heat <- GI.new Gtk.Box [#widthRequest := 3, #cssClasses := ["heat", heatOf c b]]
-      #append row heat
-      who <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6, #widthRequest := 300, #cssClasses := ["who"]]
+      let first = ["first" | k == 0]
+      heat <- GI.new Gtk.Box [#widthRequest := 3, #cssClasses := ["heat", heatOf c b] <> first]
+      place heat 0 n
+      who <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6, #cssClasses := ["who"] <> first, #tooltipText := b.summary]
       when (k == 0) $ do
         label (T.take 7 b.sha) ["mono", "hash"] >>= #append who
         label b.author ["strong"] >>= #append who
         label (ago c b.at) ["muted"] >>= #append who
         s <- label b.summary ["muted"]
-        GI.set s [#ellipsize := Pango.EllipsizeModeEnd, #hexpand := True]
+        GI.set s [#ellipsize := Pango.EllipsizeModeEnd, #maxWidthChars := 28]
         #append who s
-      GI.set who [#tooltipText := b.summary]
-      #append row who
-      num <- label (T.pack (show n)) ["mono", "number"]
-      GI.set num [#widthRequest := 40, #xalign := 1]
-      #append row num
-      code <- label (if T.null b.line then " " else b.line) ["mono", "code"]
-      GI.set code [#selectable := True]
-      #append row code
-      #append box row
-  scroll <- GI.new Gtk.ScrolledWindow [#child := box, #vscrollbarPolicy := Gtk.PolicyTypeNever, #propagateNaturalHeight := True]
+      place who 1 n
+      num <- label (T.pack (show n)) (["mono", "number"] <> first)
+      GI.set num [#xalign := 1, #marginStart := 4, #marginEnd := 12]
+      place num 2 n
+      code <- label (if T.null b.line then " " else b.line) (["mono", "code"] <> first)
+      GI.set code [#selectable := True, #hexpand := True]
+      place code 3 n
+  scroll <- GI.new Gtk.ScrolledWindow [#child := grid, #vscrollbarPolicy := Gtk.PolicyTypeNever, #propagateNaturalHeight := True]
   Gtk.toWidget scroll
   where
     -- Newer lines are warmer, as forges draw them.
@@ -183,19 +185,19 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 css :: Text
 css = mconcat
-  [ "box.u-blame { background: var(--surface); font-size: 13px; }"
-  , "box.u-blame box.line.first { border-top: 1px solid var(--border-subtle); }"
-  , "box.u-blame box.who { padding: 0 8px; }"
-  , "box.u-blame label { line-height: 1.4; }"
-  , "box.u-blame label.mono { font-family: 'JetBrains Mono', monospace; }"
-  , "box.u-blame label.number { padding-right: 10px; color: var(--text-muted); }"
-  , "box.u-blame label.code { padding-right: 16px; }"
-  , "box.u-blame label.hash, box.u-file-history label.hash { color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 12px; }"
-  , "box.u-blame label.strong, box.u-file-history label.strong { font-weight: 600; }"
-  , "box.u-blame box.heat.week { background: #E5763A; }"
-  , "box.u-blame box.heat.month { background: #F2C25C; }"
-  , "box.u-blame box.heat.year { background: #9FB7EC; }"
-  , "box.u-blame box.heat.old { background: var(--border); }"
+  [ "grid.u-blame { background: var(--surface); font-size: 13px; }"
+  , "grid.u-blame .first { border-top: 1px solid var(--border-subtle); }"
+  , "grid.u-blame box.who { padding: 0 12px 0 8px; }"
+  , "grid.u-blame label { line-height: 1.4; }"
+  , "grid.u-blame label.mono { font-family: 'JetBrains Mono', monospace; }"
+  , "grid.u-blame label.number { padding: 0 10px 0 4px; color: var(--text-muted); }"
+  , "grid.u-blame label.code { padding-right: 16px; }"
+  , "grid.u-blame label.hash, box.u-file-history label.hash { color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 12px; }"
+  , "grid.u-blame label.strong, box.u-file-history label.strong { font-weight: 600; }"
+  , "grid.u-blame box.heat.week { background: #E5763A; }"
+  , "grid.u-blame box.heat.month { background: #F2C25C; }"
+  , "grid.u-blame box.heat.year { background: #9FB7EC; }"
+  , "grid.u-blame box.heat.old { background: var(--border); }"
   , "box.u-file-history { padding: 12px; }"
   , "box.u-file-history list.commits { background: transparent; }"
   , "box.u-file-history list.commits row { padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); }"

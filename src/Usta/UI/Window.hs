@@ -57,6 +57,7 @@ import qualified Usta.UI.Pages.RepositoryCommits as RepositoryCommits
 import qualified Usta.UI.Pages.RepositoryInsights as RepositoryInsights
 import qualified Usta.UI.Pages.RepositoryReleases as RepositoryReleases
 import qualified Usta.UI.Components.SidePanel as SidePanel
+import qualified Usta.UI.Components.FileTools as FileTools
 import qualified Usta.UI.Components.BranchPicker as BranchPicker
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import qualified Usta.UI.Pages.PullRequest.Commits as Commits
@@ -385,6 +386,11 @@ buildAt start given app = do
         { loadTree = fmap (\(from, es) -> (said from "From the local mirror" "From the forge's API", es))
             <$> source.tree r.host r.name r.defaultBranch
         , loadFile = \p -> fmap snd <$> source.file r.host r.name r.defaultBranch p
+        , blame = source.blame r.host r.name r.defaultBranch
+        , history = \p -> fmap snd <$> source.fileHistory r.host r.name r.defaultBranch p
+        , changeAt = \x p -> fmap (filter (\f -> f.path == p) . map Files.fromFileDiff . snd) <$> source.commitDiff r.host r.name x.sha
+        , newest = either (const Nothing) (\(_, cs) -> case cs of x : _ -> Just (unparse x.sha); [] -> Nothing) <$> source.history r.host r.name r.defaultBranch 1
+        , clock = clock
         }
         RepositoryFiles.Place {forge = r.forge, host = r.host, repo = r.name, branch = r.defaultBranch}
         opening
@@ -1033,7 +1039,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

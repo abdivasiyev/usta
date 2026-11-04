@@ -41,7 +41,7 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Format (Clock (..), ago)
-import Usta.UI.Pages.Issue (Comment (..), Talk (..), commentWidget)
+import Usta.UI.Pages.Issue (Comment (..), Talk (..), conversation)
 import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Types.Commit as C
@@ -49,6 +49,7 @@ import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
 import Usta.Types.Parse (unparse)
 import Usta.Types.Milestone (Milestone)
+import qualified Usta.Types.Timeline as Tl
 import Usta.Types.Readiness (Readiness (..), UpdateStyle (..))
 import Usta.Types.Reviewer (Candidate (..), Reviewer (..), Stance (..), Who (..))
 
@@ -78,6 +79,8 @@ data Model = Model
     -- ^ The description.
   , comments :: [Comment]
   , events :: [Event]
+  , timeline :: [Tl.Event]
+    -- ^ What happened besides comments and commits, by time.
   , threads :: [Thread.Shown]
     -- ^ The review threads, each with its file and code.
   , merge :: Maybe MergeState
@@ -126,6 +129,7 @@ fromDiscussion c d commits (from, into) checks = Model
   , comments = map (said "commented ") d.comments
   , events = [Committed (T.take 7 (unparse x.sha)) x.subject | x <- commits]
   , threads = []
+  , timeline = []
   , merge = if d.closed then Nothing else Just MergeState {checksPassed = checks, checksRunning = False, readiness = Nothing}
   , closed = d.closed && not d.merged
   , source = from
@@ -161,7 +165,7 @@ new actions m = do
           either (\text -> GI.set problem [#label := text, #visible := True]) (const actions.refresh)
   -- The reply box is made first, so Quote reply has somewhere to go.
   (reply, buffer) <- commentBox run actions m
-  forM_ (m.opening : m.comments) $ \x -> commentWidget actions.talk buffer m.opening.author x >>= #append main
+  conversation actions.talk buffer m.opening.author (m.opening : m.comments) m.timeline main
   timeline <- vbox 10
   Gtk.widgetAddCssClass timeline "timeline"
   forM_ m.events $ \e -> eventRow e >>= #append timeline
@@ -657,6 +661,7 @@ sample = Model
       , ReviewRequestedFrom "abdivasiyev"
       ]
   , threads = []
+  , timeline = []
   , merge = Just MergeState {checksPassed = Just True, checksRunning = False, readiness = Nothing}
   , closed = False
   , source = "feat/gtk4-dep"

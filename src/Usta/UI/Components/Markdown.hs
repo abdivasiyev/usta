@@ -5,7 +5,9 @@
 -- autolinks, task lists) through cmark-gfm. Code blocks are highlighted
 -- like files; links with a scheme open in the browser, and a link to a
 -- heading, "#usage", scrolls to it. Long words and links break where the
--- line ends; code blocks and tables scroll sideways on their own.
+-- line ends; code blocks and tables scroll sideways on their own. A
+-- "diff" block is drawn as a diff, and a "suggestion" block as the change
+-- a reviewer suggests.
 --
 -- Raw HTML is shown as forges show it, within the safe part they allow:
 -- inline styling (b, i, s, u, sub, sup, small, mark, code, kbd, br, a,
@@ -16,6 +18,7 @@ module Usta.UI.Components.Markdown
   , new
   , newIn
   , newAt
+  , suggesting
   , slug
   , css
   ) where
@@ -54,13 +57,21 @@ new = newIn (const (pure ()))
 newIn :: Follow -> Text -> IO Gtk.Widget
 newIn follow = newAt follow Nothing
 
+-- | A review comment on @replaced@, the lines it was left on: its
+-- suggestions show those lines going and the suggested ones coming.
+suggesting :: [Text] -> Text -> IO Gtk.Widget
+suggesting replaced = build (const (pure ())) Nothing replaced
+
 -- | Like 'newIn', scrolled to the heading @anchor@ names once it shows,
 -- as a link "a.md#usage" from another file asks.
 newAt :: Follow -> Maybe Text -> Text -> IO Gtk.Widget
-newAt follow anchor text = do
+newAt follow anchor = build follow anchor []
+
+build :: Follow -> Maybe Text -> [Text] -> Text -> IO Gtk.Widget
+build follow anchor replaced text = do
   let root = commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text
   anchors <- newIORef []
-  let doc = Doc {follow, diagrams = diagramsOf root, anchors}
+  let doc = Doc {follow, diagrams = diagramsOf root, anchors, replaced}
   w <- block doc root
   Gtk.widgetAddCssClass w "u-markdown"
   -- The heading has its place only once the page is laid out, and wrapped
@@ -86,6 +97,9 @@ data Doc = Doc
     -- ^ Its Mermaid diagrams in order, for fullscreen to move between.
   , anchors :: IORef [(Text, Gtk.Widget)]
     -- ^ Each heading by its slug, in order.
+  , replaced :: [Text]
+    -- ^ The lines a review comment is on, which its suggestions replace;
+    -- none elsewhere.
   }
 
 -- | A heading's anchor as forges make it: lowercase, spaces to hyphens,
@@ -157,7 +171,11 @@ block doc (Node _ kind children) = case kind of
   THEMATIC_BREAK -> GI.new Gtk.Separator [#orientation := Gtk.OrientationHorizontal] >>= Gtk.toWidget
   CODE_BLOCK info code
     | isMermaid info -> Mermaid.new doc.diagrams code
-    | otherwise -> codeBlock (T.takeWhile (/= ' ') (T.strip info)) code
+    | language `elem` ["diff", "patch"] -> diffBlock language Nothing (T.lines (T.stripEnd code))
+    | language == "suggestion" -> diffBlock "Suggested change" (Just code)
+        (map ("-" <>) doc.replaced <> map ("+" <>) (T.lines (T.stripEnd code)))
+    | otherwise -> codeBlock language code
+    where language = T.toLower (T.takeWhile (/= ' ') (T.strip info))
   HTML_BLOCK raw -> htmlBlock doc raw
   LIST attributes -> list doc attributes children
   TABLE alignments -> table doc alignments children
@@ -385,6 +403,35 @@ table doc alignments rows = do
                                       , #propagateNaturalHeight := True, #propagateNaturalWidth := True ]
   Gtk.toWidget scroll
 
+-- | Diff lines, each with its "+", "-", "@@" or " ", coloured as a diff;
+-- @copied@ is what Copy takes, the whole block when 'Nothing'.
+diffBlock :: Text -> Maybe Text -> [Text] -> IO Gtk.Widget
+diffBlock title copied rows = do
+  card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["code-block", "diff"]]
+  bar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["code-bar"]]
+  name <- GI.new Gtk.Label [#label := title, #hexpand := True, #xalign := 0]
+  #append bar name
+  copy <- GI.new Gtk.Button [#label := "Copy", #cssClasses := ["copy"]]
+  void $ GI.on copy #clicked $ do
+    clipboard <- Gtk.widgetGetClipboard copy
+    provider <- GI.toGValue (Just (maybe (T.unlines rows) id copied)) >>= Gdk.contentProviderNewForValue
+    void (Gdk.clipboardSetContent clipboard (Just provider))
+  #append bar copy
+  #append card bar
+  lines' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["diff-lines"]]
+  forM_ rows $ \row -> do
+    let kind
+          | "@@" `T.isPrefixOf` row = "hunk"
+          | any (`T.isPrefixOf` row) ["+++", "---", "diff ", "index "] = "file"
+          | "+" `T.isPrefixOf` row = "add"
+          | "-" `T.isPrefixOf` row = "del"
+          | otherwise = "ctx"
+    l <- GI.new Gtk.Label [#label := if T.null row then " " else row, #xalign := 0, #selectable := True, #cssClasses := ["line", kind]]
+    #append lines' l
+  scroll <- GI.new Gtk.ScrolledWindow [#child := lines', #vscrollbarPolicy := Gtk.PolicyTypeNever, #propagateNaturalHeight := True]
+  #append card scroll
+  Gtk.toWidget card
+
 -- | A fenced block: its language and Copy above, the code highlighted.
 codeBlock :: Text -> Text -> IO Gtk.Widget
 codeBlock language code = do
@@ -424,5 +471,11 @@ css = mconcat
   , ".u-markdown box.code-bar { padding: 4px 6px 4px 12px; background: var(--window); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }"
   , ".u-markdown box.code-bar button.copy { min-height: 26px; padding: 0 10px; font-size: 12px; }"
   , ".u-markdown label.code { padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }"
+  , ".u-markdown box.diff-lines { padding: 6px 0; }"
+  , ".u-markdown box.diff-lines label.line { padding: 0 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }"
+  , ".u-markdown box.diff-lines label.add { background: var(--success-bg); }"
+  , ".u-markdown box.diff-lines label.del { background: var(--danger-bg); }"
+  , ".u-markdown box.diff-lines label.hunk { color: var(--accent); background: var(--accent-bg); }"
+  , ".u-markdown box.diff-lines label.file { color: var(--text-muted); font-weight: 600; }"
   , ".u-markdown expander.details > title { font-weight: 600; }"
   ]

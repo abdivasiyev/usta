@@ -147,7 +147,8 @@ new s = do
         label ("· " <> when'') ["muted"] >>= #append top'
         when isFresh $ Badge.new Accent "New" >>= #append top'
         #append column top'
-        Markdown.new body >>= #append column
+        -- A suggestion replaces the line the thread is on.
+        Markdown.suggesting [T.drop 1 l | l <- take 1 (reverse s.thread.code)] body >>= #append column
         #append row column
         #append noteBox row
   forM_ notes $ \n -> addNote (unparse n.author) (ago s.clock n.createdAt) (fresh n) n.body

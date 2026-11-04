@@ -20,7 +20,7 @@ import Usta.Types.Check (Check, Job)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
-import Usta.Types.Discussion (Comment, Discussion, Feeling, Merge, NewIssue, NewPull, Verdict)
+import Usta.Types.Discussion (Comment, Discussion, Feeling, Merge, NewIssue, NewPull, Verdict, Watching)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Label (Definition)
@@ -105,6 +105,9 @@ data Forge = Forge
     -- ^ A comment's new text, by its id; 'Nothing' for the description.
   , deleteComment :: RepoName -> Int64 -> IO ()
   , editTitle :: RepoName -> Number -> Text -> IO ()
+  , watching :: RepoName -> Number -> IO Watching
+  , setWatching :: RepoName -> Number -> Watching -> IO ()
+    -- ^ A forge may refuse one it cannot set, saying why.
   , timeline :: RepoName -> Number -> IO [Event]
     -- ^ What happened besides comments, oldest first.
   , react :: RepoName -> Number -> Maybe Int64 -> Feeling -> Bool -> IO ()

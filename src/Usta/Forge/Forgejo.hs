@@ -115,6 +115,17 @@ forgejo manager base host token = do
     , deleteComment = \repo i -> () <$ run client (Api.api.deleteComment (owner repo) (shortName repo) i)
     , timeline = \repo n -> mapMaybe (.event) <$> run client
         (everyPage (\page limit -> Api.api.timeline (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
+    , watching = \repo n -> (.watching) <$> run client (Api.api.subscription (owner repo) (shortName repo) n)
+    , setWatching = \repo n wanted -> do
+        let (o, r) = (owner repo, shortName repo)
+        now <- (.watching) <$> run client (Api.api.subscription o r n)
+        login <- myLogin
+        -- Forgejo keeps a subscription or an ignore, and has no way back to
+        -- neither.
+        unless (now == wanted) $ case wanted of
+          D.Subscribed -> () <$ run client (Api.api.subscribe o r n login)
+          D.Muted -> () <$ run client (Api.api.unsubscribe o r n login)
+          D.Participating -> throwIO (Refused "Forgejo cannot go back to only when taking part; choose Subscribed or Muted.")
     , editTitle = \repo n title -> () <$ run client (Api.api.editTitle (owner repo) (shortName repo) n Api.PullEdit {title = title})
     , react = \repo n which feeling adding -> do
         let (o, r) = (owner repo, shortName repo)

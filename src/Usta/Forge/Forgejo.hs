@@ -113,6 +113,16 @@ forgejo manager base host token = do
         Just i -> () <$ run client (Api.api.editComment (owner repo) (shortName repo) i Api.BodyEdit {body = text})
         Nothing -> () <$ run client (Api.api.editBody (owner repo) (shortName repo) n Api.BodyEdit {body = text})
     , deleteComment = \repo i -> () <$ run client (Api.api.deleteComment (owner repo) (shortName repo) i)
+    , repoPullRequests = \repo -> do
+        latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
+          Api.RepoIssuesQuery {kind = Named Api.Pulls, state = Api.AnyState, page = Just 1, limit = Just 30})
+        -- The forge lists them newest first; the tab wants recently
+        -- updated first.
+        sortOn (Down . (.updatedAt)) <$> traverse (\i -> pullRequestOf client details host (i, [])) latest
+    , repoIssues = \repo -> do
+        latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
+          Api.RepoIssuesQuery {kind = Named Api.Issues, state = Api.AnyState, page = Just 1, limit = Just 50})
+        pure (map (issueOf host) [(i, []) | i <- latest])
     , timeline = \repo n -> mapMaybe (.event) <$> run client
         (everyPage (\page limit -> Api.api.timeline (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
     , watching = \repo n -> (.watching) <$> run client (Api.api.subscription (owner repo) (shortName repo) n)
@@ -402,40 +412,44 @@ pullRequestsOf client cache running host since = do
   let seen = Set.fromList [keyOf i | (i, _) <- changed]
       again = [entry | since /= Nothing, (key, entry) <- Map.toList waiting, key `Set.notMember` seen]
       asked = changed <> again
-  found <- traverse one asked
+  found <- traverse (pullRequestOf client cache host) asked
   writeIORef running (Map.fromList [(keyOf i, entry) | (entry@(i, _), pr) <- zip asked found, pr.checks == Just P.ChecksRunning])
   pure found
   where
     keyOf i = (i.repository.fullName, i.number)
-    one (i, involvement) = do
-      let key = (i.repository.fullName, i.number)
-          (o, r) = (owner i.repository.fullName, shortName i.repository.fullName)
-      cached <- Map.lookup key <$> readIORef cache
-      d <- case cached of
-        Just d | d.asOf == i.updatedAt -> pure d
-        _ -> do
-          pull <- run client (Api.api.pullRequest o r i.number)
-          given <- run client (everyPage (\page limit -> Api.api.reviews o r i.number Api.ListQuery {page = page, limit = limit}))
-          let d = Details {asOf = i.updatedAt, pull = pull, review = reviewOf pull given}
-          atomicModifyIORef' cache (\m -> (Map.insert key d m, ()))
-          pure d
-      combined <- run client (Api.api.status o r d.pull.head.sha)
-      pure P.PullRequest
-        { ref = Ref {host = host, repo = i.repository.fullName, number = i.number}
-        , title = i.title
-        , author = i.user.login
-        , headBranch = d.pull.head.ref
-        , baseBranch = d.pull.base.ref
-        , state = stateOf d.pull
-        , checks = checksOf combined
-        , review = d.review
-        , comments = i.comments
-        , changedFiles = d.pull.changedFiles
-        , commits = Nothing
-        , involvement = involvement
-        , createdAt = i.createdAt
-        , updatedAt = i.updatedAt
-        }
+
+-- | A pull request found by a search or a list, with its branches, state,
+-- checks and review; the details are kept until it changes.
+pullRequestOf :: Client -> IORef (Map.Map (RepoName, Number) Details) -> Host -> (Api.Issue, [Involvement]) -> IO P.PullRequest
+pullRequestOf client cache host (i, involvement) = do
+  let key = (i.repository.fullName, i.number)
+      (o, r) = (owner i.repository.fullName, shortName i.repository.fullName)
+  cached <- Map.lookup key <$> readIORef cache
+  d <- case cached of
+    Just d | d.asOf == i.updatedAt -> pure d
+    _ -> do
+      pull <- run client (Api.api.pullRequest o r i.number)
+      given <- run client (everyPage (\page limit -> Api.api.reviews o r i.number Api.ListQuery {page = page, limit = limit}))
+      let d = Details {asOf = i.updatedAt, pull = pull, review = reviewOf pull given}
+      atomicModifyIORef' cache (\m -> (Map.insert key d m, ()))
+      pure d
+  combined <- run client (Api.api.status o r d.pull.head.sha)
+  pure P.PullRequest
+    { ref = Ref {host = host, repo = i.repository.fullName, number = i.number}
+    , title = i.title
+    , author = i.user.login
+    , headBranch = d.pull.head.ref
+    , baseBranch = d.pull.base.ref
+    , state = stateOf d.pull
+    , checks = checksOf combined
+    , review = d.review
+    , comments = i.comments
+    , changedFiles = d.pull.changedFiles
+    , commits = Nothing
+    , involvement = involvement
+    , createdAt = i.createdAt
+    , updatedAt = i.updatedAt
+    }
 
 -- | Line comments as conversations: Forgejo keeps the comments on one
 -- line of a file together, so they are grouped the same way.
@@ -601,19 +615,20 @@ issuesOf client host since = do
   found <- case since of
     Just t -> searchAll client Api.Issues Api.AnyState (Just t) mine
     Nothing -> (<>) <$> searchAll client Api.Issues Api.Open Nothing mine <*> searchAll client Api.Issues Api.Closed (Just fortnight) mine
-  pure (map fromIssue found)
-  where
-    fromIssue (i, involvement) = I.Issue
-      { ref = Ref {host = host, repo = i.repository.fullName, number = i.number}
-      , title = i.title
-      , author = i.user.login
-      , labels = [L.Label {name = l.name, color = l.color} | l <- i.labels]
-      , comments = i.comments
-      , involvement = involvement
-      , createdAt = i.createdAt
-      , updatedAt = i.updatedAt
-      , closedAt = i.closedAt
-      }
+  pure (map (issueOf host) found)
+
+issueOf :: Host -> (Api.Issue, [Involvement]) -> I.Issue
+issueOf host (i, involvement) = I.Issue
+  { ref = Ref {host = host, repo = i.repository.fullName, number = i.number}
+  , title = i.title
+  , author = i.user.login
+  , labels = [L.Label {name = l.name, color = l.color} | l <- i.labels]
+  , comments = i.comments
+  , involvement = involvement
+  , createdAt = i.createdAt
+  , updatedAt = i.updatedAt
+  , closedAt = i.closedAt
+  }
 
 repositoriesOf :: Client -> Host -> IO [R.Repository]
 repositoriesOf client host = do

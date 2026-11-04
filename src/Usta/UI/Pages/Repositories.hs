@@ -8,6 +8,7 @@ module Usta.UI.Pages.Repositories
   , Repository (..)
   , fromRepository
   , Actions (..)
+  , Tab (..)
   , ChooseMirror
   , Origins (..)
   , LookUpOrigins
@@ -125,6 +126,16 @@ data Actions = Actions
   , files :: Repository -> Maybe Text -> IO Gtk.Widget
     -- ^ The Files tab, built the first time it is chosen, or again to
     -- open a file or folder a README links to.
+  , tabs :: Repository -> [Tab]
+    -- ^ The tabs after Files, such as Pull requests.
+  }
+
+-- | A tab after Files, built the first time it is chosen.
+type Tab :: Type
+data Tab = Tab
+  { title :: Text
+    -- ^ With its count, e.g. "Pull requests  3".
+  , build :: IO Gtk.Widget
   }
 
 new :: Actions -> [Repository] -> IO (Page Repository)
@@ -157,8 +168,8 @@ new actions repositories = do
         writeIORef selectedKey (Just (key r))
         clear detail
         GI.set listPane [#visible := True]
-        -- The Files tab takes the list's room, as the design draws it.
-        repositoryDetail actions r (\inFiles -> GI.set listPane [#visible := not inFiles]) >>= #append detail
+        -- Every tab but Overview takes the list's room, as the design draws it.
+        repositoryDetail actions r (\wide -> GI.set listPane [#visible := not wide]) >>= #append detail
 
   (search, entry) <- SearchField.new SearchField.defaults
     { SearchField.placeholder = "Filter repositories"
@@ -208,12 +219,12 @@ new actions repositories = do
   where
     key r = (r.host, r.name)
 
--- | The Overview and Files tabs over the one chosen; @onFiles@ runs with
--- whether Files is the tab shown.
+-- | The Overview, Files and later tabs over the one chosen; @onWide@
+-- runs with whether a tab other than Overview is shown.
 repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO Gtk.Box
-repositoryDetail actions r onFiles = do
+repositoryDetail actions r onWide = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
-  tabs <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
+  tabBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
   stack <- GI.new Gtk.Stack [ #vexpand := True
                             , #hexpand := True
                             , #transitionType := Gtk.StackTransitionTypeCrossfade
@@ -224,32 +235,37 @@ repositoryDetail actions r onFiles = do
   openFiles <- newIORef (const (pure ()))
   overview actions r (\path -> readIORef openFiles >>= ($ path)) >>= \o -> GI.set overviewScroll [#child := o]
   void $ Gtk.stackAddNamed stack overviewScroll (Just "overview")
-  filesSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
-  void $ Gtk.stackAddNamed stack filesSlot (Just "files")
-  built <- newIORef False
-  buttons <- forM [("Overview", "overview"), ("Files", "files")] $ \(text, name) -> do
-    b <- GI.new Gtk.ToggleButton [#label := text, #active := name == "overview"]
-    void $ GI.on b #toggled $ do
-      active <- GI.get b #active
-      when active $ do
-        when (name == "files") $ do
+  -- Every other tab is built the first time it is chosen.
+  let later = Tab {title = "Files", build = actions.files r Nothing} : actions.tabs r
+  slots <- forM (zip [1 :: Int ..] later) $ \(i, tab) -> do
+    slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
+    void $ Gtk.stackAddNamed stack slot (Just (T.pack (show i)))
+    built <- newIORef False
+    pure (slot, built, tab)
+  let choose name = do
+        forM_ (zip [1 :: Int ..] slots) $ \(i, (slot, built, tab)) -> when (T.pack (show i) == name) $ do
           done <- readIORef built
           when (not done) $ do
             writeIORef built True
-            actions.files r Nothing >>= #append filesSlot
-        onFiles (name == "files")
+            tab.build >>= #append slot
+        onWide (name /= "overview")
         Gtk.stackSetVisibleChildName stack name
-    #append tabs b
+  buttons <- forM (("Overview", "overview") : [(tab.title, T.pack (show i)) | (i, (_, _, tab)) <- zip [1 :: Int ..] slots]) $ \(text, name) -> do
+    b <- GI.new Gtk.ToggleButton [#label := text, #active := name == "overview"]
+    void $ GI.on b #toggled $ do
+      active <- GI.get b #active
+      when active (choose name)
+    #append tabBar b
     pure b
   case buttons of
     first : rest -> forM_ rest $ \b -> GI.set b [#group := first]
     [] -> pure ()
-  writeIORef openFiles $ \path -> do
+  forM_ (take 1 slots) $ \(filesSlot, built, _) -> writeIORef openFiles $ \path -> do
     clear filesSlot
     writeIORef built True
     actions.files r (Just path) >>= #append filesSlot
-    forM_ (drop 1 buttons) $ \b -> GI.set b [#active := True]
-  #append box tabs
+    forM_ (take 1 (drop 1 buttons)) $ \b -> GI.set b [#active := True]
+  #append box tabBar
   #append box stack
   pure box
 

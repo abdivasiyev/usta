@@ -51,6 +51,7 @@ import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Branch (Branch, Tag)
+import Usta.Types.Release (Release)
 import qualified Usta.Types.Insights as Insights
 import Data.Time (UTCTime)
 import Usta.Types.Check (Check, Job, Run)
@@ -193,6 +194,8 @@ data Source = Source
   , branchList :: Text -> Text -> Text -> IO (Either Text (From, [Branch]))
     -- ^ By host, repository and default branch.
   , tagList :: Text -> Text -> IO (Either Text (From, [Tag]))
+  , releases :: Text -> Text -> IO (Either Text [Release])
+    -- ^ From the forge, newest first.
   , history :: Text -> Text -> Text -> Int -> IO (Either Text (From, [Commit]))
     -- ^ By host, repository, branch and page, from 1.
   , changes :: Text -> Text -> Text -> Maybe UTCTime -> IO (Either Text [Insights.Change])
@@ -322,6 +325,7 @@ fromDatabase pool changes statuses sync = Source
   , discardPending = \_ _ _ -> pure (Left unavailable)
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
+  , releases = \_ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
@@ -406,6 +410,7 @@ samples = Source
   , discardPending = \_ _ _ -> pure (Left unavailable)
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
+  , releases = \_ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
@@ -477,6 +482,7 @@ withAccounts pool accounts source = source
   , repoPullRequests = \host repo -> onRepo host repo (\f name -> f.repoPullRequests name)
   , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
+  , releases = \host repo -> onRepo host repo (\f name -> f.releases name)
   , discardPending = \host repo n -> onForge host repo n (\f name number -> f.discardPending name number)
   }
   where
@@ -629,6 +635,7 @@ tracking track s = s
   , discardPending = \h r n -> track (s.discardPending h r n)
   , branchList = \h r b -> track (s.branchList h r b)
   , tagList = \h r -> track (s.tagList h r)
+  , releases = \h r -> track (s.releases h r)
   , history = \h r b n -> track (s.history h r b n)
   , changes = \h r b t -> track (s.changes h r b t)
   , graph = \h r b f n -> track (s.graph h r b f n)

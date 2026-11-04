@@ -40,6 +40,7 @@ import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import qualified Usta.Types.Branch as Br
+import qualified Usta.Types.Release as Rel
 import qualified Usta.Types.Check as C
 import Usta.Types.Diff (FileDiff (..), parseDiff)
 import qualified Usta.Types.Discussion as D
@@ -293,6 +294,8 @@ forgejo manager base host token = do
           Api.CommitsQuery {sha = branch, page = Just n, limit = 50, stat = False, verification = False, files = False})
     , branchList = \repo -> map (\b -> Br.Branch {name = b.name, pushed = b.pushed, ahead = Nothing, behind = Nothing}) <$> run client
         (everyPage (\page limit -> Api.api.branches (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+    , releases = \repo -> map releaseOf <$> run client
+        (everyPage (\page limit -> Api.api.releases (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , tags = \repo -> map (\t -> Br.Tag {name = t.name, at = t.made}) <$> run client
         (everyPage (\page limit -> Api.api.tags (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , commitDiff = \repo sha -> do
@@ -656,6 +659,19 @@ runsOf tasks =
       | C.Waiting `elem` states = C.Waiting
       | all (== C.Skipped) states = C.Skipped
       | otherwise = C.Passed
+
+releaseOf :: Api.ApiRelease -> Rel.Release
+releaseOf r = Rel.Release
+  { name = if T.null r.name then r.tagName else r.name
+  , tag = r.tagName
+  , notes = r.body
+  , author = maybe "" (\u -> unparse u.login) r.author
+  , published = r.publishedAt
+  , draft = r.draft
+  , prerelease = r.prerelease
+  , url = r.htmlUrl
+  , assets = [Rel.Asset {name = x.name, size = x.size, downloads = x.downloadCount, url = x.browserDownloadUrl} | x <- r.assets]
+  }
 
 -- | The job a status links, "…/actions/runs/{run}/jobs/{index}".
 jobOf :: Text -> Maybe C.Job

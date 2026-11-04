@@ -94,6 +94,7 @@ new now account = do
         , F.discardPending = \_ _ -> pure 0
         , F.branchList = \_ -> pure []
         , F.tags = \_ -> pure []
+        , F.releases = \_ -> pure []
         , F.history = \_ _ _ -> pure []
         , F.react = \_ _ _ _ _ -> refuse
         , F.checkLog = \_ _ -> refuse

@@ -4,6 +4,7 @@ module Usta.Types.Discussion
   ( Comment (..)
   , Reaction (..)
   , Feeling (..)
+  , Watching (..)
   , Discussion (..)
   , Merge (..)
   , Verdict (..)
@@ -33,6 +34,17 @@ data Comment = Comment
   , reactions :: [Reaction]
   }
   deriving stock (Eq, Show)
+
+-- | How much of an issue or pull request reaches the user's inbox.
+type Watching :: Type
+data Watching
+  = Subscribed
+    -- ^ Every comment and change.
+  | Participating
+    -- ^ Only when mentioned or taking part.
+  | Muted
+    -- ^ Nothing, ever.
+  deriving stock (Eq, Show, Enum, Bounded)
 
 -- | How a reaction feels: the eight forges share.
 type Feeling :: Type

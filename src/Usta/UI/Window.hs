@@ -732,6 +732,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         , reply = source.reply summary.host summary.repo summary.number
         , discard = fmap (() <$) (source.discardPending summary.host summary.repo summary.number)
         , upload = Just (source.upload summary.host summary.repo summary.number)
+        , draftKey = summary.host <> "/" <> summary.repo <> "#" <> T.pack (show summary.number)
         }
         panels
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
@@ -783,6 +784,7 @@ talkFor source host repo n refresh me c = Issue.Talk
   , react = source.react host repo n
   , refresh = refresh
   , upload = Just (source.upload host repo n)
+  , draftKey = host <> "/" <> repo <> "#" <> T.pack (show n)
   }
 
 -- | The assignees picker of an issue or pull request, for @me@ (a login

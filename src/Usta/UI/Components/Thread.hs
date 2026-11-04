@@ -247,6 +247,8 @@ data Writing = Writing
   , posted :: Text -> IO ()
     -- ^ Comment now worked.
   , attach :: Maybe Attach.Uploader
+  , draft :: MarkdownEditor.Draft
+    -- ^ Where the note is kept while it is written.
   }
 
 -- | "213–215".
@@ -288,7 +290,7 @@ writer me w = do
   #append frame top
 
   -- The toolbar, emoji, :name: and Preview of every comment box.
-  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.text = w.text, MarkdownEditor.height = 72, MarkdownEditor.upload = w.attach}
+  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.text = w.text, MarkdownEditor.height = 72, MarkdownEditor.upload = w.attach, MarkdownEditor.draft = Just w.draft}
   #append frame editor
   void $ GI.on suggest #clicked $ do
     Gtk.textBufferInsertAtCursor buffer ("```suggestion\n" <> T.unlines w.code <> "```\n") (-1)

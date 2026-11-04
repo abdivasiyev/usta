@@ -85,6 +85,8 @@ data Talk = Talk
   , refresh :: IO ()
   , upload :: Maybe Attach.Uploader
     -- ^ Where files attached to its comments go.
+  , draftKey :: Text
+    -- ^ Where its unsent comments are kept, e.g. "host/owner/repo#12".
   }
 
 -- | A comment as a card that edits, deletes and reacts when the forge's
@@ -419,7 +421,8 @@ replyBox :: Actions -> Model -> IO (Gtk.Box, Gtk.TextBuffer)
 replyBox actions m = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
   (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults
-    { MarkdownEditor.hint = Just "Leave a comment. Markdown supported; paste or drop files to attach them.", MarkdownEditor.upload = actions.talk.upload }
+    { MarkdownEditor.hint = Just "Leave a comment. Markdown supported; paste or drop files to attach them.", MarkdownEditor.upload = actions.talk.upload
+    , MarkdownEditor.draft = Just (MarkdownEditor.draftAt (actions.talk.draftKey <> "/comment")) }
   #append box editor
   problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
   buttons <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
@@ -438,7 +441,9 @@ replyBox actions m = do
           either (\text -> GI.set problem [#label := text, #visible := True]) (const actions.refresh)
   void $ GI.on send #clicked $ do
     text <- maybe "" id <$> GI.get buffer #text
-    unless (T.null (T.strip text)) $ run send "Commenting…" (actions.comment text)
+    -- Sent, the draft is done with.
+    let sent r = r <$ either (const (pure ())) (const ((MarkdownEditor.draftAt (actions.talk.draftKey <> "/comment")).keep "")) r
+    unless (T.null (T.strip text)) $ run send "Commenting…" (actions.comment text >>= sent)
   void $ GI.on close #clicked $ run close (if m.closed then "Reopening…" else "Closing…") (actions.setClosed (not m.closed))
   #append box problem
   #append box buttons

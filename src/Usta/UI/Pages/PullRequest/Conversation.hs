@@ -311,7 +311,9 @@ commentBox run actions m = do
   box <- vbox 8
   label "Add a comment" ["strong"] >>= #append box
   -- The Markdown editor of every comment box, with attachments.
-  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 96, MarkdownEditor.upload = actions.talk.upload}
+  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults
+    { MarkdownEditor.height = 96, MarkdownEditor.upload = actions.talk.upload
+    , MarkdownEditor.draft = Just (MarkdownEditor.draftAt (actions.talk.draftKey <> "/comment")) }
   #append box editor
   buttons <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #spacing := 8
@@ -326,7 +328,9 @@ commentBox run actions m = do
   send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
   void $ GI.on send #clicked $ do
     text <- maybe "" id <$> GI.get buffer #text
-    unless (T.null (T.strip text)) $ run send buttons "Commenting…" (actions.comment text)
+    -- Sent, the draft is done with.
+    let sent r = r <$ either (const (pure ())) (const ((MarkdownEditor.draftAt (actions.talk.draftKey <> "/comment")).keep "")) r
+    unless (T.null (T.strip text)) $ run send buttons "Commenting…" (actions.comment text >>= sent)
   #append buttons send
   #append box buttons
   pure (box, buffer)

@@ -9,6 +9,8 @@
 -- line, and pressing one again takes it off.
 module Usta.UI.Components.MarkdownEditor
   ( Config (..)
+  , Draft (..)
+  , draftAt
   , defaults
   , new
   , css
@@ -19,12 +21,15 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)), set)
 import Data.Char (isDigit)
 import Data.Int (Int32)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import Usta.UI.Components.CommandPalette (shortcut)
+import qualified Usta.Drafts as Drafts
 import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
@@ -43,10 +48,23 @@ data Config = Config
   , upload :: Maybe Attach.Uploader
     -- ^ Where attached, pasted and dropped files go; none where there is
     -- no issue or pull request yet.
+  , draft :: Maybe Draft
+    -- ^ What was written here before and not sent; kept as it is typed.
   }
 
+-- | Where a box's unsent text is kept.
+type Draft :: Type
+data Draft = Draft
+  { saved :: IO Text
+  , keep :: Text -> IO ()
+  }
+
+-- | The draft kept under @key@, such as "host/owner/repo#12/comment".
+draftAt :: Text -> Draft
+draftAt key = Draft {saved = Drafts.load key, keep = Drafts.keep key}
+
 defaults :: Config
-defaults = Config { text = "", hint = Nothing, height = 120, compact = False, upload = Nothing }
+defaults = Config { text = "", hint = Nothing, height = 120, compact = False, upload = Nothing, draft = Nothing }
 
 -- | The editor and its buffer, to read what was written.
 new :: Config -> IO (Gtk.Box, Gtk.TextBuffer)
@@ -62,6 +80,21 @@ new cfg = do
 
   buffer <- GI.new Gtk.TextBuffer []
   Gtk.textBufferSetText buffer cfg.text (-1)
+  -- An empty box opens with its draft; what is typed is kept half a
+  -- second after the typing stops, and emptying the box forgets it.
+  forM_ cfg.draft $ \d -> do
+    when (T.null cfg.text) $ d.saved >>= \t -> unless (T.null t) (Gtk.textBufferSetText buffer t (-1))
+    waiting <- newIORef Nothing
+    void $ GI.on buffer #changed $ do
+      readIORef waiting >>= mapM_ GLib.sourceRemove
+      source <- GLib.timeoutAdd GLib.PRIORITY_DEFAULT 500 $ do
+        writeIORef waiting Nothing
+        text <- maybe "" id <$> GI.get buffer #text
+        d.keep text
+        pure False
+      writeIORef waiting (Just source)
+    -- A box taken away, as after it was sent, keeps nothing more.
+    void $ GI.on box #unrealize $ readIORef waiting >>= mapM_ GLib.sourceRemove >> writeIORef waiting Nothing
   view <- GI.new Gtk.TextView [ #buffer := buffer
                               , #wrapMode := Gtk.WrapModeWordChar
                               , #heightRequest := cfg.height

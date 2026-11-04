@@ -106,6 +106,8 @@ data Actions = Actions
     -- ^ Deletes the user's review left pending on the forge, if any.
   , upload :: Maybe Attach.Uploader
     -- ^ Where files attached in the review's boxes go.
+  , draftKey :: Text
+    -- ^ Where the review's unsent words are kept, e.g. "host/owner/repo#12".
   }
 
 -- | One changed file as shown in both columns.
@@ -216,13 +218,16 @@ new actions panels m = do
               readIORef self >>= mapM_ (Gtk.boxRemove under)
               modifyIORef' writingRef (filter (/= (path, number)))
             noteOf t = LineNote {path = path, line = number, body = Thread.quoteRange from number code t}
+            lineDraft = MarkdownEditor.draftAt (actions.draftKey <> "/line/" <> path <> ":" <> T.pack (show from) <> "-" <> T.pack (show number))
         w <- Thread.writer m.me Thread.Writing
           { path = path, first = from, line = number, code = code, text = text
           , cancel = close
-          , add = \t -> close >> addPending path (from, number) code t under
+          , add = \t -> close >> lineDraft.keep "" >> addPending path (from, number) code t under
           , now = \t -> actions.review CommentOnly "" [noteOf t]
           , attach = actions.upload
+          , draft = lineDraft
           , posted = \t -> do
+              lineDraft.keep ""
               close
               c <- Thread.pending m.me t (pure ()) (pure ())
               c.sent
@@ -513,7 +518,9 @@ review actions m listed pendingRef pendingChanged = do
     [] -> pure ()
   forM_ radios (#append verdict)
   label "Summary" ["soft", "small"] >>= #append verdict
-  (summary, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 72, MarkdownEditor.compact = True, MarkdownEditor.upload = actions.upload}
+  (summary, buffer) <- MarkdownEditor.new MarkdownEditor.defaults
+    { MarkdownEditor.height = 72, MarkdownEditor.compact = True, MarkdownEditor.upload = actions.upload
+    , MarkdownEditor.draft = Just (MarkdownEditor.draftAt (actions.draftKey <> "/review")) }
   #append verdict summary
 
   -- The notes on lines that go out with the review.

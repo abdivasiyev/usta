@@ -46,40 +46,64 @@ new = newIn (const (pure ()))
 -- file's links to the files beside it.
 newIn :: Follow -> Text -> IO Gtk.Widget
 newIn follow text = do
-  w <- block follow (commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text)
+  let root = commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text
+  w <- block Doc {follow, diagrams = diagramsOf root} root
   Gtk.widgetAddCssClass w "u-markdown"
   pure w
 
-block :: Follow -> Node -> IO Gtk.Widget
-block follow (Node _ kind children) = case kind of
-  DOCUMENT -> column follow 12 children
-  PARAGRAPH -> paragraph follow ["paragraph"] children
-  HEADING level -> paragraph follow ["heading", "h" <> T.pack (show (min 6 level))] children
+-- | What the blocks of one document share.
+type Doc :: Type
+data Doc = Doc
+  { follow :: Follow
+  , diagrams :: [Mermaid.Diagram]
+    -- ^ Its Mermaid diagrams in order, for fullscreen to move between.
+  }
+
+-- | The document's diagrams, each named after the heading above it.
+diagramsOf :: Node -> [Mermaid.Diagram]
+diagramsOf root = go "Diagram" (everything root)
+  where
+    everything n@(Node _ _ children) = n : concatMap everything children
+    go title nodes = case nodes of
+      [] -> []
+      Node _ (HEADING _) children : rest -> go (plainOf (foldMap inline children)) rest
+      Node _ (CODE_BLOCK info code) _ : rest
+        | isMermaid info -> Mermaid.Diagram {title, source = code} : go title rest
+      _ : rest -> go title rest
+
+isMermaid :: Text -> Bool
+isMermaid info = T.toLower (T.strip info) == "mermaid"
+
+block :: Doc -> Node -> IO Gtk.Widget
+block doc (Node _ kind children) = case kind of
+  DOCUMENT -> column doc 12 children
+  PARAGRAPH -> paragraph doc ["paragraph"] children
+  HEADING level -> paragraph doc ["heading", "h" <> T.pack (show (min 6 level))] children
   BLOCK_QUOTE -> do
-    w <- column follow 8 children
+    w <- column doc 8 children
     Gtk.widgetAddCssClass w "quote"
     pure w
   THEMATIC_BREAK -> GI.new Gtk.Separator [#orientation := Gtk.OrientationHorizontal] >>= Gtk.toWidget
   CODE_BLOCK info code
-    | T.toLower (T.strip info) == "mermaid" -> Mermaid.new code
+    | isMermaid info -> Mermaid.new doc.diagrams code
     | otherwise -> codeBlock (T.takeWhile (/= ' ') (T.strip info)) code
-  HTML_BLOCK raw -> htmlBlock follow raw
-  LIST attributes -> list follow attributes children
-  TABLE alignments -> table follow alignments children
-  _ -> column follow 8 children
+  HTML_BLOCK raw -> htmlBlock doc raw
+  LIST attributes -> list doc attributes children
+  TABLE alignments -> table doc alignments children
+  _ -> column doc 8 children
 
 -- | The blocks one under another; a <details> opened in one HTML block and
 -- closed in a later one holds the blocks between.
-column :: Follow -> Int -> [Node] -> IO Gtk.Widget
-column follow gap children = do
+column :: Doc -> Int -> [Node] -> IO Gtk.Widget
+column doc gap children = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := fromIntegral gap]
   let go nodes = case nodes of
         [] -> pure ()
         Node _ (HTML_BLOCK raw) _ : rest | opens "details" raw && not (closes "details" raw) -> do
           let (inside, after) = untilClosed (1 :: Int) rest
-          details follow raw inside >>= #append box
+          details doc raw inside >>= #append box
           go after
-        n : rest -> block follow n >>= #append box >> go rest
+        n : rest -> block doc n >>= #append box >> go rest
       untilClosed depth nodes = case nodes of
         [] -> ([], [])
         n@(Node _ (HTML_BLOCK raw) _) : rest
@@ -93,12 +117,12 @@ column follow gap children = do
 
 -- | A collapsible section: the summary from @raw@, which opened it, and
 -- @inside@ under it.
-details :: Follow -> Text -> [Node] -> IO Gtk.Widget
-details follow raw inside = do
+details :: Doc -> Text -> [Node] -> IO Gtk.Widget
+details doc raw inside = do
   let summary = T.strip (fst (T.breakOn "</summary>" (snd (T.breakOn ">" (snd (T.breakOn "<summary" raw))))))
       title = if T.null summary then "Details" else T.drop 1 summary
       rest = T.strip (snd (T.breakOn "</summary>" raw))
-  body <- column follow 8 ([Node Nothing (HTML_BLOCK (T.drop 10 rest)) [] | T.length rest > 10] <> inside)
+  body <- column doc 8 ([Node Nothing (HTML_BLOCK (T.drop 10 rest)) [] | T.length rest > 10] <> inside)
   GI.set body [#marginStart := 20, #marginTop := 6]
   expander <- GI.new Gtk.Expander [#useMarkup := True, #label := htmlMarkup title, #child := body, #cssClasses := ["details"]]
   Gtk.toWidget expander
@@ -109,13 +133,13 @@ closes tag raw = ("</" <> tag <> ">") `T.isInfixOf` T.toLower raw
 
 -- | An HTML block as a paragraph of its inline markup: a heading for h1
 -- to h6, centred when it asks, a rule for hr, nothing for a comment.
-htmlBlock :: Follow -> Text -> IO Gtk.Widget
-htmlBlock follow raw
-  | opens "details" raw = details follow raw []
+htmlBlock :: Doc -> Text -> IO Gtk.Widget
+htmlBlock doc raw
+  | opens "details" raw = details doc raw []
   | all isRule ps && any isHr ps = GI.new Gtk.Separator [#orientation := Gtk.OrientationHorizontal] >>= Gtk.toWidget
   | T.null (T.strip (htmlMarkup raw)) = GI.new Gtk.Box [] >>= Gtk.toWidget
   | otherwise = do
-      w <- text' follow (htmlMarkup raw) (heading <> ["paragraph"])
+      w <- text' doc (htmlMarkup raw) (heading <> ["paragraph"])
       when centred $ GI.set w [#halign := Gtk.AlignCenter]
       pure w
   where
@@ -129,13 +153,13 @@ htmlBlock follow raw
     heading = concat (take 1 [["heading", n] | Tag {name = n, closing = False} <- ps, n `elem` ["h1", "h2", "h3", "h4", "h5", "h6"]])
     centred = or [n == "center" || lookup "align" a == Just "center" | Tag {name = n, closing = False, attributes = a} <- ps]
 
-paragraph :: Follow -> [Text] -> [Node] -> IO Gtk.Widget
-paragraph follow classes children = text' follow (foldMap inline children) classes
+paragraph :: Doc -> [Text] -> [Node] -> IO Gtk.Widget
+paragraph doc classes children = text' doc (foldMap inline children) classes
 
 -- | Selectable, wrapping text from Pango markup; markup that does not
 -- parse, as from HTML left unclosed, shows as its plain text.
-text' :: Follow -> Text -> [Text] -> IO Gtk.Widget
-text' follow markup classes = do
+text' :: Doc -> Text -> [Text] -> IO Gtk.Widget
+text' doc markup classes = do
   -- Links are the label's own markup, which Pango's parser does not know.
   parsed <- try (Pango.parseMarkup (withoutLinks markup) (-1) '\0')
   let shown = either (\(_ :: SomeException) -> Highlight.plain (plainOf markup)) (const markup) parsed
@@ -146,14 +170,14 @@ text' follow markup classes = do
                         , #label := shown
                         , #cssClasses := classes
                         ]
-  links follow l
+  links doc l
   Gtk.toWidget l
 
 -- | A label's links with a scheme (https:, mailto:) open as GTK opens
--- them; the others go to @follow@.
-links :: Follow -> Gtk.Label -> IO ()
-links follow l = void $ GI.on l #activateLink $ \uri ->
-  if hasScheme uri then pure False else follow uri >> pure True
+-- them; the others go to the document's 'Follow'.
+links :: Doc -> Gtk.Label -> IO ()
+links doc l = void $ GI.on l #activateLink $ \uri ->
+  if hasScheme uri then pure False else doc.follow uri >> pure True
   where
     hasScheme u = case T.breakOn ":" u of
       (s, rest) -> not (T.null s) && not (T.null rest) && T.all (\c -> isAlphaNum c || c `elem` ("+-." :: String)) s
@@ -239,8 +263,8 @@ plainOf markup = foldMap one (pieces markup)
 
 -- | Bullets or numbers; an item starting "[ ]" or "[x]" is a task with a
 -- check box.
-list :: Follow -> ListAttributes -> [Node] -> IO Gtk.Widget
-list follow attributes items = do
+list :: Doc -> ListAttributes -> [Node] -> IO Gtk.Widget
+list doc attributes items = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #cssClasses := ["list"]]
   forM_ (zip [attributes.listStart ..] items) $ \(n, Node p _ content) -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
@@ -254,7 +278,7 @@ list follow attributes items = do
                               ]
         Gtk.toWidget l
     #append row marker
-    body <- block follow (Node p DOCUMENT rest)
+    body <- block doc (Node p DOCUMENT rest)
     GI.set body [#hexpand := True]
     #append row body
     #append box row
@@ -266,8 +290,8 @@ list follow attributes items = do
         | "[x] " `T.isPrefixOf` T.toLower t -> (Just True, Node p PARAGRAPH (Node q (TEXT (T.drop 4 t)) more : others) : blocks)
       _ -> (Nothing, content)
 
-table :: Follow -> [TableCellAlignment] -> [Node] -> IO Gtk.Widget
-table follow alignments rows = do
+table :: Doc -> [TableCellAlignment] -> [Node] -> IO Gtk.Widget
+table doc alignments rows = do
   grid <- GI.new Gtk.Grid [#cssClasses := ["table"], #halign := Gtk.AlignStart]
   forM_ (zip [0 ..] rows) $ \(r, Node _ _ cells) ->
     forM_ (zip3 [0 ..] cells (alignments <> repeat NoAlignment)) $ \(c, Node _ _ content, alignment) -> do
@@ -280,7 +304,7 @@ table follow alignments rows = do
                                    _ -> 0
                                , #cssClasses := ["cell"] <> ["header" | r == (0 :: Int)]
                                ]
-      links follow cell
+      links doc cell
       Gtk.gridAttach grid cell c (fromIntegral r) 1 1
   Gtk.toWidget grid
 

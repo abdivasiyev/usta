@@ -31,6 +31,20 @@ data Icon
   | Check
   | Cross
   | Skipped
+  | Heading
+  | Bold
+  | Italic
+  | Code
+  | Link
+  | Quote
+  | Bullets
+  | Numbers
+  | Tasks
+  | CodeBlock
+  | Diagram
+  | Smile
+  | Fit
+  | Fullscreen
   deriving (Eq, Show, Enum, Bounded)
 
 -- | An icon at the given size in pixels, in the surrounding text color.
@@ -77,6 +91,40 @@ source icon = case icon of
     [ stroke "circle" "cx='12' cy='12' r='8.5'"
     , stroke "path" "d='M8 12h8'"
     ]
+  Heading -> line [ stroke "path" "d='M6 5v14M18 5v14M6 12h12'" ]
+  Bold -> line [ stroke "path" "d='M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z'" ]
+  Italic -> line [ stroke "path" "d='M10 5h8M6 19h8M14 5l-4 14'" ]
+  Code -> line [ stroke "path" "d='M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16'" ]
+  Link -> line
+    [ stroke "path" "d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'"
+    , stroke "path" "d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'"
+    ]
+  Quote -> line [ stroke "path" "d='M5 5v14M10 8h9M10 12h9M10 16h6'" ]
+  Bullets -> line
+    [ stroke "path" "d='M10 7h10M10 12h10M10 17h10'"
+    , stroke "circle" "cx='5' cy='7' r='1'"
+    , stroke "circle" "cx='5' cy='12' r='1'"
+    , stroke "circle" "cx='5' cy='17' r='1'"
+    ]
+  Numbers -> line [ stroke "path" "d='M11 7h9M11 12h9M11 17h9M4 5h1.5v5M4 14.5a1.5 1.5 0 0 1 3 0c0 1-3 2.5-3 3.5h3'" ]
+  Tasks -> line
+    [ stroke "rect" "x='4' y='4' width='16' height='16' rx='3'"
+    , stroke "path" "d='M8 12l3 3 5-6'"
+    ]
+  CodeBlock -> line
+    [ stroke "path" "d='M9 4c-2 0-3 1-3 3v2c0 1.5-1 3-2 3 1 0 2 1.5 2 3v2c0 2 1 3 3 3'"
+    , stroke "path" "d='M15 4c2 0 3 1 3 3v2c0 1.5 1 3 2 3-1 0-2 1.5-2 3v2c0 2-1 3-3 3'"
+    ]
+  Diagram -> line [ stroke "path" "d='M2 12l4-4 4 4-4 4zM12 12h9M18 9l3 3-3 3'" ]
+  Smile -> line
+    [ stroke "circle" "cx='12' cy='12' r='8.5'"
+    , stroke "path" "d='M8.5 14a4 4 0 0 0 7 0M9 9.5h.01M15 9.5h.01'"
+    ]
+  Fit -> line
+    [ stroke "rect" "x='3' y='5' width='18' height='14' rx='2'"
+    , stroke "path" "d='M8 12h8'"
+    ]
+  Fullscreen -> line [ stroke "path" "d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'" ]
   where
     svg64 parts = mconcat
       ([ "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'>" ]

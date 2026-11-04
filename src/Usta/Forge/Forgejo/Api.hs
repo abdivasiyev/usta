@@ -48,6 +48,8 @@ module Usta.Forge.Forgejo.Api
   , PullRequest (..)
   , Branch (..)
   , Review (..)
+  , ReviewComment (..)
+  , LineComment (..)
   , CombinedStatus (..)
   ) where
 
@@ -98,6 +100,9 @@ data Routes mode = Routes
   , reviews
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "reviews" :> RecordQueryParam ListQuery :> Get '[JSON] [Review]
+  , reviewComments
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "reviews" :> Capture "id" Int64 :> "comments" :> Get '[JSON] [ReviewComment]
   , status
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits" :> Capture "ref" Text
            :> "status" :> Get '[JSON] CombinedStatus
@@ -436,6 +441,8 @@ type NewReview :: Type
 data NewReview = NewReview
   { verdict :: Verdict
   , body :: Text
+  , lines :: [LineComment]
+    -- ^ Comments on lines of the diff, with the review.
   }
 
 instance ToJSON NewReview where
@@ -445,7 +452,20 @@ instance ToJSON NewReview where
         RequestChanges -> "REQUEST_CHANGES"
         CommentOnly -> "COMMENT"
     , "body" .= r.body
+    , "comments" .= r.lines
     ]
+
+-- | A comment on one line of a file in the diff, by its line in the new
+-- file.
+type LineComment :: Type
+data LineComment = LineComment
+  { path :: Text
+  , line :: Int
+  , body :: Text
+  }
+
+instance ToJSON LineComment where
+  toJSON c = object ["path" .= c.path, "new_position" .= c.line, "body" .= c.body]
 
 -- | Labels go by id; the adapter finds them by name first.
 type CreateIssue :: Type
@@ -673,18 +693,55 @@ instance FromJSON Branch where
 -- "REQUEST_REVIEW"; @stale@ when commits came after it.
 type Review :: Type
 data Review = Review
-  { state :: Text
+  { id :: Int64
+  , state :: Text
   , user :: Maybe User
   , stale :: Bool
   , dismissed :: Bool
+  , submittedAt :: Maybe UTCTime
+  , comments :: Int
+    -- ^ How many line comments it holds.
   }
 
 instance FromJSON Review where
   parseJSON = withObject "Review" $ \o -> Review
-    <$> o .: "state"
+    <$> o .: "id"
+    <*> o .: "state"
     <*> o .:? "user"
     <*> o .:? "stale" .!= False
     <*> o .:? "dismissed" .!= False
+    <*> o .:? "submitted_at"
+    <*> o .:? "comments_count" .!= 0
+
+-- | A comment on a line of a pull request's diff. @position@ is its line
+-- in the new file, @originalPosition@ in the old one; whichever side it
+-- was not on is 0.
+type ReviewComment :: Type
+data ReviewComment = ReviewComment
+  { body :: Text
+  , user :: Maybe User
+  , path :: Text
+  , position :: Int
+  , originalPosition :: Int
+  , commitId :: Text
+  , diffHunk :: Text
+  , resolver :: Maybe User
+  , htmlUrl :: Text
+  , createdAt :: UTCTime
+  }
+
+instance FromJSON ReviewComment where
+  parseJSON = withObject "ReviewComment" $ \o -> ReviewComment
+    <$> o .:? "body" .!= ""
+    <*> o .:? "user"
+    <*> o .: "path"
+    <*> o .:? "position" .!= 0
+    <*> o .:? "original_position" .!= 0
+    <*> o .:? "commit_id" .!= ""
+    <*> o .:? "diff_hunk" .!= ""
+    <*> o .:? "resolver"
+    <*> o .:? "html_url" .!= ""
+    <*> o .: "created_at"
 
 -- | @state@ is "pending", "success", "error", "failure", "warning" or
 -- "skipped"; no statuses at all when @total@ is 0.

@@ -306,6 +306,21 @@ Dark screens use the same layouts with the dark token values.
 
     ![Insights](design/repository-insights.png)
 
+    **Commit graph.** Insights also has a Commit graph view beside
+    Activity: every branch's history drawn as lanes, newest first, the
+    default branch on the left. Each row shows its branches and tags, the
+    subject, author, date and short hash; a merge is a hollow dot. Filters
+    are All branches or a chosen few, First parent only and Tags, and a
+    box finds a commit by message, author or hash. The selected commit
+    shows its message, parents, pull request, the branches it is on and
+    its changed files against the first parent, with Open diff and Browse
+    files. `j` / `k` move, `[` / `]` go to the parent or child, `Enter`
+    opens the diff, `y` copies the hash and `g` switches Activity and
+    graph. It is drawn from the local mirror, loads older commits as you
+    scroll, and gains new pushes after a sync.
+
+    ![Commit graph](design/repository-graph.png)
+
 23. **Files: blame, find and go to file.** The code view has Code, Blame
     and History. `Ctrl F` finds in the file; `Ctrl P` goes to any file by
     fuzzy match. A line's menu copies a permalink (at the commit) or a
@@ -385,6 +400,9 @@ machine; a log too long for a link is saved to Downloads to attach.
 |---|---|
 | Everywhere | `Ctrl K` search and commands, `Ctrl R` sync now |
 | Inbox | `j` / `k` move, `Enter` open, `e` done, `Shift E` all done, `s` star, `o` open in browser |
-| Pull request files | `n` / `p` next / previous file, `[` / `]` previous / next thread, `r` reply, `c` comment on line, `v` mark viewed, `s` split, `w` whitespace, `x` expand context, `Ctrl Enter` submit review |
+| Pull request files | `n` / `p` next / previous file, `[` / `]` previous / next thread, `Enter` fold / unfold that thread, `r` reply to it, `c` comment on line, `v` mark viewed, `s` split, `w` whitespace, `x` expand context, `Ctrl Enter` submit review |
+| Markdown editor | `Ctrl B` bold, `Ctrl I` italic, `Ctrl E` code, `Ctrl K` link, `Ctrl Shift P` Write / Preview |
+| Diagrams | `Ctrl +` / `Ctrl −` zoom, `Ctrl 0` fit, `F` fullscreen, `←` / `→` other diagrams and `Esc` close in fullscreen |
+| Commit graph | `j` / `k` move, `[` / `]` parent / child, `Enter` open diff, `/` find, `y` copy hash, `g` Activity / graph |
 | Palette | `↑` / `↓` move, `Enter` open, `Ctrl Enter` open in browser, `Esc` close |
 | Creating | `Ctrl Shift P` new pull request, `Ctrl Shift I` new issue |

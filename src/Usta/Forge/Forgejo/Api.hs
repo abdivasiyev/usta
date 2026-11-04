@@ -131,6 +131,9 @@ data Routes mode = Routes
   , reviews
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "reviews" :> RecordQueryParam ListQuery :> Get '[JSON] [Review]
+  , deleteReview
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "reviews" :> Capture "id" Int64 :> Verb 'DELETE 204 '[JSON] NoContent
   , reviewComments
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "reviews" :> Capture "id" Int64 :> "comments" :> Get '[JSON] [ReviewComment]

@@ -123,6 +123,12 @@ forgejo manager base host token = do
         latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
           Api.RepoIssuesQuery {kind = Named Api.Issues, state = Api.AnyState, page = Just 1, limit = Just 50})
         pure (map (issueOf host) [(i, []) | i <- latest])
+    , discardPending = \repo n -> do
+        login <- myLogin
+        given <- run client (everyPage (\page limit -> Api.api.reviews (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
+        let mine = [r.id | r <- given, r.state == "PENDING", Just u <- [r.user], u.login == login]
+        mapM_ (\i -> run client (Api.api.deleteReview (owner repo) (shortName repo) n i)) mine
+        pure (length mine)
     , runs = \repo -> do
         Api.Tasks tasks <- run client (Api.api.tasks (owner repo) (shortName repo) Api.ListQuery {page = Just 1, limit = Just 50})
         pure (runsOf tasks)

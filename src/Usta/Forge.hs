@@ -126,6 +126,9 @@ data Forge = Forge
     -- ^ Merges a pull request; 'True' deletes its branch after.
   , review :: RepoName -> Number -> Verdict -> Text -> [LineNote] -> IO ()
     -- ^ Submits a review with its comment and its notes on lines.
+  , discardPending :: RepoName -> Number -> IO Int
+    -- ^ Deletes the user's reviews still pending on the forge, as one left
+    -- on its website; how many there were.
   , createIssue :: RepoName -> NewIssue -> IO Number
   , createPull :: RepoName -> NewPull -> IO Number
   , branches :: RepoName -> IO [Text]

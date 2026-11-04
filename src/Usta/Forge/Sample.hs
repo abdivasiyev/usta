@@ -91,6 +91,7 @@ new now account = do
         , F.repoPullRequests = \_ -> pure []
         , F.repoIssues = \_ -> pure []
         , F.runs = \_ -> pure []
+        , F.discardPending = \_ _ -> pure 0
         , F.react = \_ _ _ _ _ -> refuse
         , F.checkLog = \_ _ -> refuse
         , F.reviewers = \_ _ -> pure []

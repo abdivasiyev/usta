@@ -77,6 +77,8 @@ new cfg = do
     unless (i == 0) $
       GI.new Gtk.Separator [#orientation := Gtk.OrientationVertical] >>= #append tools
     forM_ group $ \tool -> toolButton view buffer tool >>= #append tools
+  GI.new Gtk.Separator [#orientation := Gtk.OrientationVertical] >>= #append tools
+  emojiButton view >>= #append tools
   #append header tools
   GI.new Gtk.Label [#label := "Markdown", #hexpand := True, #xalign := 1, #cssClasses := ["muted"]] >>= #append header
 
@@ -184,6 +186,17 @@ toolButton view buffer tool = do
   pure button
   where
     keyName k = "Ctrl " <> T.toUpper (T.takeWhileEnd (/= '>') k)
+
+-- | Opens GTK's emoji chooser at the cursor, as @Ctrl .@ does in the
+-- text: it searches, groups by category and keeps recently used ones.
+emojiButton :: Gtk.TextView -> IO Gtk.Button
+emojiButton view = do
+  image <- Icon.new 16 Icon.Smile
+  button <- GI.new Gtk.Button [#child := image, #focusOnClick := False, #tooltipText := "Emoji (Ctrl .)", #cssClasses := ["tool"]]
+  void $ GI.on button #clicked $ do
+    void (Gtk.widgetGrabFocus view)
+    void (Gtk.widgetActivateAction view "misc.insert-emoji" Nothing)
+  pure button
 
 -- | Applies an edit to the text and selection the buffer has now.
 editWith :: Gtk.TextBuffer -> (Text -> (Int, Int) -> Edit) -> IO ()

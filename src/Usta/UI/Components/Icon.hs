@@ -42,6 +42,7 @@ data Icon
   | Tasks
   | CodeBlock
   | Diagram
+  | Smile
   deriving (Eq, Show, Enum, Bounded)
 
 -- | An icon at the given size in pixels, in the surrounding text color.
@@ -113,6 +114,10 @@ source icon = case icon of
     , stroke "path" "d='M15 4c2 0 3 1 3 3v2c0 1.5 1 3 2 3-1 0-2 1.5-2 3v2c0 2-1 3-3 3'"
     ]
   Diagram -> line [ stroke "path" "d='M2 12l4-4 4 4-4 4zM12 12h9M18 9l3 3-3 3'" ]
+  Smile -> line
+    [ stroke "circle" "cx='12' cy='12' r='8.5'"
+    , stroke "path" "d='M8.5 14a4 4 0 0 0 7 0M9 9.5h.01M15 9.5h.01'"
+    ]
   where
     svg64 parts = mconcat
       ([ "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'>" ]

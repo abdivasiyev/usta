@@ -102,7 +102,7 @@ forgejo manager base host token = do
     , setClosed = \repo n closed ->
         () <$ run client (Api.api.editIssue (owner repo) (shortName repo) n (Api.IssueEdit closed))
     , merge = \repo n how delete ->
-        () <$ run client (Api.api.merge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete})
+        () <$ run client (Api.api.merge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete, whenChecksPass = False})
     , review = \repo n verdict text notes ->
         () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview
           {verdict = verdict, body = text, lines = [Api.LineComment {path = x.path, line = x.line, body = x.body} | x <- notes]})

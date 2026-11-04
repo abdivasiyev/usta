@@ -25,6 +25,9 @@ module Usta.Forge.Forgejo.Api
   , NewComment (..)
   , IssueEdit (..)
   , MergeOption (..)
+  , PullEdit (..)
+  , Style (..)
+  , BranchProtection (..)
   , NewReview (..)
   , CreateIssue (..)
   , CreatePull (..)
@@ -85,6 +88,7 @@ import qualified Usta.Types.Label as L
 import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
 import Usta.Types.Parse (parseM, unparse)
+import Usta.Types.Readiness (UpdateStyle (..))
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Servant.NamedQueryParam (Named (..), RecordQueryParam, ToQuery)
 import Usta.Types.ThreadId (ThreadId)
@@ -148,6 +152,18 @@ data Routes mode = Routes
   , merge
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "merge" :> ReqBody '[JSON] MergeOption :> Post '[JSON] NoContent
+  , cancelAutoMerge
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "merge" :> Verb 'DELETE 204 '[JSON] NoContent
+  , editPull
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> ReqBody '[JSON] PullEdit :> Verb 'PATCH 201 '[JSON] NoContent
+  , updatePull
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "update" :> QueryParam' '[Required, Strict] "style" Style :> Verb 'POST 200 '[JSON] NoContent
+  , branchProtections
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "branch_protections"
+           :> Get '[JSON] [BranchProtection]
   , review
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "reviews" :> ReqBody '[JSON] NewReview :> Post '[JSON] NoContent
@@ -473,6 +489,8 @@ type MergeOption :: Type
 data MergeOption = MergeOption
   { how :: Merge
   , deleteBranch :: Bool
+  , whenChecksPass :: Bool
+    -- ^ Merge once the checks pass instead of now.
   }
 
 instance ToJSON MergeOption where
@@ -482,7 +500,35 @@ instance ToJSON MergeOption where
         MergeCommit -> "merge"
         Rebase -> "rebase"
     , "delete_branch_after_merge" .= m.deleteBranch
+    , "merge_when_checks_succeed" .= m.whenChecksPass
     ]
+
+-- | A new title, which says whether it is a draft ("WIP: …").
+type PullEdit :: Type
+newtype PullEdit = PullEdit {title :: Text}
+
+instance ToJSON PullEdit where
+  toJSON e = object ["title" .= e.title]
+
+-- | How Forgejo brings the base branch's commits into a pull request.
+type Style :: Type
+newtype Style = Style UpdateStyle
+
+instance ToHttpApiData Style where
+  toQueryParam (Style s) = case s of
+    ByMerge -> "merge"
+    ByRebase -> "rebase"
+
+-- | A branch protection rule: the branch it names, or a pattern, and the
+-- approvals it asks for.
+type BranchProtection :: Type
+data BranchProtection = BranchProtection {rule :: Text, requiredApprovals :: Int}
+
+instance FromJSON BranchProtection where
+  parseJSON = withObject "BranchProtection" $ \o -> do
+    named <- o .:? "rule_name" .!= ""
+    branch <- o .:? "branch_name" .!= ""
+    BranchProtection (if T.null named then branch else named) <$> o .:? "required_approvals" .!= 0
 
 type NewReview :: Type
 data NewReview = NewReview
@@ -746,6 +792,9 @@ data PullRequest = PullRequest
   , requestedTeams :: [Team]
   , user :: User
     -- ^ Who opened it.
+  , title :: Text
+  , mergeable :: Bool
+    -- ^ Forgejo can merge it as it is: no conflicts.
   }
 
 instance FromJSON PullRequest where
@@ -758,6 +807,8 @@ instance FromJSON PullRequest where
     <*> o .:? "requested_reviewers" .!= []
     <*> o .:? "requested_reviewers_teams" .!= []
     <*> o .: "user"
+    <*> o .:? "title" .!= ""
+    <*> o .:? "mergeable" .!= True
 
 type Branch :: Type
 data Branch = Branch

@@ -37,6 +37,7 @@ import qualified Usta.UI.Components.Thread as Thread
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
+import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Format (Clock (..), ago)
 import Usta.UI.Pages.Issue (Comment (..))
@@ -46,6 +47,7 @@ import qualified Usta.Types.Commit as C
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
 import Usta.Types.Parse (unparse)
+import Usta.Types.Readiness (Readiness (..), UpdateStyle (..))
 import Usta.Types.Reviewer (Candidate (..), Reviewer (..), Stance (..), Who (..))
 
 -- | Something that happened on the pull request. Add a constructor and a
@@ -60,9 +62,12 @@ data Event
 
 -- | What the merge box knows.
 type MergeState :: Type
-newtype MergeState = MergeState
+data MergeState = MergeState
   { checksPassed :: Maybe Bool
-    -- ^ 'Nothing' when the repository runs no checks.
+    -- ^ 'Nothing' when the repository runs no checks, or they still run.
+  , checksRunning :: Bool
+  , readiness :: Maybe Readiness
+    -- ^ 'Nothing' when the forge did not say.
   }
 
 type Model :: Type
@@ -92,6 +97,10 @@ data Actions = Actions
   , setClosed :: Bool -> IO (Either Text ())
   , merge :: D.Merge -> Bool -> IO (Either Text ())
     -- ^ 'True' deletes the branch after.
+  , scheduleMerge :: D.Merge -> Bool -> IO (Either Text ())
+    -- ^ Merges once the checks pass.
+  , markReady :: IO (Either Text ())
+  , updateBranch :: UpdateStyle -> IO (Either Text ())
   , requestReview :: [Who] -> IO (Either Text ())
   , unrequestReview :: Who -> IO (Either Text ())
   , candidates :: IO (Either Text [Candidate])
@@ -107,7 +116,7 @@ fromDiscussion c d commits (from, into) checks = Model
   , comments = map (said "commented ") d.comments
   , events = [Committed (T.take 7 (unparse x.sha)) x.subject | x <- commits]
   , threads = []
-  , merge = if d.closed then Nothing else Just MergeState {checksPassed = checks}
+  , merge = if d.closed then Nothing else Just MergeState {checksPassed = checks, checksRunning = False, readiness = Nothing}
   , closed = d.closed && not d.merged
   , source = from
   , target = into
@@ -146,7 +155,9 @@ new actions m = do
         GI.set problem [#visible := False]
         Button.busy button [row] doing act $
           either (\text -> GI.set problem [#label := text, #visible := True]) (const actions.refresh)
-  forM_ m.merge $ \s -> mergeBox run actions s >>= #append main
+  forM_ m.merge $ \s -> do
+    Card.sectionTitle "Merge" >>= #append main
+    mergeBox run actions m s >>= #append main
   commentBox run actions m >>= #append main
   #append main problem
 
@@ -199,41 +210,95 @@ eventRow e = do
   pure row
 
 -- | @run@ disables the buttons while an action runs.
-mergeBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> MergeState -> IO Gtk.Box
-mergeBox run actions s = do
+-- | Only what applies: a draft, a branch behind its base, conflicts,
+-- approvals still missing, the checks; then how to merge. The button
+-- stays off with the reason beside it until nothing blocks.
+mergeBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> MergeState -> IO Gtk.Box
+mergeBox run actions m s = do
   card <- Card.new
   Gtk.widgetAddCssClass card "merge-box"
-  forM_ s.checksPassed $ \passed -> do
-    status <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["merge-row"]]
-    if passed
-      then do
-        Icon.toned 16 Success Icon.Check >>= #append status
-        label "All checks have passed" [] >>= #append status
-      else do
-        Icon.toned 16 Danger Icon.Cross >>= #append status
-        label "Some checks failed" [] >>= #append status
-    #append card status
+  let approved = length [r | r <- m.reviewers, r.stance == Approved, not r.stale]
+      needed = maybe 0 (.requiredApprovals) s.readiness
+      missing = needed - approved
+      row tone title sub extras = do
+        box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["merge-row", "state"]]
+        dot <- Badge.dot tone
+        GI.set dot [#valign := Gtk.AlignStart, #marginTop := 5]
+        #append box dot
+        texts <- vbox 2
+        GI.set texts [#hexpand := True]
+        label title ["state-title"] >>= #append texts
+        unless (T.null sub) $ label sub ["muted", "small"] >>= \l -> GI.set l [#wrap := True] >> #append texts l
+        #append box texts
+        forM_ extras $ \w -> GI.set w [#valign := Gtk.AlignCenter] >> #append box w
+        #append card box
+        pure box
+  forM_ s.readiness $ \r -> do
+    when r.draft $ do
+      ready <- Button.new Button.defaults {Button.label = Just "Ready for review", Button.variant = Button.Primary}
+      box <- row Neutral "This pull request is a draft" "Reviewers are not asked until it is ready." =<< sequence [Gtk.toWidget ready]
+      void $ GI.on ready #clicked (run ready box "Marking ready…" actions.markReady)
+    when (r.behind > 0) $ do
+      (styles, styleButtons) <- Segmented.new ["Merge", "Rebase"] 0
+      update <- Button.new Button.defaults {Button.label = Just "Update branch"}
+      box <- row Warning (m.source <> " is " <> plural r.behind "commit" <> " behind " <> m.target)
+        ("Bring in the newer commits from " <> m.target <> " before merging.") =<< sequence [Gtk.toWidget styles, Gtk.toWidget update]
+      void $ GI.on update #clicked $ do
+        rebase <- maybe (pure False) (\b -> GI.get b #active) (lookup 1 (zip [0 :: Int ..] styleButtons))
+        run update box "Updating…" (actions.updateBranch (if rebase then ByRebase else ByMerge))
+    when r.conflicts $
+      void $ row Danger ("Conflicts with " <> m.target) "Resolve them on your computer, then push; the merge waits until then." []
+  when (missing > 0) $
+    void $ row Warning (T.pack (show approved) <> " of " <> plural needed "required approval")
+      ("The protected branch " <> m.target <> " asks for them before merging.") []
+  case (s.checksPassed, s.checksRunning) of
+    (_, True) -> void $ row Warning "Checks are running" "Merging waits until they pass, or merges when they do." []
+    (Just True, _) -> void $ row Success "All checks have passed" "" []
+    (Just False, _) -> void $ row Danger "Some checks failed" "See the Checks tab for what failed." []
+    _ -> pure ()
+
   buttons <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["merge-row"]]
   -- In the order of [minBound ..]: Squash, MergeCommit, Rebase.
   how <- Gtk.dropDownNewFromStrings ["Squash and merge", "Create a merge commit", "Rebase and merge"]
   #append buttons how
   delete <- GI.new Gtk.CheckButton [#label := "Delete branch after merge", #active := True]
   #append buttons delete
+  auto <- GI.new Gtk.CheckButton [ #label := "Merge automatically when checks pass and approvals are in"
+                                 , #visible := s.checksRunning ]
+  #append buttons auto
+  reason <- label "" ["muted", "small", "reason"]
+  GI.set reason [#hexpand := True, #xalign := 1]
+  #append buttons reason
   mergeButton <- Button.new Button.defaults { Button.label = Just "Merge", Button.variant = Button.Primary }
-  -- The forge decides the rest (approvals, protected branches) and says so.
-  GI.set mergeButton [ #hexpand := True
-                     , #halign := Gtk.AlignEnd
-                     , #sensitive := s.checksPassed /= Just False
-                     ]
+  #append buttons mergeButton
+  let blockers waiting =
+        [ "Mark it ready first" | maybe False (.draft) s.readiness ]
+        <> [ "Resolve the conflicts first" | maybe False (.conflicts) s.readiness ]
+        <> [ "Some checks failed" | s.checksPassed == Just False ]
+        <> [ "Needs " <> plural missing "more approval" | missing > 0, not waiting ]
+        <> [ "Checks are still running" | s.checksRunning, not waiting ]
+      refreshButton = do
+        waiting <- GI.get auto #active
+        let why = blockers waiting
+        GI.set mergeButton [ #sensitive := null why
+                           , #label := if waiting then "Merge when ready" else "Merge" ]
+        GI.set reason [#label := T.intercalate " · " (take 1 why)]
+  refreshButton
+  void $ GI.on auto #toggled refreshButton
   void $ GI.on mergeButton #clicked $ do
     chosen <- Gtk.dropDownGetSelected how
     deleting <- GI.get delete #active
+    waiting <- GI.get auto #active
     let ways = [minBound .. maxBound] :: [D.Merge]
+        way = ways !! fromIntegral chosen
     when (fromIntegral chosen < length ways) $
-      run mergeButton buttons "Merging…" (actions.merge (ways !! fromIntegral chosen) deleting)
-  #append buttons mergeButton
+      if waiting
+        then run mergeButton buttons "Scheduling…" (actions.scheduleMerge way deleting)
+        else run mergeButton buttons "Merging…" (actions.merge way deleting)
   #append card buttons
   pure card
+  where
+    plural n word = T.pack (show n) <> " " <> word <> (if n == 1 then "" else "s")
 
 commentBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box
 commentBox run actions m = do
@@ -571,7 +636,7 @@ sample = Model
       , ReviewRequestedFrom "abdivasiyev"
       ]
   , threads = []
-  , merge = Just MergeState {checksPassed = Just True}
+  , merge = Just MergeState {checksPassed = Just True, checksRunning = False, readiness = Nothing}
   , closed = False
   , source = "feat/gtk4-dep"
   , target = "master"
@@ -583,7 +648,10 @@ sample = Model
 
 css :: Text
 css = mconcat
-  [ "box.u-conversation button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
+  [ "box.u-conversation box.merge-row.state { border-bottom: 1px solid var(--border-subtle); }"
+  , "box.u-conversation label.state-title { font-weight: 600; }"
+  , "box.u-conversation label.reason { font-size: 12px; }"
+  , "box.u-conversation button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
   , "popover.u-request-review-pop > contents { padding: 0; border-radius: 12px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 12px 32px rgba(27,29,33,0.16); }"
   , "box.u-request-review box.top { padding: 14px 14px 8px; }"
   , "box.u-request-review label.picker-title { font-size: 15px; font-weight: 600; color: var(--text); }"

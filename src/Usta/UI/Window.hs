@@ -554,12 +554,16 @@ tabContent source reopen fetch summary showState tab = case tab of
           commits <- source.pullCommits host repo n
           threads <- source.threads host repo n
           reviewers <- either (const []) id <$> source.reviewers host repo n
+          ready <- either (const Nothing) Just <$> source.readiness host repo n
           me <- maybe "" (.login) . find (\a -> a.host == host) <$> source.accounts
-          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, reviewers)) d)
+          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, (reviewers, ready))) d)
         actions = Conversation.Actions
           { comment = source.comment host repo n
           , setClosed = source.setClosed host repo n
           , merge = source.merge host repo n
+          , scheduleMerge = source.scheduleMerge host repo n
+          , markReady = source.markReady host repo n
+          , updateBranch = source.updateBranch host repo n
           , requestReview = source.requestReview host repo n
           , unrequestReview = source.unrequestReview host repo n
           , candidates = source.reviewCandidates host repo n
@@ -569,7 +573,7 @@ tabContent source reopen fetch summary showState tab = case tab of
           Just Success -> Just True
           Just Danger -> Just False
           _ -> Nothing
-    loadInto load $ \(d, commits, threads, me, reviewers) -> do
+    loadInto load $ \(d, commits, threads, me, (reviewers, ready)) -> do
       c <- clock
       showState $ case (d.merged, d.closed) of
         (True, _) -> PullRequest.MergedState
@@ -578,8 +582,13 @@ tabContent source reopen fetch summary showState tab = case tab of
       let shown t = Thread.Shown
             { thread = t, outdated = False, showCode = True, lastReviewed = threads.lastReviewed
             , me = me, clock = c, reply = source.reply host repo n t }
-      Conversation.new actions (Conversation.fromDiscussion c d commits summary.branches checks)
-        {Conversation.threads = map shown threads.threads, Conversation.reviewers = reviewers}
+          model = Conversation.fromDiscussion c d commits summary.branches checks
+          running = fmap fst summary.checks == Just Warning
+      Conversation.new actions model
+        { Conversation.threads = map shown threads.threads
+        , Conversation.reviewers = reviewers
+        , Conversation.merge = (\st -> st {Conversation.readiness = ready, Conversation.checksRunning = running}) <$> model.merge
+        }
   PullRequest.Files ->
     -- The diff with its review threads; without threads it still shows.
     let withThreads = do

@@ -45,6 +45,7 @@ module Usta.Forge.Forgejo.Api
   , CreatePull (..)
   , Created (..)
   , BranchName (..)
+  , ApiTag (..)
   , RepoLabel (..)
   , Reviewers (..)
   , BaseHead (..)
@@ -267,6 +268,9 @@ data Routes mode = Routes
   , branches
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "branches"
            :> RecordQueryParam ListQuery :> Get '[JSON] [BranchName]
+  , tags
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "tags"
+           :> RecordQueryParam ListQuery :> Get '[JSON] [ApiTag]
   , labels
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels"
            :> RecordQueryParam ListQuery :> Get '[JSON] [RepoLabel]
@@ -380,6 +384,7 @@ type CommitsQuery :: Type
 data CommitsQuery = CommitsQuery
   { sha :: Text
     -- ^ The branch or commit to start from.
+  , page :: Maybe Int
   , limit :: Int
   , stat :: Bool
   , verification :: Bool
@@ -869,11 +874,23 @@ instance FromJSON Authored where
     details <- o .: "commit"
     Authored <$> o .:? "author" <*> (details .: "author" >>= (.: "date"))
 
+-- | A branch, and when its last commit was made.
 type BranchName :: Type
-newtype BranchName = BranchName {name :: Text}
+data BranchName = BranchName {name :: Text, pushed :: Maybe UTCTime}
 
 instance FromJSON BranchName where
-  parseJSON = withObject "Branch" $ \o -> BranchName <$> o .: "name"
+  parseJSON = withObject "Branch" $ \o -> do
+    commit <- o .:? "commit"
+    BranchName <$> o .: "name" <*> maybe (pure Nothing) (.:? "timestamp") commit
+
+-- | A tag, and when the commit it marks was made.
+type ApiTag :: Type
+data ApiTag = ApiTag {name :: Text, made :: Maybe UTCTime}
+
+instance FromJSON ApiTag where
+  parseJSON = withObject "Tag" $ \o -> do
+    commit <- o .:? "commit"
+    ApiTag <$> o .: "name" <*> maybe (pure Nothing) (.:? "created") commit
 
 type RepoLabel :: Type
 data RepoLabel = RepoLabel

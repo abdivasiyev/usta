@@ -16,6 +16,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 
+import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Check (Check, Job, Run)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
@@ -132,6 +133,11 @@ data Forge = Forge
   , createIssue :: RepoName -> NewIssue -> IO Number
   , createPull :: RepoName -> NewPull -> IO Number
   , branches :: RepoName -> IO [Text]
+  , branchList :: RepoName -> IO [Branch]
+    -- ^ Every branch with when it was last pushed; no counts.
+  , tags :: RepoName -> IO [Tag]
+  , history :: RepoName -> Text -> Int -> IO [Commit]
+    -- ^ A branch's history, newest first, a page of 50 at a time from 1.
   , labels :: RepoName -> IO [Definition]
     -- ^ The labels the repository defines.
   , setLabels :: RepoName -> Number -> [Text] -> IO ()

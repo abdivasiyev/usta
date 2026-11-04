@@ -39,6 +39,7 @@ import Text.Read (readMaybe)
 import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
+import qualified Usta.Types.Branch as Br
 import qualified Usta.Types.Check as C
 import Usta.Types.Diff (FileDiff (..), parseDiff)
 import qualified Usta.Types.Discussion as D
@@ -286,7 +287,14 @@ forgejo manager base host token = do
         Api.NewReview {verdict = CommentOnly, body = "", lines = [Api.LineComment {path = t.path, line = t.line, body = text}]})
     , recentCommits = \repo branch -> map (.commit) <$> run client
         (Api.api.commits (owner repo) (shortName repo)
-          Api.CommitsQuery {sha = branch, limit = 10, stat = False, verification = False, files = False})
+          Api.CommitsQuery {sha = branch, page = Nothing, limit = 10, stat = False, verification = False, files = False})
+    , history = \repo branch n -> map (.commit) <$> run client
+        (Api.api.commits (owner repo) (shortName repo)
+          Api.CommitsQuery {sha = branch, page = Just n, limit = 50, stat = False, verification = False, files = False})
+    , branchList = \repo -> map (\b -> Br.Branch {name = b.name, pushed = b.pushed, ahead = Nothing, behind = Nothing}) <$> run client
+        (everyPage (\page limit -> Api.api.branches (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+    , tags = \repo -> map (\t -> Br.Tag {name = t.name, at = t.made}) <$> run client
+        (everyPage (\page limit -> Api.api.tags (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , commitDiff = \repo sha -> do
         text <- run client (Api.api.commitDiff (owner repo) (shortName repo) (Api.CommitDiffOf sha))
         either (throwIO . Refused) pure (parseDiff text)

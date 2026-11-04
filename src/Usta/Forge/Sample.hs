@@ -85,6 +85,7 @@ new now account = do
         , F.editComment = \_ _ _ _ -> refuse
         , F.deleteComment = \_ _ -> refuse
         , F.editTitle = \_ _ _ -> refuse
+        , F.timeline = \_ _ -> pure []
         , F.react = \_ _ _ _ _ -> refuse
         , F.checkLog = \_ _ -> refuse
         , F.reviewers = \_ _ -> pure []

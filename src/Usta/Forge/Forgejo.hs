@@ -113,6 +113,8 @@ forgejo manager base host token = do
         Just i -> () <$ run client (Api.api.editComment (owner repo) (shortName repo) i Api.BodyEdit {body = text})
         Nothing -> () <$ run client (Api.api.editBody (owner repo) (shortName repo) n Api.BodyEdit {body = text})
     , deleteComment = \repo i -> () <$ run client (Api.api.deleteComment (owner repo) (shortName repo) i)
+    , timeline = \repo n -> mapMaybe (.event) <$> run client
+        (everyPage (\page limit -> Api.api.timeline (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
     , editTitle = \repo n title -> () <$ run client (Api.api.editTitle (owner repo) (shortName repo) n Api.PullEdit {title = title})
     , react = \repo n which feeling adding -> do
         let (o, r) = (owner repo, shortName repo)

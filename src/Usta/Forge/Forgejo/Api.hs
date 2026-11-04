@@ -46,6 +46,8 @@ module Usta.Forge.Forgejo.Api
   , Created (..)
   , BranchName (..)
   , ApiTag (..)
+  , ApiRelease (..)
+  , ApiAsset (..)
   , RepoLabel (..)
   , Reviewers (..)
   , BaseHead (..)
@@ -271,6 +273,9 @@ data Routes mode = Routes
   , tags
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "tags"
            :> RecordQueryParam ListQuery :> Get '[JSON] [ApiTag]
+  , releases
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "releases"
+           :> RecordQueryParam ListQuery :> Get '[JSON] [ApiRelease]
   , labels
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels"
            :> RecordQueryParam ListQuery :> Get '[JSON] [RepoLabel]
@@ -882,6 +887,47 @@ instance FromJSON BranchName where
   parseJSON = withObject "Branch" $ \o -> do
     commit <- o .:? "commit"
     BranchName <$> o .: "name" <*> maybe (pure Nothing) (.:? "timestamp") commit
+
+-- | A release and the files it offers.
+type ApiRelease :: Type
+data ApiRelease = ApiRelease
+  { name :: Text
+  , tagName :: Text
+  , body :: Text
+  , author :: Maybe User
+  , publishedAt :: Maybe UTCTime
+  , draft :: Bool
+  , prerelease :: Bool
+  , htmlUrl :: Text
+  , assets :: [ApiAsset]
+  }
+
+instance FromJSON ApiRelease where
+  parseJSON = withObject "Release" $ \o -> ApiRelease
+    <$> o .:? "name" .!= ""
+    <*> o .: "tag_name"
+    <*> o .:? "body" .!= ""
+    <*> o .:? "author"
+    <*> o .:? "published_at"
+    <*> o .:? "draft" .!= False
+    <*> o .:? "prerelease" .!= False
+    <*> o .:? "html_url" .!= ""
+    <*> o .:? "assets" .!= []
+
+type ApiAsset :: Type
+data ApiAsset = ApiAsset
+  { name :: Text
+  , size :: Int64
+  , downloadCount :: Int
+  , browserDownloadUrl :: Text
+  }
+
+instance FromJSON ApiAsset where
+  parseJSON = withObject "Asset" $ \o -> ApiAsset
+    <$> o .: "name"
+    <*> o .:? "size" .!= 0
+    <*> o .:? "download_count" .!= 0
+    <*> o .:? "browser_download_url" .!= ""
 
 -- | A tag, and when the commit it marks was made.
 type ApiTag :: Type

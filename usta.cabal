@@ -104,6 +104,7 @@ executable usta
     Usta.Types.Readiness
     Usta.Types.Ref
     Usta.Types.RepoName
+    Usta.Types.Release
     Usta.Types.Repository
     Usta.Types.Resource
     Usta.Types.Reviewer

@@ -56,6 +56,7 @@ import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Release (Release)
 import Usta.Types.Search (Found)
 import qualified Usta.Waiting as Waiting
+import Usta.OAuth (Waiting (..))
 import qualified Usta.Types.Insights as Insights
 import Data.Time (UTCTime)
 import Usta.Types.Check (Check, Job, Run)
@@ -122,6 +123,9 @@ data Source = Source
     -- "Move to inbox" ('False', which marks it unread again).
   , signIn :: Kind -> Host -> Token -> IO (Either Text ())
     -- ^ 'Left' says, for the user, why it did not work.
+  , browserSignIn :: Kind -> Host -> Text -> IO (Either Text (Text, IO (Either Text ()), IO ()))
+    -- ^ With an OAuth2 client ID, on the main thread: the page to open,
+    -- the wait for the sign-in (off the main thread), and how to stop it.
   , remove :: AccountId -> IO (Either Text ())
   , mirror :: Text -> Text -> Choice -> IO (Either Text ())
     -- ^ The user's mirror answer for the repository on a host, by name.
@@ -299,6 +303,7 @@ fromDatabase pool changes statuses sync = Source
       when (before.interval /= p.interval) $ sync.setEvery (Preferences.seconds p.interval)
   , setDone = \_ _ -> pure (Left unavailable)
   , signIn = \_ _ _ -> pure (Left unavailable)
+  , browserSignIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
   , onMirrorStatus = const (pure ())
@@ -397,6 +402,7 @@ samples = Source
   , setPreferences = const (pure ())
   , setDone = \_ _ -> pure (Left unavailable)
   , signIn = \_ _ _ -> pure (Left unavailable)
+  , browserSignIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
   , onMirrorStatus = const (pure ())
@@ -479,6 +485,11 @@ unavailable = "Signing in is not available here."
 withAccounts :: ConnectionPool -> Accounts -> Source -> Source
 withAccounts pool accounts source = source
   { signIn = \kind host token -> either (Left . describe) (const (Right ())) <$> accounts.signIn kind host token
+  , browserSignIn = \kind host client -> fmap
+      (\w -> ( w.page
+             , w.answer >>= either (pure . Left) (fmap (either (Left . describe) (const (Right ()))) . accounts.signInBrowser kind host client)
+             , w.stop ))
+      <$> accounts.beginBrowser host client
   , remove = \key -> either (Left . describe) Right <$> accounts.remove key
   , setDone = \n done -> do
       items <- run pool DB.inbox

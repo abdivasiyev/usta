@@ -269,7 +269,7 @@ buildOpening start link given app = do
           NewIssue.Model {places = places, chosen = if chosen < length places then chosen else 0}
       openNewIssue = openNewIssueIn Nothing
       addAccountThen after = Gtk.toWidget screens >>= \anchor ->
-        AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn after
+        AddAccount.open anchor (AddAccount.for Forge.Forgejo) source.signIn source.browserSignIn after
       openAddAccount = addAccountThen (pure ())
       openSettings = do
         known <- readIORef states
@@ -285,7 +285,7 @@ buildOpening start link given app = do
                   >>= either (Settings.notice anchor "The account was not removed") (const openSettings)
               , Settings.onReauthenticate =
                   AddAccount.open anchor (AddAccount.for a.forge) {AddAccount.server = "https://" <> a.host}
-                    source.signIn openSettings
+                    source.signIn source.browserSignIn openSettings
               }
         chosen <- source.preferences
         folder <- source.mirrorsFolder
@@ -707,7 +707,7 @@ buildOpening start link given app = do
   void $ Gtk.stackAddNamed top withPalette (Just "app")
   when (start == FirstRun) $ do
     let connect kind = Gtk.toWidget top >>= \anchor ->
-          AddAccount.open anchor (AddAccount.for kind) source.signIn (Gtk.stackSetVisibleChildName top "app")
+          AddAccount.open anchor (AddAccount.for kind) source.signIn source.browserSignIn (Gtk.stackSetVisibleChildName top "app")
     welcome <- Welcome.new connect
     void $ Gtk.stackAddNamed top welcome (Just "welcome")
     Gtk.stackSetVisibleChildName top "welcome"

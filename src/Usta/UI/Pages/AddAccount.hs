@@ -10,19 +10,21 @@ module Usta.UI.Pages.AddAccount
   , Server (..)
   , parseServer
   , SignIn
+  , BrowserSignIn
   , open
   , css
   ) where
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM, forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
@@ -104,10 +106,16 @@ scopes kind = case kind of
 type SignIn :: Type
 type SignIn = Forge.Kind -> Host -> Token -> IO (Either Text ())
 
+-- | Starts a browser sign-in with an OAuth2 client ID, on the main thread:
+-- the page to open, the wait for it to finish (off the main thread), and
+-- how to stop waiting.
+type BrowserSignIn :: Type
+type BrowserSignIn = Forge.Kind -> Host -> Text -> IO (Either Text (Text, IO (Either Text ()), IO ()))
+
 -- | Opens the dialog over the window that @anchor@ is in. "Add account"
 -- runs @signInWith@; @onAdded@ runs once it worked, with the dialog closed.
-open :: Gtk.Widget -> Model -> SignIn -> IO () -> IO ()
-open anchor m signInWith onAdded = do
+open :: Gtk.Widget -> Model -> SignIn -> BrowserSignIn -> IO () -> IO ()
+open anchor m signInWith browserSignIn onAdded = do
   root <- Gtk.widgetGetRoot anchor
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
 
@@ -183,8 +191,43 @@ open anchor m signInWith onAdded = do
                                  ]
   #append tokenPage scopesHint
   void $ Gtk.stackAddNamed signIn tokenPage (Just "token")
+  browserPage <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10]
   browserHint <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #cssClasses := ["hint"]]
-  void $ Gtk.stackAddNamed signIn browserHint (Just "browser")
+  #append browserPage browserHint
+  -- The three steps, shown once the browser is open.
+  steps <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #visible := False, #cssClasses := ["steps"]]
+  let stepRow n title detail = do
+        row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
+        number <- GI.new Gtk.Label [#label := n, #valign := Gtk.AlignStart, #cssClasses := ["step-number"]]
+        #append row number
+        texts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
+        GI.new Gtk.Label [#label := title, #xalign := 0, #cssClasses := ["step-title"]] >>= #append texts
+        forM_ detail $ \d -> GI.new Gtk.Label [#label := d, #xalign := 0, #wrap := True, #cssClasses := ["hint"]] >>= #append texts
+        #append row texts
+        #append steps row
+        pure (number, texts)
+  (opened, _) <- stepRow "1" "usta opened the server in your browser" (Just "Sign in there if it asks.")
+  (approving, approveTexts) <- stepRow "2" "Approve \"usta\" on the forge" (Just "It asks for access to your repositories, issues, pull requests and notifications.")
+  waitingRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  spinner <- GI.new Gtk.Spinner [#spinning := True]
+  waitingText <- GI.new Gtk.Label [#label := "Waiting for the forge…", #cssClasses := ["hint"]]
+  again <- Button.new Button.defaults {Button.label = Just "Open the page again", Button.variant = Button.Flat, Button.small = True}
+  mapM_ (#append waitingRow) =<< sequence [Gtk.toWidget spinner, Gtk.toWidget waitingText, Gtk.toWidget again]
+  #append approveTexts waitingRow
+  (keeping, _) <- stepRow "3" "usta keeps the token in the system keyring" Nothing
+  #append browserPage steps
+  appBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["oauth-app"]]
+  appHint <- GI.new Gtk.Label [ #xalign := 0, #wrap := True, #useMarkup := True, #cssClasses := ["hint"]
+                              , #label := "<b>The server needs an OAuth app for usta, once.</b> An administrator, or you on your own account, creates an OAuth2 application: <tt>Settings → Applications</tt>, name <tt>usta</tt>, not confidential, redirect URI <tt>http://127.0.0.1/callback</tt>. Paste its client ID here:" ]
+  clientId <- GI.new Gtk.Entry [#placeholderText := "Client ID", #cssClasses := ["mono"]]
+  mapM_ (#append appBox) =<< sequence [Gtk.toWidget appHint, Gtk.toWidget clientId]
+  #append browserPage appBox
+  void $ Gtk.stackAddNamed signIn browserPage (Just "browser")
+  -- A sign-in waiting for the browser, stopped by Cancel or closing.
+  stopping <- newIORef (pure ())
+  page <- newIORef ""
+  void $ GI.on dialog #closeRequest $ join (readIORef stopping) >> pure False
+  void $ GI.on again #clicked (readIORef page >>= openUri)
   #append body signIn
 
   footer <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
@@ -196,12 +239,10 @@ open anchor m signInWith onAdded = do
   #append footer spacer
   cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
   add <- Button.new Button.defaults { Button.label = Just "Add account", Button.variant = Button.Primary }
-  void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
+  void $ GI.on cancel #clicked (join (readIORef stopping) >> Gtk.windowDestroy dialog)
   #append footer cancel
   #append footer add
 
-  -- Browser sign-in needs an app registered with each forge.
-  GI.set (methodButtons !! 1) [#sensitive := False, #tooltipText := "Comes later; use an access token for now"]
 
   selected <- newIORef m.forge
   let showProblem problem = do
@@ -216,7 +257,37 @@ open anchor m signInWith onAdded = do
     kind <- readIORef selected
     text <- Gtk.editableGetText url
     tokenText <- Gtk.editableGetText token
-    case (,) <$> (parseServer text >>= parse . (.host)) <*> parse tokenText of
+    browser <- GI.get (methodButtons !! 1) #active
+    client <- T.strip <$> Gtk.editableGetText clientId
+    if browser then case parseServer text >>= parse . (.host) of
+      Left problem -> showProblem problem
+      Right host -> browserSignIn kind host client >>= \case
+        Left problem -> showProblem problem
+        Right (link, wait, stop) -> do
+          writeIORef stopping stop
+          writeIORef page link
+          openUri link
+          GI.set steps [#visible := True]
+          GI.set appBox [#visible := False]
+          GI.set opened [#label := "✓", #cssClasses := ["step-number", "done"]]
+          GI.set approving [#cssClasses := ["step-number", "now"]]
+          GI.set add [#sensitive := False, #label := "Waiting…"]
+          void $ forkIO $ do
+            outcome <- try wait
+            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+              stop
+              writeIORef stopping (pure ())
+              case either (\(_ :: SomeException) -> Left "Signing in failed unexpectedly.") id outcome of
+                Right () -> do
+                  GI.set keeping [#label := "✓", #cssClasses := ["step-number", "done"]]
+                  Gtk.windowDestroy dialog >> onAdded
+                Left problem -> do
+                  GI.set steps [#visible := False]
+                  GI.set appBox [#visible := True]
+                  GI.set add [#sensitive := True, #label := "Sign in"]
+                  showProblem problem
+              pure False
+    else case (,) <$> (parseServer text >>= parse . (.host)) <*> parse tokenText of
       Left problem -> showProblem problem
       Right (host, parsedToken) -> do
         checking True
@@ -253,13 +324,18 @@ open anchor m signInWith onAdded = do
             GI.set statusIcon [#visible := False]
             GI.set statusText [#label := problem, #cssClasses := ["status", "problem"]]
         GI.set scopesHint [#label := scopesMarkup kind]
+        client <- Gtk.editableGetText clientId
         GI.set browserHint
           [ #label := "usta opens " <> either (const "the server") (.host) parsed
               <> " in your browser and comes back here once you approve."
           ]
+        -- Only Forgejo signs in with the browser so far.
+        GI.set (methodButtons !! 1) [#sensitive := kind == Forge.Forgejo]
+        when (kind /= Forge.Forgejo && browser) $ GI.set (methodButtons !! 0) [#active := True]
         Gtk.stackSetVisibleChildName signIn (if browser then "browser" else "token")
-        GI.set add [#sensitive := either (const False) (const True) parsed
-                                    && (browser || not (T.null tokenText))]
+        GI.set add [ #label := if browser then "Sign in" else "Add account"
+                   , #sensitive := either (const False) (const True) parsed
+                                    && (if browser then not (T.null (T.strip client)) else not (T.null tokenText)) ]
 
   forM_ choices $ \(card, kind) ->
     void $ GI.on card #toggled $ do
@@ -270,6 +346,7 @@ open anchor m signInWith onAdded = do
         refresh
   void $ GI.on url #changed refresh
   void $ GI.on token #changed refresh
+  void $ GI.on clientId #changed refresh
   forM_ methodButtons $ \b -> void $ GI.on b #toggled refresh
   refresh
 
@@ -278,6 +355,11 @@ open anchor m signInWith onAdded = do
   #append content footer
   GI.set dialog [#child := content]
   #present dialog
+
+openUri :: Text -> IO ()
+openUri uri = do
+  launcher <- Gtk.uriLauncherNew (Just uri)
+  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
 
 -- | "Needs scopes a, b and c. The token is kept …", scopes in code font.
 scopesMarkup :: Forge.Kind -> Text
@@ -334,6 +416,11 @@ css = mconcat
   , "  background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(27, 29, 33, 0.12);"
   , "}"
   , "window.u-add-account label.hint { font-size: 13px; color: var(--text-muted); }"
+  , "window.u-add-account label.step-number { min-width: 24px; min-height: 24px; border-radius: 12px; background: var(--neutral-bg); font-size: 12px; font-weight: 600; }"
+  , "window.u-add-account label.step-number.done { background: var(--success); color: var(--on-accent); }"
+  , "window.u-add-account label.step-number.now { background: var(--accent); color: var(--on-accent); }"
+  , "window.u-add-account label.step-title { font-weight: 600; }"
+  , "window.u-add-account box.oauth-app { padding: 14px; border-radius: 8px; background: var(--window); }"
   , "window.u-add-account box.footer {"
   , "  padding: 14px 20px; background: var(--window); border-top: 1px solid var(--border);"
   , "}"

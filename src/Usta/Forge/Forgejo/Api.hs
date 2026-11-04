@@ -26,6 +26,7 @@ module Usta.Forge.Forgejo.Api
   , IssueEdit (..)
   , MergeOption (..)
   , PullEdit (..)
+  , TimelineEvent (..)
   , Style (..)
   , BranchProtection (..)
   , NewReview (..)
@@ -156,6 +157,9 @@ data Routes mode = Routes
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "merge" :> ReqBody '[JSON] MergeOption :> Verb 'POST 201 '[JSON] NoContent
     -- ^ The same as 'merge' with 'whenChecksPass': Forgejo answers 201.
+  , timeline
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "timeline" :> RecordQueryParam ListQuery :> Get '[JSON] [TimelineEvent]
   , cancelAutoMerge
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "merge" :> Verb 'DELETE 204 '[JSON] NoContent
@@ -506,6 +510,14 @@ instance ToJSON MergeOption where
     , "delete_branch_after_merge" .= m.deleteBranch
     , "merge_when_checks_succeed" .= m.whenChecksPass
     ]
+
+-- | An event in an issue's or pull request's timeline, by its kind, e.g.
+-- "pull_scheduled_merge" or "pull_cancel_scheduled_merge".
+type TimelineEvent :: Type
+newtype TimelineEvent = TimelineEvent {kind :: Text}
+
+instance FromJSON TimelineEvent where
+  parseJSON = withObject "TimelineEvent" $ \o -> TimelineEvent <$> o .:? "type" .!= ""
 
 -- | A new title, which says whether it is a draft ("WIP: …").
 type PullEdit :: Type

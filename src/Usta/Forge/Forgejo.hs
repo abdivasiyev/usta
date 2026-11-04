@@ -36,7 +36,7 @@ import Servant.Client (BaseUrl, ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import Usta.Types.Diff (parseDiff)
@@ -99,8 +99,9 @@ forgejo manager base host token = do
         () <$ run client (Api.api.editIssue (owner repo) (shortName repo) n (Api.IssueEdit closed))
     , merge = \repo n how delete ->
         () <$ run client (Api.api.merge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete})
-    , review = \repo n verdict text ->
-        () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview {verdict = verdict, body = text, lines = []})
+    , review = \repo n verdict text notes ->
+        () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview
+          {verdict = verdict, body = text, lines = [Api.LineComment {path = x.path, line = x.line, body = x.body} | x <- notes]})
     , createIssue = \repo new -> do
         ids <- labelIds client repo new.labels
         created <- run client $ Api.api.createIssue (owner repo) (shortName repo) Api.CreateIssue

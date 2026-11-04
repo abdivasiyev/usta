@@ -7,6 +7,7 @@ module Usta.UI.Format
   , clock
   , ago
   , short
+  , date
   ) where
 
 import Data.Kind (Type)

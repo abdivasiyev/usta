@@ -109,6 +109,7 @@ executable usta
     Usta.Types.Thread
     Usta.Types.Tree
     Usta.Types.Token
+    Usta.UI.Components.AssignPickers
     Usta.UI.Components.Avatar
     Usta.UI.Components.Badge
     Usta.UI.Components.Button

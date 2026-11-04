@@ -23,6 +23,7 @@ import Data.Int (Int32)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
+import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 
 -- | Which side of the main column the panel is on.
@@ -119,15 +120,31 @@ new c content = do
   Gtk.widgetAddController railBox railClick
 
   -- Dragging the edge: wider away from the main column, narrower toward it.
+  -- The pointer is measured against the window, which stays put; the
+  -- edge itself moves as the panel resizes, so offsets from it would
+  -- shake the width back and forth.
   drag <- Gtk.gestureDragNew
   startWidth <- newIORef start.width
-  void $ GI.on drag #dragBegin $ \_ _ -> do
+  startX <- newIORef 0
+  let windowX x = Gtk.widgetGetRoot edgeBox >>= \case
+        Nothing -> pure x
+        Just root -> do
+          to <- Gtk.toWidget root
+          point <- Graphene.newZeroPoint >>= \p -> Graphene.pointInit p (realToFrac x) 0
+          (ok, at) <- Gtk.widgetComputePoint edgeBox to point
+          if ok then realToFrac <$> Graphene.getPointX at else pure x
+  void $ GI.on drag #dragBegin $ \x _ -> do
     s <- readIORef c.side
     writeIORef startWidth s.width
+    windowX x >>= writeIORef startX
     Gtk.widgetAddCssClass edgeBox "dragging"
   void $ GI.on drag #dragUpdate $ \dx _ -> do
+    (_, began, _) <- Gtk.gestureDragGetStartPoint ?self
+    x0 <- readIORef startX
+    x <- windowX (began + dx)
     w0 <- readIORef startWidth
-    let w = w0 + round (if c.edge == OnLeft then dx else negate dx)
+    let moved = x - x0
+        w = w0 + round (if c.edge == OnLeft then moved else negate moved)
     if w < c.least
       then setFolded True >> setWidth c.defaultWidth >> void (Gtk.gestureSetState ?self Gtk.EventSequenceStateDenied)
       else setWidth w

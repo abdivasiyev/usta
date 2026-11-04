@@ -205,6 +205,24 @@ Dark screens use the same layouts with the dark token values.
 
    ![A range of lines](design/line-ranges.png)
 
+   **Side panels.** The file list and the review panel fold to a thin
+   rail with their counts (files viewed; pending notes and threads) by
+   their « and » buttons, `Ctrl B` and `Ctrl Shift B`, or by dragging
+   them narrower than their least (200 px for files, 260 for the review);
+   a click on the rail opens them again. Dragging the edge between a
+   panel and the diff resizes it, and a double-click puts it back. Until
+   you choose, a window under 1200 px starts the review panel folded and
+   one under 960 px both; the choice is kept for every pull request. A
+   long path keeps its file name and shortens its folders in the middle.
+
+   ![Folded panels](design/files-panels.png)
+
+   **Discard review.** Under Submit, once the review has pending comments
+   or a summary: it asks once, then drops them, and deletes a review of
+   yours left pending on the forge's website.
+
+   ![Resizing a panel, and Discard review](design/files-panels-resize.png)
+
    **Diff options.** Unified or split, hide whitespace-only changes,
    highlight the changed words in a line, and expand the context 20 lines
    at a time or to the next change. The choice is kept per pull request;

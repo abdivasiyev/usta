@@ -167,24 +167,26 @@ data Routes mode = Routes
   , editTitle
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> ReqBody '[JSON] PullEdit :> Verb 'PATCH 201 '[JSON] NoContent
+    -- Forgejo answers null, not [], once the last reaction is taken back.
   , commentReactions
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
-           :> "reactions" :> Get '[JSON] [ApiReaction]
+           :> "reactions" :> Get '[JSON] (Maybe [ApiReaction])
   , issueReactions
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
-           :> "reactions" :> RecordQueryParam ListQuery :> Get '[JSON] [ApiReaction]
+           :> "reactions" :> RecordQueryParam ListQuery :> Get '[JSON] (Maybe [ApiReaction])
   , reactToComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
            :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'POST 201 '[JSON] NoContent
+    -- Forgejo answers taking a reaction back with nothing, of no type.
   , unreactToComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
-           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'DELETE 200 '[JSON] NoContent
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'DELETE 200 '[RawBytes] ByteString
   , reactToIssue
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'POST 201 '[JSON] NoContent
   , unreactToIssue
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
-           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'DELETE 200 '[JSON] NoContent
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'DELETE 200 '[RawBytes] ByteString
   , postComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> "comments" :> ReqBody '[JSON] NewComment :> Verb 'POST 201 '[JSON] ApiComment

@@ -15,7 +15,10 @@ executable usta
     app
     src
 
+  autogen-modules:
+    Paths_usta
   other-modules:
+    Paths_usta
     Usta.Accounts
     Usta.Bus
     Usta.DB
@@ -78,6 +81,7 @@ executable usta
     Usta.Git.Credential
     Usta.Keyring
     Usta.Mermaid
+    Usta.Log
     Usta.Mirrors
     Usta.OAuth
     Usta.Pins
@@ -171,6 +175,7 @@ executable usta
     Usta.UI.Pages.PullRequest.Files
     Usta.UI.Pages.PullRequests
     Usta.UI.Pages.Repositories
+    Usta.UI.Pages.ReportProblem
     Usta.UI.Pages.RepositoryActions
     Usta.UI.Pages.RepositoryCommits
     Usta.UI.Pages.RepositoryInsights

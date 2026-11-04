@@ -39,6 +39,7 @@ import qualified Usta.Types.Commit as C
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
 import Usta.Types.Parse (unparse)
+import Usta.Types.Reviewer (Reviewer (..), Stance (..), Who (..))
 
 -- | Something that happened on the pull request. Add a constructor and a
 -- case in 'eventRow' for a new kind.
@@ -70,7 +71,7 @@ data Model = Model
   , closed :: Bool
   , source :: Text
   , target :: Text
-  , reviewers :: [(Tone, Text)]
+  , reviewers :: [Reviewer]
   , labels :: [(Tone, Text)]
   , linkedIssues :: [Text]
   }
@@ -83,6 +84,8 @@ data Actions = Actions
   , setClosed :: Bool -> IO (Either Text ())
   , merge :: D.Merge -> Bool -> IO (Either Text ())
     -- ^ 'True' deletes the branch after.
+  , requestReview :: [Who] -> IO (Either Text ())
+  , unrequestReview :: Who -> IO (Either Text ())
   , refresh :: IO ()
   }
 
@@ -145,7 +148,7 @@ new actions m = do
                                       , #hscrollbarPolicy := Gtk.PolicyTypeNever
                                       ]
   #append columns scroll
-  details m >>= #append columns
+  details run actions m >>= #append columns
   Gtk.toWidget columns
 
 commentCard :: Comment -> IO Gtk.Box
@@ -253,8 +256,8 @@ commentBox run actions m = do
   #append box buttons
   pure box
 
-details :: Model -> IO Gtk.Box
-details m = do
+details :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box
+details run actions m = do
   side <- vbox 20
   GI.set side [#widthRequest := 260, #hexpand := False, #cssClasses := ["details"]]
 
@@ -264,13 +267,9 @@ details m = do
     label "→" ["muted"] >>= #append row
     label m.target ["chip", "mono"] >>= #append row
     #append box row
-  -- Sections usta has nothing for are left out.
-  unless (null m.reviewers) $ section side "Reviewers" $ \box ->
-    forM_ m.reviewers $ \(tone, name) -> do
-      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-      Badge.dot tone >>= #append row
-      label name [] >>= #append row
-      #append box row
+  section side "Reviewers" $ \box -> do
+    when (null m.reviewers) $ label "Nobody yet" ["muted"] >>= #append box
+    forM_ m.reviewers $ \r -> reviewerRow run actions r >>= #append box
   section side "Labels" $ \box -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
     forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
@@ -286,6 +285,42 @@ details m = do
       Card.sectionTitle title >>= #append box
       fill box
       #append side box
+
+-- | A reviewer: who, where they stand, and a button that asks them again
+-- once they reviewed, or stops asking while they have not.
+reviewerRow :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Reviewer -> IO Gtk.Box
+reviewerRow run actions r = do
+  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["reviewer"]]
+  let (name, short) = case r.who of
+        Person l -> (unparse l, unparse l)
+        Team t -> ("team: " <> t, t)
+  Avatar.new 22 (T.toUpper (T.take 2 short)) >>= #append row
+  texts <- vbox 0
+  GI.set texts [#hexpand := True]
+  label name ["name"] >>= #append texts
+  label (stanceText r.stance <> (if r.stale then " · on an older commit" else "")) ["small", stanceClass r.stance]
+    >>= #append texts
+  #append row texts
+  (caption, act, doing) <- pure $ case r.stance of
+    Waiting -> ("Remove", actions.unrequestReview r.who, "Removing…")
+    _ -> ("Ask again", actions.requestReview [r.who], "Asking…")
+  button <- Button.new Button.defaults {Button.label = Just caption, Button.variant = Button.Flat}
+  GI.set button [#valign := Gtk.AlignCenter]
+  Gtk.widgetAddCssClass button "small"
+  void $ GI.on button #clicked (run button row doing act)
+  #append row button
+  pure row
+  where
+    stanceText s = case s of
+      Waiting -> "Waiting for a review"
+      Approved -> "Approved"
+      ChangesRequested -> "Requested changes"
+      Commented -> "Commented"
+    stanceClass s = case s of
+      Waiting -> "waiting"
+      Approved -> "approved"
+      ChangesRequested -> "changes"
+      Commented -> "muted"
 
 vbox :: Int -> IO Gtk.Box
 vbox gap = GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := fromIntegral gap]
@@ -308,14 +343,20 @@ sample = Model
   , closed = False
   , source = "feat/gtk4-dep"
   , target = "master"
-  , reviewers = [(Warning, "abdivasiyev")]
+  , reviewers = []
   , labels = [(Accent, "gtk"), (Neutral, "build")]
   , linkedIssues = ["#5 Render the main window with GTK4"]
   }
 
 css :: Text
 css = mconcat
-  [ "box.u-conversation box.main { padding: 20px 32px; }"
+  [ "box.u-conversation box.reviewer label.name { font-weight: 500; }"
+  , "box.u-conversation box.reviewer label.small { font-size: 12px; }"
+  , "box.u-conversation box.reviewer label.waiting { color: var(--warning); }"
+  , "box.u-conversation box.reviewer label.approved { color: var(--success); }"
+  , "box.u-conversation box.reviewer label.changes { color: var(--danger); }"
+  , "box.u-conversation box.reviewer button.small { min-height: 26px; padding: 0 8px; font-size: 12px; }"
+  , "box.u-conversation box.main { padding: 20px 32px; }"
   , "box.u-conversation box.details { padding: 20px 16px; }"
   , "box.u-conversation label.strong { font-weight: 600; }"
   , "box.u-conversation label.link { color: var(--accent); }"

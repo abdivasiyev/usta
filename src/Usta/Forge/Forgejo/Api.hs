@@ -29,6 +29,7 @@ module Usta.Forge.Forgejo.Api
   , IssueEdit (..)
   , MergeOption (..)
   , PullEdit (..)
+  , WatchInfo (..)
   , AssigneesEdit (..)
   , MilestoneEdit (..)
   , MilestoneQuery (..)
@@ -92,7 +93,7 @@ import Servant.API
 import Servant.Client (AsClientT, ClientM, client)
 
 import Usta.Types.Commit (Commit (..), Sha)
-import Usta.Types.Discussion (Comment (..), Feeling (..), Merge (..), Verdict (..))
+import Usta.Types.Discussion (Comment (..), Feeling (..), Merge (..), Verdict (..), Watching (..))
 import Usta.Types.Count (Count)
 import Usta.Types.Label (Color)
 import qualified Usta.Types.Label as L
@@ -204,6 +205,17 @@ data Routes mode = Routes
   , timeline
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> "timeline" :> RecordQueryParam ListQuery :> Get '[JSON] [TimelineEvent]
+  , subscription
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "subscriptions" :> "check" :> Get '[JSON] WatchInfo
+    -- Forgejo answers 201 to a new subscription, 200 to one it had; usta
+    -- subscribes only when it was not.
+  , subscribe
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "subscriptions" :> Capture "user" Login :> Verb 'PUT 201 '[JSON] NoContent
+  , unsubscribe
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "subscriptions" :> Capture "user" Login :> Verb 'DELETE 201 '[JSON] NoContent
   , cancelAutoMerge
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "merge" :> Verb 'DELETE 204 '[JSON] NoContent
@@ -688,6 +700,17 @@ instance FromJSON ApiMilestone where
       <*> o .:? "open_issues" .!= 0
       <*> o .:? "closed_issues" .!= 0
     pure (ApiMilestone i m)
+
+-- | Whether the user watches an issue: subscribed, ignored (muted), or
+-- neither, which is taking part.
+type WatchInfo :: Type
+newtype WatchInfo = WatchInfo {watching :: Watching}
+
+instance FromJSON WatchInfo where
+  parseJSON = withObject "WatchInfo" $ \o -> do
+    subscribed <- o .:? "subscribed" .!= False
+    ignored <- o .:? "ignored" .!= False
+    pure (WatchInfo (if subscribed then Subscribed else if ignored then Muted else Participating))
 
 -- | A new title, which says whether it is a draft ("WIP: …").
 type PullEdit :: Type

@@ -101,6 +101,7 @@ executable usta
     Usta.Types.RepoName
     Usta.Types.Repository
     Usta.Types.Resource
+    Usta.Types.Reviewer
     Usta.Types.Servant.NamedQueryParam
     Usta.Types.ThreadId
     Usta.Types.Thread

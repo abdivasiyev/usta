@@ -117,7 +117,7 @@ forgejo manager base host token = do
         created <- run client $ Api.api.createPull (owner repo) (shortName repo) Api.CreatePull
           {title = title, body = new.body, head = new.from, base = new.into, labels = ids}
         unless (null new.reviewers) $
-          () <$ run client (Api.api.requestReviewers (owner repo) (shortName repo) created.number (Api.Reviewers new.reviewers))
+          () <$ run client (Api.api.requestReviewers (owner repo) (shortName repo) created.number Api.Reviewers {reviewers = new.reviewers, teams = []})
         pure created.number
     , branches = \repo -> map (.name) <$> run client
         (everyPage (\page limit -> Api.api.branches (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))

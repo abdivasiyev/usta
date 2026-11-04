@@ -43,6 +43,7 @@ data Icon
   | CodeBlock
   | Diagram
   | Smile
+  | Fit
   deriving (Eq, Show, Enum, Bounded)
 
 -- | An icon at the given size in pixels, in the surrounding text color.
@@ -117,6 +118,10 @@ source icon = case icon of
   Smile -> line
     [ stroke "circle" "cx='12' cy='12' r='8.5'"
     , stroke "path" "d='M8.5 14a4 4 0 0 0 7 0M9 9.5h.01M15 9.5h.01'"
+    ]
+  Fit -> line
+    [ stroke "rect" "x='3' y='5' width='18' height='14' rx='2'"
+    , stroke "path" "d='M8 12h8'"
     ]
   where
     svg64 parts = mconcat

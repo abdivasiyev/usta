@@ -49,8 +49,9 @@ new source = do
     Right d -> DiagramView.new (\measure -> Diagram.draw measure d) >>= #append diagram
   Gtk.toWidget figure
 
+-- | With the diagram view's, which only diagrams use.
 css :: Text
-css = mconcat
+css = DiagramView.css <> mconcat
   [ "box.u-mermaid { border: 1px solid var(--border); border-radius: 8px; }"
   , "box.u-mermaid box.bar { padding: 4px 6px 4px 12px; background: var(--window); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }"
   , "box.u-mermaid button.toggle { min-height: 26px; padding: 0 10px; font-size: 12px; }"

@@ -2,6 +2,8 @@
 -- one: comment, close, merge, review.
 module Usta.Types.Discussion
   ( Comment (..)
+  , Reaction (..)
+  , Feeling (..)
   , Discussion (..)
   , Merge (..)
   , Verdict (..)
@@ -9,6 +11,7 @@ module Usta.Types.Discussion
   , NewPull (..)
   ) where
 
+import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
@@ -22,7 +25,23 @@ data Comment = Comment
   , body :: Text
     -- ^ Markdown, as written.
   , createdAt :: UTCTime
+  , id :: Maybe Int64
+    -- ^ The forge's id of a comment; 'Nothing' for the description.
+  , edited :: Bool
+  , url :: Text
+    -- ^ Its page on the forge, to link to.
+  , reactions :: [Reaction]
   }
+  deriving stock (Eq, Show)
+
+-- | How a reaction feels: the eight forges share.
+type Feeling :: Type
+data Feeling = ThumbsUp | ThumbsDown | Laugh | Hooray | Confused | Heart | Rocket | Eyes
+  deriving stock (Eq, Ord, Show, Enum, Bounded)
+
+-- | How many reacted with one feeling, and whether the user is one of them.
+type Reaction :: Type
+data Reaction = Reaction {feeling :: Feeling, count :: Int, mine :: Bool}
   deriving stock (Eq, Show)
 
 -- | An issue or pull request as the forge has it now. Its description is

@@ -15,8 +15,8 @@ module Usta.UI.Source
   , tracking
   ) where
 
-import Control.Exception (IOException, SomeException, displayException, try)
-import Control.Monad (forM, when)
+import Control.Exception (IOException, SomeException, displayException, throwIO, try)
+import Control.Monad (forM, forM_, when)
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.Kind (Type)
@@ -55,6 +55,7 @@ import Usta.Types.Forge (Kind)
 import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Release (Release)
 import Usta.Types.Search (Found)
+import qualified Usta.Waiting as Waiting
 import qualified Usta.Types.Insights as Insights
 import Data.Time (UTCTime)
 import Usta.Types.Check (Check, Job, Run)
@@ -200,6 +201,11 @@ data Source = Source
   , upload :: Text -> Text -> Int -> Text -> ByteString -> IO (Either Text Text)
     -- ^ By host, repository, number, file name and bytes: where it is served.
   , searchForges :: Text -> IO [(Kind, Text, Found)]
+  , waiting :: IO [Waiting.Action]
+    -- ^ What was done offline and waits for the forge, oldest first.
+  , dropWaiting :: Int -> IO ()
+  , sendWaiting :: IO Int
+    -- ^ Sends what waits; says how many still wait.
     -- ^ Every signed-in forge's own search, with its kind and host; a
     -- forge that does not answer finds nothing.
   , starred :: Text -> Text -> IO (Either Text Bool)
@@ -348,6 +354,9 @@ fromDatabase pool changes statuses sync = Source
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
   , searchForges = \_ -> pure []
+  , waiting = pure []
+  , dropWaiting = \_ -> pure ()
+  , sendWaiting = pure 0
   , starred = \_ _ -> pure (Left unavailable)
   , setStarred = \_ _ _ -> pure (Left unavailable)
   , pins = Pins.pins
@@ -443,6 +452,9 @@ samples = Source
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
   , searchForges = \_ -> pure []
+  , waiting = pure []
+  , dropWaiting = \_ -> pure ()
+  , sendWaiting = pure 0
   , starred = \_ _ -> pure (Right False)
   , setStarred = \_ _ _ -> pure (Left unavailable)
   , pins = pure []
@@ -477,7 +489,14 @@ withAccounts pool accounts source = source
           let thread = i.notification.threadId
               tell f = if done then f.markRead thread else f.markUnread thread
           told <- maybe (pure (Left SignedOut)) (try . tell) forge
+          -- Done while offline is done in the cache, and the forge is told later.
           case told of
+            Left Offline | done -> do
+              Waiting.add (Waiting.Done n.host n.repo n.number)
+              run pool $ do
+                DB.setUnread i.accountId thread False
+                DB.setDone i.accountId thread True
+              pure (Right ())
             Left problem -> pure (Left (said problem))
             Right () -> do
               run pool $ do
@@ -498,7 +517,37 @@ withAccounts pool accounts source = source
   , cancelScheduledMerge = \host repo n -> changing (onForge host repo n (\f name number -> f.cancelScheduledMerge name number))
   , reviewCandidates = \host repo n -> onForge host repo n (\f name number -> f.reviewCandidates name (Just number))
   , reply = \host repo n t text -> onForge host repo n (\f name number -> f.reply name number t text)
-  , comment = \host repo n text -> changing (onForge host repo n (\f name number -> () <$ f.comment name number text))
+  , comment = \host repo n text -> changing $ do
+      sent <- onForge host repo n (\f name number -> try (() <$ f.comment name number text))
+      case sent of
+        Right (Left Offline) -> Right () <$ Waiting.add (Waiting.Comment host repo n text)
+        Right (Left problem) -> pure (Left (said problem))
+        Right (Right ()) -> pure (Right ())
+        Left why -> pure (Left why)
+  , waiting = Waiting.load
+  , dropWaiting = \k -> Waiting.load >>= \xs -> Waiting.save (take k xs <> drop (k + 1) xs)
+  -- In order; the first one the forge does not answer stops the rest. One
+  -- it refuses is dropped, as sending it again would not change that.
+  , sendWaiting = do
+      let go [] = pure []
+          go (x : rest) = do
+            sent <- try (send x)
+            case sent of
+              Left Offline -> pure (x : rest)
+              _ -> go rest
+          send = \case
+            Waiting.Comment {host, repo, number, text} -> do
+              -- onForge turns a failure into words; offline has to come back out.
+              out <- onForge host repo number (\f name num -> try (() <$ f.comment name num text))
+              when (out == Right (Left Offline)) (throwIO Offline)
+            Waiting.Done {host, repo, number} -> do
+              items <- run pool DB.inbox
+              forM_ (take 1 [i | i <- items, matchesAt host repo number i]) $ \i ->
+                accounts.forgeOf i.accountId >>= mapM_ (\f -> f.markRead i.notification.threadId)
+      left <- Waiting.load >>= go
+      Waiting.save left
+      when (null left) source.syncNow
+      pure (length left)
   , editComment = \host repo n which text -> changing (onForge host repo n (\f name number -> f.editComment name number which text))
   , deleteComment = \host repo i -> changing (onRepo host repo (\f name -> f.deleteComment name i))
   , editTitle = \host repo n title -> changing (onForge host repo n (\f name number -> f.editTitle name number title))
@@ -554,10 +603,11 @@ withAccounts pool accounts source = source
       result <- act
       either (const (pure ())) (const source.syncNow) result
       pure result
-    matches n i =
-      unparse i.notification.host == n.host
-        && unparse i.notification.repo == n.repo
-        && numberOf i.notification.subject == Just n.number
+    matches n = matchesAt n.host n.repo n.number
+    matchesAt h r number i =
+      unparse i.notification.host == h
+        && unparse i.notification.repo == r
+        && numberOf i.notification.subject == Just number
     numberOf subject = case subject of
       N.PullRequestSubject number -> Just (unparse number)
       N.IssueSubject number -> Just (unparse number)
@@ -686,6 +736,7 @@ tracking track s = s
   , tagList = \h r -> track (s.tagList h r)
   , releases = \h r -> track (s.releases h r)
   , searchForges = \w -> track (s.searchForges w)
+  , sendWaiting = track s.sendWaiting
   , starred = \h r -> track (s.starred h r)
   , setStarred = \h r o -> track (s.setStarred h r o)
   , upload = \h r n f b -> track (s.upload h r n f b)

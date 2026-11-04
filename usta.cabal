@@ -40,6 +40,7 @@ executable usta
     Usta.DB.SyncCursor
     Usta.Details
     Usta.Drafts
+    Usta.Waiting
     Usta.Diagram
     Usta.Diagram.Architecture
     Usta.Diagram.Block
@@ -149,6 +150,7 @@ executable usta
     Usta.UI.Components.Thread
     Usta.UI.Components.TimelineRow
     Usta.UI.Components.SyncStatus
+    Usta.UI.Components.WaitingChip
     Usta.UI.Format
     Usta.UI.Highlight
     Usta.UI.Gallery

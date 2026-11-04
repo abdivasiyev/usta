@@ -4,7 +4,8 @@
 -- | Draws a 'Scene' with GTK: cairo for the shapes, Pango for the text,
 -- in the palette of the current theme, and again when it changes.
 module Usta.UI.Components.DiagramView
-  ( new
+  ( Config (..)
+  , new
   , colorOf
   , css
   ) where
@@ -14,7 +15,7 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Traversable (for)
 import qualified Data.Text as T
@@ -38,9 +39,9 @@ import qualified Usta.UI.Highlight as Highlight
 -- The view zooms and pans inside its own size, so a page around it keeps
 -- its scrolling: Ctrl + scroll and pinch zoom around the pointer, dragging
 -- pans, and the tools in its corner show on hover or focus.
-new :: (Measure IO -> IO Scene) -> IO Gtk.Widget
-new layout = do
-  area <- GI.new Gtk.DrawingArea [#hexpand := True, #focusable := True]
+new :: Config -> (Measure IO -> IO Scene) -> IO Gtk.Widget
+new cfg layout = do
+  area <- GI.new Gtk.DrawingArea [#hexpand := True, #vexpand := cfg.large, #focusable := True]
   let measure font text = do
         l <- Gtk.widgetCreatePangoLayout area (Just text)
         Pango.fontDescriptionFromString (describe font) >>= Pango.layoutSetFontDescription l . Just
@@ -64,19 +65,23 @@ new layout = do
       width = max laid.size.w (maximum (0 : map fst points) + dx + 4)
       height = max laid.size.h (maximum (0 : map snd points) + dy + 4)
       drawn = Scene {size = Size width height, items = map (translate dx dy) laid.items}
-  GI.set area [#contentWidth := ceiling drawn.size.w, #contentHeight := ceiling drawn.size.h]
-  -- Nothing until the reader zooms or pans: then the scene sits at its own
-  -- size in the middle, whatever the width.
+  -- In a page the view is as large as the scene; large, it takes the room
+  -- it is given.
+  unless cfg.large $
+    GI.set area [#contentWidth := ceiling drawn.size.w, #contentHeight := ceiling drawn.size.h]
+  -- Nothing until the reader zooms or pans: until then the scene sits in
+  -- the middle, at its own size or, large, fitted, whatever the size.
+  let start = if cfg.large then fitted else actual
   camera <- newIORef Nothing
   pointer <- newIORef Nothing
   let sizeOf = do
         w <- Gtk.widgetGetWidth area
         h <- Gtk.widgetGetHeight area
         pure (fromIntegral w, fromIntegral h)
-      current = readIORef camera >>= maybe (uncurry (actual drawn.size) <$> sizeOf) pure
+      current = readIORef camera >>= maybe (uncurry (start drawn.size) <$> sizeOf) pure
   Gtk.drawingAreaSetDrawFunc area $ Just $ \_ context w h -> do
     palette <- Highlight.currentPalette
-    c <- fromMaybe (actual drawn.size (fromIntegral w) (fromIntegral h)) <$> readIORef camera
+    c <- fromMaybe (start drawn.size (fromIntegral w) (fromIntegral h)) <$> readIORef camera
     renderWithContext (Cairo.translate c.dx c.dy >> Cairo.scale c.zoom c.zoom) context
     forM_ drawn.items $ \item -> paint area palette context item
   Highlight.follow area (const (Gtk.widgetQueueDraw area))
@@ -84,7 +89,7 @@ new layout = do
   overlay <- GI.new Gtk.Overlay [#child := area, #cssClasses := ["u-diagram"]]
   tools <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal, #spacing := 2
                           , #halign := Gtk.AlignEnd, #valign := Gtk.AlignStart
-                          , #visible := False, #cssClasses := ["tools"] ]
+                          , #visible := cfg.large, #cssClasses := ["tools"] ]
   Gtk.overlayAddOverlay overlay tools
   let tool child hint = GI.new Gtk.Button [#child := child, #focusOnClick := False, #tooltipText := hint, #cssClasses := ["tool"]]
       glyph t = GI.new Gtk.Label [#label := t] >>= Gtk.toWidget
@@ -93,11 +98,24 @@ new layout = do
   zoomIn <- glyph "+" >>= \g -> tool g "Zoom in (Ctrl +)"
   fitButton <- Icon.new 16 Icon.Fit >>= Gtk.toWidget >>= \g -> tool g "Fit (Ctrl 0)"
   #append tools zoomOut >> #append tools percent >> #append tools zoomIn >> #append tools fitButton
+  forM_ cfg.fullscreen $ \open -> do
+    button <- Icon.new 16 Icon.Fullscreen >>= Gtk.toWidget >>= \g -> tool g "Fullscreen (F)"
+    void $ GI.on button #clicked open
+    #append tools button
+  minimap <- if cfg.large then Just <$> mapOf area drawn current else pure Nothing
+  -- Until the reader zooms, the percentage follows the size the view gets.
+  void $ GI.on area #resize $ \_ _ -> do
+    untouched <- isNothing <$> readIORef camera
+    when untouched $ current >>= \c -> GI.set percent [#label := percentOf c]
+  forM_ minimap $ \m -> do
+    Gtk.overlayAddOverlay overlay m
+    void $ GI.on area #resize $ \_ _ -> Gtk.widgetQueueDraw m
 
   let place c = do
         writeIORef camera (Just c)
-        GI.set percent [#label := T.pack (show (round (c.zoom * 100) :: Int)) <> "%"]
+        GI.set percent [#label := percentOf c]
         Gtk.widgetQueueDraw area
+        mapM_ Gtk.widgetQueueDraw minimap
       zoomBy factor = do
         (w, h) <- sizeOf
         at <- fromMaybe (w / 2, h / 2) <$> readIORef pointer
@@ -112,7 +130,7 @@ new layout = do
   -- The tools show while the pointer is over the diagram or it has focus.
   hovered <- newIORef False
   focused <- newIORef False
-  let showTools = do
+  let showTools = unless cfg.large $ do
         on' <- (||) <$> readIORef hovered <*> readIORef focused
         GI.set tools [#visible := on']
   motion <- GI.new Gtk.EventControllerMotion []
@@ -157,8 +175,53 @@ new layout = do
   forM_ ["<Primary>plus", "<Primary>equal", "<Primary>KP_Add"] $ \k -> shortcut keys k (zoomBy step)
   forM_ ["<Primary>minus", "<Primary>KP_Subtract"] $ \k -> shortcut keys k (zoomBy (1 / step))
   shortcut keys "<Primary>0" fit
+  forM_ cfg.fullscreen $ shortcut keys "f"
   Gtk.widgetAddController overlay keys
   Gtk.toWidget overlay
+
+-- | How a view shows its scene.
+type Config :: Type
+data Config = Config
+  { large :: Bool
+    -- ^ Filling a window: fitted at first, the tools always shown, with a
+    -- map of the whole scene in the corner.
+  , fullscreen :: Maybe (IO ())
+    -- ^ Shows the diagram large; offered as a tool and the F key.
+  }
+
+-- | The whole scene small, with the part the view shows outlined.
+mapOf :: Gtk.DrawingArea -> Scene -> IO Camera -> IO Gtk.Widget
+mapOf view whole current = do
+  m <- GI.new Gtk.DrawingArea [ #contentWidth := 140, #contentHeight := 90, #canTarget := False
+                              , #halign := Gtk.AlignEnd, #valign := Gtk.AlignEnd, #cssClasses := ["minimap"] ]
+  Gtk.drawingAreaSetDrawFunc m $ Just $ \_ context w h -> do
+    palette <- Highlight.currentPalette
+    c <- current
+    vw <- fromIntegral <$> Gtk.widgetGetWidth view
+    vh <- fromIntegral <$> Gtk.widgetGetHeight view
+    let small = fitted whole.size (fromIntegral w) (fromIntegral h)
+        (sx, sy) = (small.dx, small.dy)
+        k = small.zoom
+        (r, g, b) = colorOf palette (Series 0)
+    renderWithContext (Cairo.save >> Cairo.translate sx sy >> Cairo.scale k k) context
+    forM_ whole.items $ \item -> paint m palette context item
+    renderWithContext Cairo.restore context
+    -- The view, in scene coordinates and then in the map's, cut to the
+    -- scene: fitted, the view is larger than it.
+    let x0 = max 0 (negate c.dx / c.zoom)
+        y0 = max 0 (negate c.dy / c.zoom)
+        x1 = min whole.size.w ((vw - c.dx) / c.zoom)
+        y1 = min whole.size.h ((vh - c.dy) / c.zoom)
+    renderWithContext (do
+      Cairo.rectangle (sx + x0 * k) (sy + y0 * k) (max 0 (x1 - x0) * k) (max 0 (y1 - y0) * k)
+      Cairo.setSourceRGB r g b
+      Cairo.setLineWidth 1.5
+      Cairo.stroke) context
+  Highlight.follow m (const (Gtk.widgetQueueDraw m))
+  Gtk.toWidget m
+
+percentOf :: Camera -> Text
+percentOf c = T.pack (show (round (c.zoom * 100) :: Int)) <> "%"
 
 -- | How much one press of the tools zooms.
 step :: Double
@@ -372,5 +435,9 @@ css = mconcat
   , "  background: transparent; border: none; box-shadow: none; color: var(--text-soft);"
   , "}"
   , "overlay.u-diagram button.tool:hover { background: var(--border-subtle); color: var(--text); }"
+  , "overlay.u-diagram drawingarea.minimap {"
+  , "  margin: 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface);"
+  , "  box-shadow: 0 2px 8px rgba(0,0,0,0.08);"
+  , "}"
   , "overlay.u-diagram button.percent { min-width: 48px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }"
   ]

@@ -9,6 +9,8 @@ module Usta.UI.Pages.Issue
   , commentWidget
   , conversation
   , editableTitle
+  , Watch (..)
+  , watchButton
   , Event (..)
   , Model (..)
   , Actions (..)
@@ -21,6 +23,7 @@ module Usta.UI.Pages.Issue
 import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Control.Concurrent (forkIO)
 import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.List (sortOn)
@@ -28,6 +31,7 @@ import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gio as Gio
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -47,7 +51,7 @@ import Usta.UI.Components.CommandPalette (shortcut)
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
-import Usta.Types.Discussion (Feeling)
+import Usta.Types.Discussion (Feeling, Watching (..))
 import qualified Usta.Types.Timeline as Tl
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
@@ -99,6 +103,67 @@ commentWidget t reply opener c = case c.forge of
     , react = t.react x.id
     , changed = t.refresh
     } >>= Gtk.toWidget
+
+-- | How much of a thread reaches the inbox, read and set on the forge.
+type Watch :: Type
+data Watch = Watch
+  { current :: IO (Either Text Watching)
+  , set :: Watching -> IO (Either Text ())
+  }
+
+-- | The header's Subscribed button: a menu of Subscribed, Participating
+-- and Muted, the current one ticked. It reads the forge when made; a
+-- choice the forge refuses says why in the menu.
+watchButton :: Watch -> IO Gtk.Widget
+watchButton w = do
+  caption <- GI.new Gtk.Label [#label := "Subscribed"]
+  inner <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+  GI.new Gtk.Label [#label := "🔔"] >>= #append inner
+  #append inner caption
+  items <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #widthRequest := 280]
+  popover <- GI.new Gtk.Popover [#child := items, #hasArrow := False, #cssClasses := ["u-watch-menu"]]
+  button <- GI.new Gtk.MenuButton [#child := inner, #popover := popover, #sensitive := False, #cssClasses := ["u-watch"]]
+  problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #maxWidthChars := 34, #cssClasses := ["problem"]]
+  let choices =
+        [ (Subscribed, "Subscribed", "Every comment and change")
+        , (Participating, "Participating", "Only when you are mentioned or take part")
+        , (Muted, "Muted", "Nothing from this thread, ever") ]
+      draw now = do
+        GI.set caption [#label := maybe "Subscribed" (\(_, t, _) -> t) (lookup' now)]
+        clear
+        forM_ choices $ \(value, title, sub) -> do
+          row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
+          GI.new Gtk.Label [#label := if value == now then "✓" else "", #widthRequest := 14, #cssClasses := ["tick"]] >>= #append row
+          texts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True]
+          GI.new Gtk.Label [#label := title, #xalign := 0, #cssClasses := ["title"]] >>= #append texts
+          GI.new Gtk.Label [#label := sub, #xalign := 0, #wrap := True, #cssClasses := ["muted", "small"]] >>= #append texts
+          #append row texts
+          b <- GI.new Gtk.Button [#child := row, #cssClasses := ["choice"] <> ["on" | value == now]]
+          void $ GI.on b #clicked $ unless (value == now) $ do
+            GI.set problem [#visible := False]
+            GI.set button [#sensitive := False]
+            void $ forkIO $ do
+              result <- w.set value
+              void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                GI.set button [#sensitive := True]
+                case result of
+                  Right () -> GI.set problem [#visible := False] >> Gtk.popoverPopdown popover >> draw value
+                  Left e -> GI.set problem [#label := e, #visible := True]
+                pure False
+          #append items b
+        #append items problem
+      lookup' now = case [c | c@(v, _, _) <- choices, v == now] of
+        c : _ -> Just c
+        [] -> Nothing
+      clear = Gtk.widgetGetFirstChild items >>= mapM_ (\c -> Gtk.boxRemove items c >> clear)
+  void $ forkIO $ do
+    got <- w.current
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      case got of
+        Right now -> GI.set button [#sensitive := True] >> draw now
+        Left e -> GI.set button [#tooltipText := e]
+      pure False
+  Gtk.toWidget button
 
 -- | A title with a pencil that edits it in place: Enter or Save renames,
 -- Esc or Cancel keeps it.
@@ -219,14 +284,14 @@ fromDiscussion c d m = m
 -- @content@ gets what sets the header's Open or Closed badge, for when the
 -- forge says otherwise than the list did. @backLabel@ names where Back
 -- goes, e.g. "Issues" or "Inbox".
-new :: Text -> IO () -> (Text -> IO (Either Text ())) -> Model -> ((Bool -> IO ()) -> IO Gtk.Widget) -> IO Gtk.Widget
-new backLabel onBack rename m content = do
+new :: Text -> IO () -> (Text -> IO (Either Text ())) -> Watch -> Model -> ((Bool -> IO ()) -> IO Gtk.Widget) -> IO Gtk.Widget
+new backLabel onBack rename watch m content = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
                          , #cssClasses := ["u-issue"]
                          ]
-  (bar, showClosed) <- header m backLabel onBack rename
+  (bar, showClosed) <- header m backLabel onBack rename watch
   #append page bar
   content showClosed >>= #append page
   Gtk.toWidget page
@@ -261,8 +326,8 @@ thread actions m = do
   details actions m >>= #append columns
   Gtk.toWidget columns
 
-header :: Model -> Text -> IO () -> (Text -> IO (Either Text ())) -> IO (Gtk.Box, Bool -> IO ())
-header m backLabel onBack rename = do
+header :: Model -> Text -> IO () -> (Text -> IO (Either Text ())) -> Watch -> IO (Gtk.Box, Bool -> IO ())
+header m backLabel onBack rename watch = do
   bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 12
                         , #cssClasses := ["issue-header"]
@@ -295,6 +360,7 @@ header m backLabel onBack rename = do
   editableTitle m.title ["issue-title"] rename >>= #append titles
   #append bar titles
 
+  watchButton watch >>= #append bar
   browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
   void $ GI.on browser #clicked $ do
     launcher <- Gtk.uriLauncherNew (Just url)
@@ -414,7 +480,16 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 css :: Text
 css = mconcat
-  [ "box.u-title-edit button.pencil { min-height: 24px; min-width: 24px; padding: 0; border: none; box-shadow: none; background: transparent; color: var(--text-muted); }"
+  [ "menubutton.u-watch > button { min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: none; background-image: none; }"
+  , "popover.u-watch-menu > contents { padding: 6px; border-radius: 10px; }"
+  , "popover.u-watch-menu button.choice { padding: 8px 10px; border: none; border-radius: 6px; box-shadow: none; background: transparent; background-image: none; }"
+  , "popover.u-watch-menu button.choice:hover { background: var(--border-subtle); }"
+  , "popover.u-watch-menu button.choice.on { background: var(--accent-bg); }"
+  , "popover.u-watch-menu label.title { font-weight: 600; color: var(--text); }"
+  , "popover.u-watch-menu label.tick { color: var(--accent); font-weight: 700; }"
+  , "popover.u-watch-menu label.small { font-size: 12px; }"
+  , "popover.u-watch-menu label.problem { margin: 6px 10px 2px; color: var(--danger); font-size: 12px; }"
+  , "box.u-title-edit button.pencil { min-height: 24px; min-width: 24px; padding: 0; border: none; box-shadow: none; background: transparent; color: var(--text-muted); }"
   , "box.u-title-edit button.pencil:hover { color: var(--text); }"
   , "box.u-issue button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
   , "box.u-issue box.issue-header {"

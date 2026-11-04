@@ -159,6 +159,7 @@ buildAt start given app = do
           pure False
       openPullRequestWith fetch backLabel summary =
         PullRequest.new backLabel backToMain (source.editTitle summary.host summary.repo summary.number)
+          (Issue.Watch (source.watching summary.host summary.repo summary.number) (source.setWatching summary.host summary.repo summary.number))
           (tabContent source (openPullRequestWith fetch backLabel summary) fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
@@ -208,7 +209,7 @@ buildAt start given app = do
               events <- either (const []) id <$> source.timeline h r n
               me <- maybe "" (.login) . find (\a -> a.host == h) <$> source.accounts
               pure (fmap (\x -> (x, goals, me, events)) d)
-        Issue.new backLabel backToMain (source.editTitle h r n) model (\showClosed ->
+        Issue.new backLabel backToMain (source.editTitle h r n) (Issue.Watch (source.watching h r n) (source.setWatching h r n)) model (\showClosed ->
           loadInto load $ \(d, goals, me, events) -> do
             c <- clock
             showClosed d.closed

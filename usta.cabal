@@ -114,6 +114,7 @@ executable usta
     Usta.UI.Components.AssignPickers
     Usta.UI.Components.Avatar
     Usta.UI.Components.Badge
+    Usta.UI.Components.BranchPicker
     Usta.UI.Components.Button
     Usta.UI.Components.Card
     Usta.UI.Components.CodeView

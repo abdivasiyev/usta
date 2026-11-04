@@ -50,6 +50,7 @@ data Icon
   | Chain
   | Pencil
   | Commit
+  | Branch
   | Flag
   | Closed
   | Reopened
@@ -152,6 +153,12 @@ source icon = case icon of
   Commit -> line
     [ stroke "circle" "cx='12' cy='12' r='3.5'"
     , stroke "path" "d='M3 12h5.5M15.5 12H21'"
+    ]
+  Branch -> line
+    [ stroke "circle" "cx='6' cy='5' r='2.5'"
+    , stroke "circle" "cx='6' cy='19' r='2.5'"
+    , stroke "circle" "cx='18' cy='7' r='2.5'"
+    , stroke "path" "d='M6 7.5v9M18 9.5a6 6 0 0 1-6 6H8'"
     ]
   Flag -> line [ stroke "path" "d='M5 21V4M5 4h11l-2 4 2 4H5'" ]
   Closed -> line

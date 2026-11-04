@@ -23,6 +23,8 @@ import Usta.Types.Discussion (Comment, Discussion, Merge, NewIssue, NewPull, Ver
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Label (Definition)
+import Usta.Types.Login (Login)
+import Usta.Types.Milestone (Milestone)
 import Usta.Types.Notification (Notification)
 import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (PullRequest)
@@ -111,6 +113,14 @@ data Forge = Forge
   , setLabels :: RepoName -> Number -> [Text] -> IO ()
     -- ^ An issue's or pull request's labels, by name, all at once.
   , createLabel :: RepoName -> Definition -> IO ()
+  , assignable :: RepoName -> IO [Candidate]
+    -- ^ Who can be assigned, with their full names.
+  , setAssignees :: RepoName -> Number -> [Login] -> IO ()
+    -- ^ All of them at once.
+  , milestones :: RepoName -> IO [Milestone]
+    -- ^ Open and closed, by due date.
+  , setMilestone :: RepoName -> Number -> Maybe Text -> IO ()
+    -- ^ By title; 'Nothing' takes it out of any.
   , compare :: RepoName -> Text -> Text -> IO ([Commit], [Text])
     -- ^ What a branch has that the base branch does not: its commits,
     -- oldest first, and the paths they change.

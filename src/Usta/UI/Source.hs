@@ -51,6 +51,8 @@ import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Check (Check, Job)
 import Usta.Types.Label (Definition)
+import Usta.Types.Login (Login)
+import Usta.Types.Milestone (Milestone)
 import Usta.Types.Readiness (Readiness, UpdateStyle)
 import Usta.Types.Reviewer (Candidate, Reviewer, Who)
 import Usta.Types.Commit (Commit, Sha)
@@ -163,6 +165,10 @@ data Source = Source
   , labels :: Text -> Text -> IO (Either Text [Definition])
   , setLabels :: Text -> Text -> Int -> [Text] -> IO (Either Text ())
   , createLabel :: Text -> Text -> Definition -> IO (Either Text ())
+  , assignable :: Text -> Text -> IO (Either Text [Candidate])
+  , setAssignees :: Text -> Text -> Int -> [Login] -> IO (Either Text ())
+  , milestones :: Text -> Text -> IO (Either Text [Milestone])
+  , setMilestone :: Text -> Text -> Int -> Maybe Text -> IO (Either Text ())
   , compare :: Text -> Text -> Text -> Text -> IO (Either Text ([Commit], [Text]))
     -- ^ By host, repository, base branch and branch: the commits and
     -- paths a pull request between them would have.
@@ -270,6 +276,10 @@ fromDatabase pool changes statuses sync = Source
   , labels = \_ _ -> pure (Left unavailable)
   , setLabels = \_ _ _ _ -> pure (Left unavailable)
   , createLabel = \_ _ _ -> pure (Left unavailable)
+  , assignable = \_ _ -> pure (Left unavailable)
+  , setAssignees = \_ _ _ _ -> pure (Left unavailable)
+  , milestones = \_ _ -> pure (Left unavailable)
+  , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
   }
   where
@@ -334,6 +344,10 @@ samples = Source
   , labels = \_ _ -> pure (Left unavailable)
   , setLabels = \_ _ _ _ -> pure (Left unavailable)
   , createLabel = \_ _ _ -> pure (Left unavailable)
+  , assignable = \_ _ -> pure (Left unavailable)
+  , setAssignees = \_ _ _ _ -> pure (Left unavailable)
+  , milestones = \_ _ -> pure (Left unavailable)
+  , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
   }
 
@@ -388,6 +402,10 @@ withAccounts pool accounts source = source
   , labels = \host repo -> onRepo host repo (\f name -> f.labels name)
   , setLabels = \host repo n names -> changing (onForge host repo n (\f name number -> f.setLabels name number names))
   , createLabel = \host repo d -> onRepo host repo (\f name -> f.createLabel name d)
+  , assignable = \host repo -> onRepo host repo (\f name -> f.assignable name)
+  , setAssignees = \host repo n who -> changing (onForge host repo n (\f name number -> f.setAssignees name number who))
+  , milestones = \host repo -> onRepo host repo (\f name -> f.milestones name)
+  , setMilestone = \host repo n t -> changing (onForge host repo n (\f name number -> f.setMilestone name number t))
   , compare = \host repo into from -> onRepo host repo (\f name -> f.compare name into from)
   }
   where
@@ -522,6 +540,10 @@ tracking track s = s
   , labels = \h r -> track (s.labels h r)
   , setLabels = \h r n l -> track (s.setLabels h r n l)
   , createLabel = \h r d -> track (s.createLabel h r d)
+  , assignable = \h r -> track (s.assignable h r)
+  , setAssignees = \h r n w -> track (s.setAssignees h r n w)
+  , milestones = \h r -> track (s.milestones h r)
+  , setMilestone = \h r n t -> track (s.setMilestone h r n t)
   , compare = \h r a b -> track (s.compare h r a b)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors

@@ -3,7 +3,9 @@
 
 -- | Markdown as native widgets: GitHub-flavored (tables, strikethrough,
 -- autolinks, task lists) through cmark-gfm. Code blocks are highlighted
--- like files; links with a scheme open in the browser.
+-- like files; links with a scheme open in the browser, and a link to a
+-- heading, "#usage", scrolls to it. Long words and links break where the
+-- line ends; code blocks and tables scroll sideways on their own.
 --
 -- Raw HTML is shown as forges show it, within the safe part they allow:
 -- inline styling (b, i, s, u, sub, sup, small, mark, code, kbd, br, a,
@@ -13,12 +15,15 @@ module Usta.UI.Components.Markdown
   ( Follow
   , new
   , newIn
+  , newAt
+  , slug
   , css
   ) where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (forM_, void, when)
 import Data.Char (isAlphaNum, isSpace)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import CMarkGFM (ListAttributes (..), ListType (..), Node (..), NodeType (..), TableCellAlignment (..), commonmarkToNode, extAutolink, extStrikethrough, extTable)
 import qualified Data.GI.Base as GI
@@ -26,6 +31,8 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gdk as Gdk
+import qualified GI.GLib as GLib
+import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -45,10 +52,30 @@ new = newIn (const (pure ()))
 -- | @text@ rendered, with links without a scheme going to @follow@, as a
 -- file's links to the files beside it.
 newIn :: Follow -> Text -> IO Gtk.Widget
-newIn follow text = do
+newIn follow = newAt follow Nothing
+
+-- | Like 'newIn', scrolled to the heading @anchor@ names once it shows,
+-- as a link "a.md#usage" from another file asks.
+newAt :: Follow -> Maybe Text -> Text -> IO Gtk.Widget
+newAt follow anchor text = do
   let root = commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text
-  w <- block Doc {follow, diagrams = diagramsOf root} root
+  anchors <- newIORef []
+  let doc = Doc {follow, diagrams = diagramsOf root, anchors}
+  w <- block doc root
   Gtk.widgetAddCssClass w "u-markdown"
+  -- The heading has its place only once the page is laid out, and wrapped
+  -- text settles over a few frames: this follows it for up to two seconds,
+  -- until it stays where it was.
+  forM_ anchor $ \a -> void $ GI.on w #map $ do
+    tries <- newIORef (0 :: Int)
+    last' <- newIORef Nothing
+    void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 50 $ do
+      at <- jump doc a
+      before <- readIORef last'
+      writeIORef last' at
+      modifyIORef' tries (+ 1)
+      n <- readIORef tries
+      pure (n < 40 && (at == Nothing || at /= before))
   pure w
 
 -- | What the blocks of one document share.
@@ -57,7 +84,45 @@ data Doc = Doc
   { follow :: Follow
   , diagrams :: [Mermaid.Diagram]
     -- ^ Its Mermaid diagrams in order, for fullscreen to move between.
+  , anchors :: IORef [(Text, Gtk.Widget)]
+    -- ^ Each heading by its slug, in order.
   }
+
+-- | A heading's anchor as forges make it: lowercase, spaces to hyphens,
+-- other punctuation dropped; "Getting started!" is "getting-started".
+slug :: Text -> Text
+slug = T.map (\c -> if isSpace c then '-' else c) . T.filter keep . T.toLower . T.strip
+  where
+    keep c = isAlphaNum c || isSpace c || c == '-' || c == '_'
+
+-- | Scrolls the nearest scrolled window to the heading @name@ names; a
+-- second heading of the same text is "@name@-1", as forges number them.
+-- Where it scrolled to; 'Nothing' while the page is not laid out.
+jump :: Doc -> Text -> IO (Maybe Double)
+jump doc name = do
+  headings <- readIORef doc.anchors
+  let wanted = T.toLower (T.replace "%20" "-" name)
+  case lookup wanted headings of
+    Nothing -> pure (Just 0)
+    Just heading -> scrollerOf heading >>= \case
+      Nothing -> pure (Just 0)
+      Just scroller -> Gtk.scrolledWindowGetChild scroller >>= \case
+        Nothing -> pure (Just 0)
+        Just child -> do
+          origin <- Graphene.newZeroPoint
+          (placed, at) <- Gtk.widgetComputePoint heading child origin
+          y <- realToFrac <$> Graphene.getPointY at
+          adjustment <- Gtk.scrolledWindowGetVadjustment scroller
+          room <- (-) <$> Gtk.adjustmentGetUpper adjustment <*> Gtk.adjustmentGetPageSize adjustment
+          let target = max 0 (y - 12)
+          -- No room yet means the page is not laid out.
+          if placed && room > 0
+            then Gtk.adjustmentSetValue adjustment target >> pure (Just (min room target))
+            else pure Nothing
+  where
+    scrollerOf w = Gtk.widgetGetParent w >>= \case
+      Nothing -> pure Nothing
+      Just parent -> GI.castTo Gtk.ScrolledWindow parent >>= maybe (scrollerOf parent) (pure . Just)
 
 -- | The document's diagrams, each named after the heading above it.
 diagramsOf :: Node -> [Mermaid.Diagram]
@@ -78,7 +143,13 @@ block :: Doc -> Node -> IO Gtk.Widget
 block doc (Node _ kind children) = case kind of
   DOCUMENT -> column doc 12 children
   PARAGRAPH -> paragraph doc ["paragraph"] children
-  HEADING level -> paragraph doc ["heading", "h" <> T.pack (show (min 6 level))] children
+  HEADING level -> do
+    w <- paragraph doc ["heading", "h" <> T.pack (show (min 6 level))] children
+    let base = slug (plainOf (foldMap inline children))
+    modifyIORef' doc.anchors $ \known ->
+      let taken = length [() | (k, _) <- known, k == base || T.isPrefixOf (base <> "-") k && T.all (`elem` ['0' .. '9']) (T.drop (T.length base + 1) k)]
+      in known <> [(if taken == 0 then base else base <> "-" <> T.pack (show taken), w)]
+    pure w
   BLOCK_QUOTE -> do
     w <- column doc 8 children
     Gtk.widgetAddCssClass w "quote"
@@ -165,6 +236,7 @@ text' doc markup classes = do
   let shown = either (\(_ :: SomeException) -> Highlight.plain (plainOf markup)) (const markup) parsed
   l <- GI.new Gtk.Label [ #xalign := 0
                         , #wrap := True
+                        , #wrapMode := Pango.WrapModeWordChar
                         , #selectable := True
                         , #useMarkup := True
                         , #label := shown
@@ -176,8 +248,10 @@ text' doc markup classes = do
 -- | A label's links with a scheme (https:, mailto:) open as GTK opens
 -- them; the others go to the document's 'Follow'.
 links :: Doc -> Gtk.Label -> IO ()
-links doc l = void $ GI.on l #activateLink $ \uri ->
-  if hasScheme uri then pure False else doc.follow uri >> pure True
+links doc l = void $ GI.on l #activateLink $ \uri -> case T.stripPrefix "#" uri of
+  Just name -> jump doc name >> pure True
+  Nothing | hasScheme uri -> pure False
+          | otherwise -> doc.follow uri >> pure True
   where
     hasScheme u = case T.breakOn ":" u of
       (s, rest) -> not (T.null s) && not (T.null rest) && T.all (\c -> isAlphaNum c || c `elem` ("+-." :: String)) s
@@ -306,7 +380,10 @@ table doc alignments rows = do
                                ]
       links doc cell
       Gtk.gridAttach grid cell c (fromIntegral r) 1 1
-  Gtk.toWidget grid
+  -- A wide table scrolls by itself rather than widening the page.
+  scroll <- GI.new Gtk.ScrolledWindow [ #child := grid, #vscrollbarPolicy := Gtk.PolicyTypeNever
+                                      , #propagateNaturalHeight := True, #propagateNaturalWidth := True ]
+  Gtk.toWidget scroll
 
 -- | A fenced block: its language and Copy above, the code highlighted.
 codeBlock :: Text -> Text -> IO Gtk.Widget

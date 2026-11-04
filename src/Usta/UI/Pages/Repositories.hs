@@ -36,7 +36,7 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Markdown as Markdown
-import Usta.UI.Pages.RepositoryFiles (relativeTo)
+import Usta.UI.Pages.RepositoryFiles (linkTarget)
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
 import qualified Usta.UI.Components.Skeleton as Skeleton
@@ -393,7 +393,7 @@ sections r follow c into = do
       Gtk.widgetAddCssClass card "readme"
       -- A README in Markdown is rendered; any other is shown as written.
       body <- if any (`T.isSuffixOf` T.toLower name) [".md", ".markdown"] || T.toLower name == "readme"
-        then Markdown.newIn (mapM_ follow . relativeTo name) text
+        then Markdown.newIn (mapM_ follow . linkTarget name) text
         else label text ["mono"] >>= \l -> GI.set l [#wrap := True, #selectable := True] >> Gtk.toWidget l
       #append card body
       #append section card

@@ -50,6 +50,7 @@ module Usta.Forge.Forgejo.Api
   , PullRequest (..)
   , Branch (..)
   , Review (..)
+  , Team (..)
   , ReviewComment (..)
   , LineComment (..)
   , CombinedStatus (..)
@@ -156,6 +157,14 @@ data Routes mode = Routes
   , requestReviewers
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> "requested_reviewers" :> ReqBody '[JSON] Reviewers :> Verb 'POST 201 '[JSON] NoContent
+  , unrequestReviewers
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
+           :> "requested_reviewers" :> ReqBody '[JSON] Reviewers :> Verb 'DELETE 204 '[JSON] NoContent
+  , collaborators
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "collaborators"
+           :> RecordQueryParam ListQuery :> Get '[JSON] [User]
+  , teams
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "teams" :> Get '[JSON] [Team]
   , branches
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "branches"
            :> RecordQueryParam ListQuery :> Get '[JSON] [BranchName]
@@ -526,11 +535,19 @@ newtype Created = Created {number :: Number}
 instance FromJSON Created where
   parseJSON = withObject "Created" $ \o -> Created <$> o .: "number"
 
+-- | People by login and teams by name, to ask for a review or stop asking.
 type Reviewers :: Type
-newtype Reviewers = Reviewers {reviewers :: [Login]}
+data Reviewers = Reviewers {reviewers :: [Login], teams :: [Text]}
 
 instance ToJSON Reviewers where
-  toJSON r = object ["reviewers" .= map unparse r.reviewers]
+  toJSON r = object ["reviewers" .= map unparse r.reviewers, "team_reviewers" .= r.teams]
+
+-- | A team of the repository's organization, which can be asked to review.
+type Team :: Type
+newtype Team = Team {name :: Text}
+
+instance FromJSON Team where
+  parseJSON = withObject "Team" $ \o -> Team <$> o .: "name"
 
 type BranchName :: Type
 newtype BranchName = BranchName {name :: Text}
@@ -686,6 +703,7 @@ data PullRequest = PullRequest
   , merged :: Bool
   , changedFiles :: Maybe Count
   , requestedReviewers :: [User]
+  , requestedTeams :: [Team]
   }
 
 instance FromJSON PullRequest where
@@ -696,6 +714,7 @@ instance FromJSON PullRequest where
     <*> o .:? "merged" .!= False
     <*> o .:? "changed_files"
     <*> o .:? "requested_reviewers" .!= []
+    <*> o .:? "requested_reviewers_teams" .!= []
 
 type Branch :: Type
 data Branch = Branch

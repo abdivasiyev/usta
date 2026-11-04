@@ -73,7 +73,7 @@ module Usta.Forge.Forgejo.Api
   , CommitStatus (..)
   ) where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.!=), (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, decodeStrict, object, withObject, (.!=), (.:), (.:?), (.=))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find)
@@ -85,7 +85,7 @@ import Data.Maybe (isJust)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (decodeUtf8Lenient)
+import Data.Text.Encoding (decodeUtf8Lenient, encodeUtf8)
 import Data.Time (UTCTime, diffUTCTime)
 import GHC.Generics (Generic)
 import Servant.API
@@ -100,6 +100,7 @@ import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
 import Usta.Types.Parse (parseM, unparse)
 import qualified Usta.Types.Milestone as M
+import qualified Usta.Types.Timeline as Tl
 import Usta.Types.Readiness (UpdateStyle (..))
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Servant.NamedQueryParam (Named (..), RecordQueryParam, ToQuery)
@@ -607,13 +608,49 @@ instance ToJSON MergeOption where
     , "merge_when_checks_succeed" .= m.whenChecksPass
     ]
 
--- | An event in an issue's or pull request's timeline, by its kind, e.g.
--- "pull_scheduled_merge" or "pull_cancel_scheduled_merge".
+-- | An event in an issue's or pull request's timeline: its kind, e.g.
+-- "pull_scheduled_merge", and what usta shows of it. Comments and reviews
+-- are shown apart, and kinds usta does not show come as 'Nothing'.
 type TimelineEvent :: Type
-newtype TimelineEvent = TimelineEvent {kind :: Text}
+data TimelineEvent = TimelineEvent {kind :: Text, event :: Maybe Tl.Event}
 
 instance FromJSON TimelineEvent where
-  parseJSON = withObject "TimelineEvent" $ \o -> TimelineEvent <$> o .:? "type" .!= ""
+  parseJSON = withObject "TimelineEvent" $ \o -> do
+    kind <- o .:? "type" .!= ""
+    actor <- o .:? "user"
+    at <- o .:? "created_at"
+    body <- o .:? "body" .!= ("" :: Text)
+    removed <- o .:? "removed_assignee" .!= False
+    let titleOf key = o .:? key >>= traverse (.: "title")
+        loginOf key = fmap (\u -> (u :: User).login) <$> o .:? key
+    what <- case kind :: Text of
+      "label" -> fmap (Tl.Labeled (body == "1")) <$> (fmap (\l -> L.Label {name = l.name, color = l.color}) <$> (o .:? "label" :: Parser (Maybe Label)))
+      "assignees" -> fmap (Tl.Assigned (not removed)) <$> loginOf "assignee"
+      "review_request" -> fmap (Tl.ReviewRequested (not removed)) <$> loginOf "assignee"
+      "milestone" -> (\old new -> Just (Tl.Milestoned old new)) <$> titleOf "old_milestone" <*> titleOf "milestone"
+      "change_title" -> (\old new -> Tl.Renamed <$> old <*> new) <$> o .:? "old_title" <*> o .:? "new_title"
+      "close" -> pure (Just Tl.Closed)
+      "reopen" -> pure (Just Tl.Reopened)
+      "merge_pull" -> pure (Just Tl.Merged)
+      "pull_scheduled_merge" -> pure (Just (Tl.MergeScheduled True))
+      "pull_cancel_scheduled_merge" -> pure (Just (Tl.MergeScheduled False))
+      "delete_branch" -> pure (Just Tl.BranchDeleted)
+      "pull_push" -> pure (Tl.Pushed . length . (\(Pushed ids) -> ids) <$> (decodeStrict (encodeUtf8 body) :: Maybe Pushed))
+      ref | ref `elem` ["issue_ref", "pull_ref", "comment_ref", "commit_ref"] -> do
+        issue <- o .:? "ref_issue"
+        traverse (\i -> Tl.Referenced <$> i .: "number" <*> i .:? "title" .!= "") issue
+      _ -> pure Nothing
+    pure TimelineEvent
+      { kind = kind
+      , event = Tl.Event <$> fmap (\u -> (u :: User).login) actor <*> at <*> what
+      }
+
+-- | A push's body: the commits it brought.
+type Pushed :: Type
+newtype Pushed = Pushed [Text]
+
+instance FromJSON Pushed where
+  parseJSON = withObject "Pushed" $ \o -> Pushed <$> o .:? "commit_ids" .!= []
 
 -- | Who an issue or pull request is assigned to, all at once.
 type AssigneesEdit :: Type

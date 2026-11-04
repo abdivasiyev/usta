@@ -108,6 +108,7 @@ executable usta
     Usta.Types.ThreadId
     Usta.Types.Thread
     Usta.Types.Tree
+    Usta.Types.Timeline
     Usta.Types.Token
     Usta.UI.Components.AssignPickers
     Usta.UI.Components.Avatar

@@ -7,6 +7,7 @@ module Usta.UI.Window
   ( Start (..)
   , build
   , buildAt
+  , buildOpening
   ) where
 
 import Control.Concurrent (forkIO)
@@ -95,6 +96,7 @@ import qualified Usta.Types.Commit as C
 import Usta.UI.Format (Clock, ago, clock, short)
 import qualified Usta.Forge as Forge
 import qualified Usta.Types.Search as Search
+import qualified Usta.Types.Link as Link
 import qualified Usta.Waiting as Waiting
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
 import qualified Usta.Sync as Sync
@@ -119,10 +121,14 @@ data Start
 build :: Source -> Gtk.Application -> IO Gtk.ApplicationWindow
 build = buildAt Ready
 
+buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
+buildAt start = buildOpening start Nothing
+
 -- | The pages show @source@'s lists, reload the ones that change, and
 -- reload all of them each minute so "5 min ago" stays true.
-buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildAt start given app = do
+-- | Opens @link@, a forge link given on the command line, once built.
+buildOpening :: Start -> Maybe Text -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
+buildOpening start link given app = do
   -- The Files tab's side panels, kept as left from one pull request to
   -- the next.
   panels <- Files.newPanels
@@ -628,6 +634,37 @@ buildAt start given app = do
   noTitlebar <- GI.new Gtk.Box [#visible := False]
 
   let showPage page = backToMain >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
+      -- A link to a signed-in forge opens its page here, when the setting
+      -- says so; True when it did.
+      openLink uri = do
+        chosen <- source.preferences
+        accounts <- source.accounts
+        case Link.parseLink uri of
+          Just target | chosen.openLinks, Just a <- find (\a -> a.host == target.host) accounts -> do
+            case target of
+              Link.PullAt {repo, number} -> do
+                known <- source.pullRequests
+                openPullRequest "Back" $ case [pr | pr <- known, pr.host == target.host, pr.repo == repo, pr.number == number] of
+                  pr : _ -> summaryOf pr
+                  [] -> PullRequest.Summary
+                    { PullRequest.forge = a.forge, PullRequest.host = target.host, PullRequest.repo = repo, PullRequest.number = number
+                    , PullRequest.title = repo <> " #" <> T.pack (show number), PullRequest.state = PullRequest.Open
+                    , PullRequest.comments = 0, PullRequest.files = 0, PullRequest.commits = 0
+                    , PullRequest.checks = Nothing, PullRequest.branches = ("", "")
+                    }
+              Link.IssueAt {repo, number} -> do
+                known <- source.issues
+                openIssue "Back" $ case [i | i <- known, i.host == target.host, i.repo == repo, i.number == number] of
+                  i : _ -> issueDetail i
+                  [] -> Issue.Model
+                    { Issue.forge = a.forge, Issue.host = target.host, Issue.repo = repo, Issue.number = number
+                    , Issue.title = repo <> " #" <> T.pack (show number), Issue.closed = False, Issue.comments = [], Issue.events = []
+                    , Issue.timeline = [], Issue.assignees = [], Issue.labels = [], Issue.milestone = Nothing, Issue.linkedPullRequests = []
+                    }
+              -- A file opens its repository for now.
+              _ -> showPage Sidebar.Repositories >> showRepository (target.host, target.repo)
+            pure True
+          _ -> pure False
       paletteModel = do
         settings <- Gtk.settingsGetDefault
         scheme <- maybe (pure Gtk.InterfaceColorSchemeDefault) (`GI.get` #gtkInterfaceColorScheme) settings
@@ -647,14 +684,20 @@ buildAt start given app = do
                   applyTheme nextTheme
                   source.setPreferences chosen {theme = nextTheme}
               ]
+        accounts <- source.accounts
         pullRequests <- map (paletteItem openPullRequest) <$> source.pullRequests
         issues <- map (issueItem openIssue) <$> source.issues
         repositories <- map (repositoryItem (showPage Sidebar.Repositories)) <$> source.repositories
         pure CommandPalette.Model
           { CommandPalette.recent = take 1 pullRequests <> take 1 issues <> take 1 (drop 1 repositories)
           , CommandPalette.items = pullRequests <> issues <> repositories <> commands
+          , CommandPalette.link = \t -> case Link.parseLink t of
+              Just target | target.host `elem` [a.host | a <- accounts] ->
+                Just (CommandPalette.Item CommandPalette.Command ("Open " <> Link.describe target) target.host (void (openLink t)))
+              _ -> Nothing
           , CommandPalette.search = \words' -> map (foundItem openPullRequest openIssue (\at -> showPage Sidebar.Repositories >> showRepository at)) <$> source.searchForges words'
           }
+  Markdown.openLinksWith openLink
   rootWidget <- Gtk.toWidget root
   (withPalette, openPalette) <- CommandPalette.new rootWidget paletteModel
   writeIORef paletteOpener openPalette
@@ -679,6 +722,7 @@ buildAt start given app = do
                                          ]
   Gtk.toWidget window >>= \w -> Style.install w styles
   #present window
+  forM_ link (void . openLink)
   -- GTK focuses the first entry; start with nothing focused so single-key
   -- shortcuts (j, k, e) work instead of typing into the search field.
   Gtk.windowSetFocus window (Nothing :: Maybe Gtk.Widget)

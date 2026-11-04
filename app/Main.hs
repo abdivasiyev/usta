@@ -4,6 +4,9 @@
 
 module Main (main) where
 
+import Data.Maybe (isJust)
+import qualified Data.Text as T
+import qualified Usta.Types.Link as Link
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, void, when)
 import Data.GI.Base
@@ -91,7 +94,12 @@ cache = do
           (Source.withMirrors pool accounts mirrors mirrorStatuses
             (Source.withAccounts pool accounts (Source.fromDatabase pool changes statuses sync)))
         start = if null saved then Window.FirstRun else Window.Ready
-    runApp (void . Window.buildAt start source)
+    -- @usta <forge link>@ opens it once the window shows.
+    args <- getArgs
+    let link = case [a | a <- args, isJust (Link.parseLink (T.pack a))] of
+          a : _ -> Just (T.pack a)
+          [] -> Nothing
+    runApp (void . Window.buildOpening start link source)
 
 -- | Two sample accounts in a fresh cache file, synced each minute. Every
 -- 90 seconds the sample forges change and sync runs at once, so the pages

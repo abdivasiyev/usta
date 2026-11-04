@@ -13,6 +13,7 @@ module Usta.UI.Pages.Settings
   , css
   ) where
 
+import qualified Usta.Types.Link as Link
 import Control.Concurrent (forkIO)
 import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
@@ -68,7 +69,7 @@ data Model = Model
   }
 
 type Section :: Type
-data Section = Accounts | Sync | Notifications | Appearance | Keyboard
+data Section = Accounts | Sync | Notifications | Links | Appearance | Keyboard
   deriving (Eq, Enum, Bounded)
 
 sectionTitle :: Section -> Text
@@ -76,6 +77,7 @@ sectionTitle s = case s of
   Accounts -> "Accounts"
   Sync -> "Sync and storage"
   Notifications -> "Notifications"
+  Links -> "Links"
   Appearance -> "Appearance"
   Keyboard -> "Keyboard"
 
@@ -204,6 +206,28 @@ section s m change onAddAccount = do
       , setting "Only when usta is in the background" [plain "Stay quiet while you are looking at the app"]
           =<< sequence [switch m.preferences.onlyInBackground (\on p -> p {onlyInBackground = on})]
       ]
+    Links -> do
+      opening <- setting "Open forge links in usta"
+        [plain "Links to your forges in comments, in the search or given as ", code "usta <link>", plain " open the pull request, issue or repository here; every other link goes to the browser"]
+        =<< sequence [switch m.preferences.openLinks (\on p -> p {openLinks = on})]
+      others <- setting "Other links open in" [plain "The system's default browser. usta becomes the system's link handler once it is installed as an app"] []
+      entry <- GI.new Gtk.Entry [#placeholderText := "Paste a link", #widthRequest := 320]
+      trying <- setting "Try a link" [plain "Paste one to see where it would open"] =<< sequence [Gtk.toWidget entry]
+      answer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #visible := False, #cssClasses := ["setting", "answer"]]
+      mark <- GI.new Gtk.Image [#iconName := "object-select-symbolic"]
+      said <- label "" []
+      mapM_ (#append answer) =<< sequence [Gtk.toWidget mark, Gtk.toWidget said]
+      let hosts = [a.host | a <- m.accounts]
+      void $ GI.on entry #changed $ do
+        t <- T.strip <$> Gtk.editableGetText entry
+        let where' = case Link.parseLink t of
+              Just target | target.host `elem` hosts -> Just ("Opens in usta: " <> Link.describe target)
+              Just target -> Just ("Opens in the browser: " <> target.host <> " is not one of your forges")
+              Nothing -> Nothing
+        GI.set answer [#visible := not (T.null t)]
+        GI.set mark [#visible := maybe False ("Opens in usta" `T.isPrefixOf`) where']
+        GI.set said [#label := maybe "Opens in the browser: not a forge link" id where']
+      sequence [pure opening, pure others, pure trying, Gtk.toWidget answer]
     Appearance -> sequence
       [ setting "Theme" [] =<< sequence [themeChoice m.preferences.theme (\t -> change (\p -> p {theme = t}))]
       ]
@@ -415,6 +439,8 @@ css = mconcat
   , "}"
   , "box.u-settings box.content { padding: 24px 32px 48px; }"
   , "box.u-settings label.section-title { font-size: 19px; font-weight: 600; }"
+  , "box.u-settings box.answer { background: var(--accent-bg); }"
+  , "box.u-settings box.answer image { color: var(--success); }"
   , "box.u-settings box.setting { padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); }"
   , "box.u-settings box.setting:last-child { border-bottom: none; }"
   , "box.u-settings box.setting label.title { font-weight: 600; }"

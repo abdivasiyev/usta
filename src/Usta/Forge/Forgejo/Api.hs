@@ -47,6 +47,7 @@ module Usta.Forge.Forgejo.Api
   , BranchName (..)
   , ApiTag (..)
   , ApiRelease (..)
+  , FoundRepositories (..)
   , Attachment (..)
   , ApiAsset (..)
   , RepoLabel (..)
@@ -128,6 +129,8 @@ data Routes mode = Routes
       :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId :> RecordQueryParam ThreadQuery
            :> Verb 'PATCH 205 '[JSON] NoContent
   , search :: mode :- "repos" :> "issues" :> "search" :> RecordQueryParam SearchQuery :> Get '[JSON] [Issue]
+  , searchRepositories
+      :: mode :- "repos" :> "search" :> QueryParam "q" Text :> QueryParam "limit" Int :> Get '[JSON] FoundRepositories
   , repoIssues
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues"
            :> RecordQueryParam RepoIssuesQuery :> Get '[JSON] [Issue]
@@ -383,7 +386,9 @@ instance ToQuery NotificationQuery
 -- keeps those involving the user that way.
 type SearchQuery :: Type
 data SearchQuery = SearchQuery
-  { kind :: Named "type" IssueType
+  { q :: Maybe Text
+    -- ^ Words to find in the title or text.
+  , kind :: Named "type" IssueType
   , state :: IssueState
   , since :: Maybe UTCTime
   , assigned :: Maybe Bool
@@ -902,6 +907,13 @@ instance FromJSON BranchName where
   parseJSON = withObject "Branch" $ \o -> do
     commit <- o .:? "commit"
     BranchName <$> o .: "name" <*> maybe (pure Nothing) (.:? "timestamp") commit
+
+-- | The repositories a search found.
+type FoundRepositories :: Type
+newtype FoundRepositories = FoundRepositories [Repository]
+
+instance FromJSON FoundRepositories where
+  parseJSON = withObject "FoundRepositories" $ \o -> FoundRepositories <$> o .:? "data" .!= []
 
 -- | A file attached to an issue or pull request, and where it is served.
 type Attachment :: Type

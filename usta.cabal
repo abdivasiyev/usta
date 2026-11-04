@@ -112,6 +112,7 @@ executable usta
     Usta.Types.Reviewer
     Usta.Types.Servant.NamedQueryParam
     Usta.Types.ThreadId
+    Usta.Types.Search
     Usta.Types.Thread
     Usta.Types.Tree
     Usta.Types.Timeline

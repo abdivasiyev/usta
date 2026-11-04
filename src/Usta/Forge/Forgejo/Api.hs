@@ -704,6 +704,8 @@ data PullRequest = PullRequest
   , changedFiles :: Maybe Count
   , requestedReviewers :: [User]
   , requestedTeams :: [Team]
+  , user :: User
+    -- ^ Who opened it.
   }
 
 instance FromJSON PullRequest where
@@ -715,6 +717,7 @@ instance FromJSON PullRequest where
     <*> o .:? "changed_files"
     <*> o .:? "requested_reviewers" .!= []
     <*> o .:? "requested_reviewers_teams" .!= []
+    <*> o .: "user"
 
 type Branch :: Type
 data Branch = Branch

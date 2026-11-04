@@ -16,7 +16,7 @@ module Usta.Forge.Forgejo
   , whoAmI
   ) where
 
-import Control.Exception (throwIO)
+import Control.Exception (throwIO, try)
 import Control.Monad (unless)
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
@@ -54,6 +54,7 @@ import qualified Usta.Types.PullRequest as P
 import Usta.Types.Ref (Ref (..))
 import qualified Usta.Types.Thread as Th
 import Usta.Types.RepoName (RepoName, owner, shortName)
+import qualified Usta.Types.Reviewer as Rv
 import qualified Usta.Types.Repository as R
 import Usta.Types.Servant.NamedQueryParam (Named (..))
 import Usta.Types.Token (Token)
@@ -156,6 +157,19 @@ forgejo manager base host token = do
         pure (map (checkOf host) combined.statuses)
     -- The first attempt's: the status links the job, not its attempts.
     , checkLog = \repo job -> run site (Api.web.jobLog (owner repo) (shortName repo) job.run job.index 1)
+    , reviewers = \repo n -> do
+        pull <- run client (Api.api.pullRequest (owner repo) (shortName repo) n)
+        given <- run client (everyPage (\page limit -> Api.api.reviews (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
+        pure (reviewersOf pull given)
+    , requestReview = \repo n whos ->
+        () <$ run client (Api.api.requestReviewers (owner repo) (shortName repo) n (requestOf whos))
+    , unrequestReview = \repo n who ->
+        () <$ run client (Api.api.unrequestReviewers (owner repo) (shortName repo) n (requestOf [who]))
+    , reviewCandidates = \repo -> do
+        people <- run client (everyPage (\page limit -> Api.api.collaborators (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+        -- A repository a person owns has no teams; Forgejo refuses to list them.
+        teams <- try (run client (Api.api.teams (owner repo) (shortName repo)))
+        pure (map (Rv.Person . (.login)) people <> either (\(_ :: Failure) -> []) (map (Rv.Team . (.name))) teams)
     -- Forgejo has no reply to a thread; a comment on the same line joins it.
     , reply = \repo n t text -> () <$ run client (Api.api.review (owner repo) (shortName repo) n
         Api.NewReview {verdict = CommentOnly, body = "", lines = [Api.LineComment {path = t.path, line = t.line, body = text}]})
@@ -360,6 +374,33 @@ reviewOf pull given
     counted = [r | r <- given, not r.stale, not r.dismissed, r.state `elem` ["APPROVED", "REQUEST_CHANGES"]]
     lastBy = Map.fromList [(fmap (unparse . (.login)) r.user, r.state) | r <- counted]
     verdicts = Map.elems lastBy
+
+-- | Each reviewer's latest review that counts, oldest first, then those
+-- asked who have not reviewed, people and teams. Forgejo keeps a reviewer
+-- among the requested after they review and does not list requests among
+-- the reviews, so a request made again after a review does not show. The
+-- author's own comments are no review.
+reviewersOf :: Api.PullRequest -> [Api.Review] -> [Rv.Reviewer]
+reviewersOf pull given = reviewed <> pending <> teams
+  where
+    counted = [(u.login, (stance, r.stale)) | r <- sortOn (.id) given, not r.dismissed, Just u <- [r.user], u.login /= pull.user.login, Just stance <- [stanceOf r.state]]
+    latest = Map.fromList counted
+    order = nub (map fst counted)
+    requested = map (.login) pull.requestedReviewers
+    reviewed =
+      [ Rv.Reviewer {who = Rv.Person l, stance = stance, stale = stale}
+      | l <- order, Just (stance, stale) <- [Map.lookup l latest] ]
+    pending = [Rv.Reviewer {who = Rv.Person l, stance = Rv.Waiting, stale = False} | l <- requested, l `notElem` order]
+    teams = [Rv.Reviewer {who = Rv.Team t.name, stance = Rv.Waiting, stale = False} | t <- pull.requestedTeams]
+    stanceOf s = case s of
+      "APPROVED" -> Just Rv.Approved
+      "REQUEST_CHANGES" -> Just Rv.ChangesRequested
+      "COMMENT" -> Just Rv.Commented
+      _ -> Nothing
+
+-- | People and teams as Forgejo takes them in a review request.
+requestOf :: [Rv.Who] -> Api.Reviewers
+requestOf whos = Api.Reviewers {reviewers = [l | Rv.Person l <- whos], teams = [t | Rv.Team t <- whos]}
 
 -- | The site's root from the API's path: "/api/v1" off its end.
 siteOf :: String -> String

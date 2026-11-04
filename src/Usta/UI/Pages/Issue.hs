@@ -490,7 +490,7 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 css :: Text
 css = mconcat
   [ "menubutton.u-watch > button { min-height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: none; background-image: none; }"
-  , "popover.u-watch-menu > contents { padding: 6px; border-radius: 10px; }"
+  , "popover.u-watch-menu > contents { padding: 6px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
   , "popover.u-watch-menu button.choice { padding: 8px 10px; border: none; border-radius: 6px; box-shadow: none; background: transparent; background-image: none; }"
   , "popover.u-watch-menu button.choice:hover { background: var(--border-subtle); }"
   , "popover.u-watch-menu button.choice.on { background: var(--accent-bg); }"

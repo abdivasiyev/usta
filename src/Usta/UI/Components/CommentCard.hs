@@ -190,7 +190,7 @@ css = mconcat
   , "box.u-comment-card button.chip.mine { background: var(--accent-bg); border-color: var(--accent); }"
   , "box.u-comment-card box.confirm { margin: 0 12px 12px; padding: 8px 10px; border-radius: 6px; background: var(--danger-bg); }"
   , "box.u-comment-card label.problem { margin: 0 12px 10px; color: var(--danger); font-size: 12px; }"
-  , "popover.u-comment-menu > contents { padding: 4px; border-radius: 10px; }"
+  , "popover.u-comment-menu > contents { padding: 4px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
   , "popover.u-comment-menu button.item { min-height: 32px; padding: 0 12px; border: none; box-shadow: none; background: transparent; background-image: none; }"
   , "popover.u-comment-menu button.item:hover { background: var(--border-subtle); }"
   , "popover.u-comment-menu button.item.danger { color: var(--danger); }"

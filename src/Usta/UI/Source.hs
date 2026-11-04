@@ -50,6 +50,7 @@ import qualified Usta.Mirrors as Mirrors
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
+import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Check (Check, Job, Run)
 import Usta.Types.Label (Definition)
 import Usta.Types.Login (Login)
@@ -187,6 +188,11 @@ data Source = Source
   , repoIssues :: Text -> Text -> IO (Either Text [I.Issue])
   , runs :: Text -> Text -> IO (Either Text [Run])
     -- ^ A repository's latest CI runs, from the forge.
+  , branchList :: Text -> Text -> Text -> IO (Either Text (From, [Branch]))
+    -- ^ By host, repository and default branch.
+  , tagList :: Text -> Text -> IO (Either Text (From, [Tag]))
+  , history :: Text -> Text -> Text -> Int -> IO (Either Text (From, [Commit]))
+    -- ^ By host, repository, branch and page, from 1.
   , discardPending :: Text -> Text -> Int -> IO (Either Text Int)
     -- ^ Deletes the user's review left pending on the forge, by host,
     -- repository and number.
@@ -310,6 +316,9 @@ fromDatabase pool changes statuses sync = Source
   , repoIssues = \_ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
   , discardPending = \_ _ _ -> pure (Left unavailable)
+  , branchList = \_ _ _ -> pure (Left unavailable)
+  , tagList = \_ _ -> pure (Left unavailable)
+  , history = \_ _ _ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -389,6 +398,9 @@ samples = Source
   , repoIssues = \_ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
   , discardPending = \_ _ _ -> pure (Left unavailable)
+  , branchList = \_ _ _ -> pure (Left unavailable)
+  , tagList = \_ _ -> pure (Left unavailable)
+  , history = \_ _ _ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -607,6 +619,9 @@ tracking track s = s
   , repoIssues = \h r -> track (s.repoIssues h r)
   , runs = \h r -> track (s.runs h r)
   , discardPending = \h r n -> track (s.discardPending h r n)
+  , branchList = \h r b -> track (s.branchList h r b)
+  , tagList = \h r -> track (s.tagList h r)
+  , history = \h r b n -> track (s.history h r b n)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors
   }
@@ -622,6 +637,9 @@ withDetails pool details source = source
   , readme = \host repo branch -> repoOf host repo (\key name -> details.readme key name branch)
   , tree = \host repo branch -> repoOf host repo (\key name -> details.tree key name branch)
   , file = \host repo branch path -> repoOf host repo (\key name -> details.file key name branch path)
+  , branchList = \host repo base -> repoOf host repo (\key name -> details.branchList key name base)
+  , tagList = \host repo -> repoOf host repo (\key name -> details.tagList key name)
+  , history = \host repo branch n -> repoOf host repo (\key name -> details.history key name branch n)
   }
   where
     pullOf :: Text -> Text -> Int -> (AccountId -> RepoName -> Number -> IO (Either Text a)) -> IO (Either Text a)

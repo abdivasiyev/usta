@@ -26,6 +26,7 @@ import Usta.DB.Schema.Account (AccountId)
 import Usta.Forge (Failure (..), Forge (..))
 import qualified Usta.Git as Git
 import Usta.Mirrors (Mirrors (..))
+import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Number (Number)
@@ -63,6 +64,12 @@ data Details = Details
     -- ^ Every folder and file on a branch.
   , file :: AccountId -> RepoName -> Text -> Text -> IO (Either Text (From, ByteString))
     -- ^ A file's contents on a branch, by path.
+  , branchList :: AccountId -> RepoName -> Text -> IO (Either Text (From, [Branch]))
+    -- ^ Every branch, most recently pushed first; from the mirror with how
+    -- far each is from the default branch given.
+  , tagList :: AccountId -> RepoName -> IO (Either Text (From, [Tag]))
+  , history :: AccountId -> RepoName -> Text -> Int -> IO (Either Text (From, [Commit]))
+    -- ^ A branch's history, newest first, 50 commits a page from 1.
   }
 
 new :: Settings -> Details
@@ -76,6 +83,10 @@ new settings = Details
   , tree = \key repo branch -> either' key repo (\path -> Git.tree path branch) (\f -> f.tree repo branch)
   , file = \key repo branch name ->
       either' key repo (\path -> BL.toStrict <$> Git.blob path branch name) (\f -> f.file repo branch name)
+  , branchList = \key repo base -> either' key repo (\path -> Git.branches path base) (\f -> f.branchList repo)
+  , tagList = \key repo -> either' key repo Git.tags (\f -> f.tags repo)
+  , history = \key repo branch n ->
+      either' key repo (\path -> Git.page path branch ((n - 1) * 50) 50) (\f -> f.history repo branch n)
   }
   where
     -- A pull request from the mirror needs both its base branch and its own

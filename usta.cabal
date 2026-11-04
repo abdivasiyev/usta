@@ -155,6 +155,7 @@ executable usta
     Usta.UI.Pages.PullRequest.Files
     Usta.UI.Pages.PullRequests
     Usta.UI.Pages.Repositories
+    Usta.UI.Pages.RepositoryActions
     Usta.UI.Pages.RepositoryFiles
     Usta.UI.Pages.Settings
     Usta.UI.Pages.Welcome

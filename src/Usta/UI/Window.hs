@@ -51,6 +51,7 @@ import qualified Usta.UI.Pages.Issues as Issues
 import qualified Usta.UI.Pages.NewIssue as NewIssue
 import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
+import qualified Usta.UI.Pages.RepositoryActions as RepositoryActions
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import qualified Usta.UI.Pages.PullRequest.Commits as Commits
 import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
@@ -397,6 +398,12 @@ buildAt start given app = do
                       c <- clock
                       fmap (map (Issues.fromIssue c r.forge)) <$> source.repoIssues r.host r.name
                 Issues.forRepository synced load (openIssue "Repositories" . issueDetail) >>= Gtk.toWidget
+            }
+        , Repositories.Tab
+            { title = "Actions"
+            , build = do
+                c <- clock
+                RepositoryActions.new c (source.runs r.host r.name) (source.checkLog r.host r.name)
             }
         ]
     }
@@ -955,7 +962,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

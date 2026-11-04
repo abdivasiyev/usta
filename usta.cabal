@@ -97,6 +97,7 @@ executable usta
     Usta.Types.Parse
     Usta.Types.Platform
     Usta.Types.PullRequest
+    Usta.Types.Readiness
     Usta.Types.Ref
     Usta.Types.RepoName
     Usta.Types.Repository

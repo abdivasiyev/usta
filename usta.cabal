@@ -116,6 +116,7 @@ executable usta
     Usta.UI.Components.Card
     Usta.UI.Components.CodeView
     Usta.UI.Components.CommandPalette
+    Usta.UI.Components.CommentCard
     Usta.UI.Components.DiagramView
     Usta.UI.Components.Diff
     Usta.UI.Components.Forge

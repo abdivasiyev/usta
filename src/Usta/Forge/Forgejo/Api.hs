@@ -389,6 +389,8 @@ type CommitsQuery :: Type
 data CommitsQuery = CommitsQuery
   { sha :: Text
     -- ^ The branch or commit to start from.
+  , path :: Maybe Text
+    -- ^ Only the commits that changed this file.
   , page :: Maybe Int
   , limit :: Int
   , stat :: Bool

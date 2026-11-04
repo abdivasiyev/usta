@@ -96,6 +96,7 @@ new now account = do
         , F.tags = \_ -> pure []
         , F.releases = \_ -> pure []
         , F.history = \_ _ _ -> pure []
+        , F.fileHistory = \_ _ _ -> pure []
         , F.react = \_ _ _ _ _ -> refuse
         , F.checkLog = \_ _ -> refuse
         , F.reviewers = \_ _ -> pure []

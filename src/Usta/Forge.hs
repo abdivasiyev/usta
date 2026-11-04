@@ -139,6 +139,8 @@ data Forge = Forge
   , tags :: RepoName -> IO [Tag]
   , releases :: RepoName -> IO [Release]
     -- ^ Newest first.
+  , fileHistory :: RepoName -> Text -> Text -> IO [Commit]
+    -- ^ The last 50 commits on a branch that changed a file, newest first.
   , history :: RepoName -> Text -> Int -> IO [Commit]
     -- ^ A branch's history, newest first, a page of 50 at a time from 1.
   , labels :: RepoName -> IO [Definition]

@@ -12,6 +12,7 @@ module Usta.UI.Window
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, bracket_, try)
 import Control.Monad (forM, forM_, join, void, when)
+import Data.Maybe (fromMaybe)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
@@ -653,10 +654,20 @@ tabContent source reopen fetch summary showState tab = case tab of
     let withThreads = do
           files <- source.pullFiles summary.host summary.repo summary.number
           threads <- source.threads summary.host summary.repo summary.number
+          -- The newest commit, for permalinks to lines.
+          commits <- source.pullCommits summary.host summary.repo summary.number
           me <- maybe "" (.login) . find (\a -> a.host == summary.host) <$> source.accounts
           c <- clock
-          pure ((\f -> (f, either (const (Threads [] Nothing)) id threads, me, c)) <$> files)
-    in loadInto withThreads $ \((from, changes), threads, me, c) ->
+          -- The forge names each file's diff by a digest of its path.
+          hashes <- forM (either (const []) (map (.path) . snd) files) $ \p ->
+            (,) p . fromMaybe "" <$> GLib.computeChecksumForString
+              (if summary.forge == Forge.GitHub then GLib.ChecksumTypeSha256 else GLib.ChecksumTypeSha1) p (-1)
+          let head' = case either (const []) snd commits of
+                [] -> Nothing
+                cs -> Just (unparse (last cs).sha)
+              links = Files.lineLinks summary.forge (pullUrl summary) head' (\p -> fromMaybe "" (lookup p hashes))
+          pure ((\f -> (f, either (const (Threads [] Nothing)) id threads, me, c, links)) <$> files)
+    in loadInto withThreads $ \((from, changes), threads, me, c, links) ->
       Files.new Files.Actions
         { review = source.review summary.host summary.repo summary.number
         , merge = source.merge summary.host summary.repo summary.number Squash True
@@ -666,7 +677,7 @@ tabContent source reopen fetch summary showState tab = case tab of
         , reply = source.reply summary.host summary.repo summary.number
         }
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
-          {Files.threads = threads, Files.me = me}
+          {Files.threads = threads, Files.me = me, Files.links = links}
   PullRequest.Commits ->
     loadInto (source.pullCommits summary.host summary.repo summary.number) $ \(from, commits) -> do
       c <- clock
@@ -824,6 +835,15 @@ issueItem open i = CommandPalette.Item CommandPalette.Issue i.title
 repositoryItem :: IO () -> Repositories.Repository -> CommandPalette.Item
 repositoryItem open r = CommandPalette.Item CommandPalette.Repository r.name
   r.host open
+
+-- | A pull request's page on its forge.
+pullUrl :: PullRequest.Summary -> Text
+pullUrl s = "https://" <> s.host <> "/" <> s.repo <> path <> T.pack (show s.number)
+  where
+    path = case s.forge of
+      Forge.GitHub -> "/pull/"
+      Forge.GitLab -> "/-/merge_requests/"
+      Forge.Forgejo -> "/pulls/"
 
 -- | A tab's title with its count, e.g. "Pull requests  3"; no count for 0.
 counted :: Text -> Int -> Text

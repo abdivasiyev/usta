@@ -8,6 +8,7 @@ module Usta.UI.Pages.PullRequest.Files
   , Actions (..)
   , fromFileDiff
   , fromFileDiffs
+  , lineLinks
   , sample
   , new
   , Fetching (..)
@@ -52,6 +53,7 @@ import Usta.Types.Thread (Threads (..))
 import qualified Usta.Types.Thread as Th
 import Usta.Types.Discussion (Verdict (..))
 import Usta.Forge (LineNote (..))
+import qualified Usta.UI.Components.Forge as Forge
 
 type Model :: Type
 data Model = Model
@@ -74,6 +76,9 @@ data Model = Model
   , images :: [(Text, (Maybe Text, Maybe Text))]
     -- ^ By shown path, the image files changed: their path before (none
     -- when added) and after (none when deleted).
+  , links :: Text -> (Int, Int) -> [(Text, Text)]
+    -- ^ By path, the links to lines of the new version, each with its
+    -- name: the pull request's first, then the permalink.
   }
 
 -- | What the review panel does. Both run off the main thread; a 'Left' is
@@ -152,22 +157,24 @@ new actions m = do
                                     <> " files viewed" ]
 
   -- Notes on lines: the boxes open, and the notes waiting for the review.
-  hovered <- newIORef Nothing
+  keysRef <- newIORef Nothing
   writingRef <- newIORef []
   pendingRef <- newIORef []
   nextPending <- newIORef (0 :: Int)
   pendingChanged <- newIORef (pure ())
   let changed = readIORef pendingChanged >>= id
-      writeOn path number text under = do
+      -- On lines @from@ to @number@; one line when they are the same.
+      writeOn path (from, number) code text under = do
         self <- newIORef Nothing
         let close = do
               readIORef self >>= mapM_ (Gtk.boxRemove under)
               modifyIORef' writingRef (filter (/= (path, number)))
+            noteOf t = LineNote {path = path, line = number, body = Thread.quoteRange from number code t}
         w <- Thread.writer m.me Thread.Writing
-          { path = path, line = number, text = text
+          { path = path, first = from, line = number, code = code, text = text
           , cancel = close
-          , add = \t -> close >> addPending path number t under
-          , now = \t -> actions.review CommentOnly "" [LineNote {path = path, line = number, body = t}]
+          , add = \t -> close >> addPending path (from, number) code t under
+          , now = \t -> actions.review CommentOnly "" [noteOf t]
           , posted = \t -> do
               close
               c <- Thread.pending m.me t (pure ()) (pure ())
@@ -177,7 +184,7 @@ new actions m = do
         writeIORef self (Just w)
         modifyIORef' writingRef ((path, number) :)
         #append under w
-      addPending path number t under = do
+      addPending path (from, number) code t under = do
         i <- readIORef nextPending
         writeIORef nextPending (i + 1)
         self <- newIORef Nothing
@@ -185,16 +192,17 @@ new actions m = do
               readIORef self >>= mapM_ (\c -> Gtk.boxRemove under c.widget)
               modifyIORef' pendingRef (filter ((/= i) . fst))
               changed
-        c <- Thread.pending m.me t (remove >> writeOn path number t under) remove
+        c <- Thread.pending m.me t (remove >> writeOn path (from, number) code t under) remove
         writeIORef self (Just c)
         #append under c.widget
-        modifyIORef' pendingRef (<> [(i, (LineNote {path = path, line = number, body = t}, c))])
+        modifyIORef' pendingRef (<> [(i, (LineNote {path = path, line = number, body = Thread.quoteRange from number code t}, c))])
         changed
       commenting path = Diff.Commenting
-        { start = \number under -> do
+        { start = \(from, number) code under -> do
             open <- elem (path, number) <$> readIORef writingRef
-            unless open $ writeOn path number "" under
-        , hovered = hovered
+            unless open $ writeOn path (from, number) code "" under
+        , links = m.links path
+        , keys = keysRef
         }
 
   placedRef <- newIORef []
@@ -310,8 +318,14 @@ new actions m = do
         when (i >= 0 && i < length placed) $ let (_, _, d) = placed !! i in act d
   shortcut keys "Return" (onCurrent (.toggle))
   shortcut keys "r" (onCurrent (.focusReply))
-  -- c comments on the line under the pointer.
-  shortcut keys "c" (readIORef hovered >>= sequence_)
+  -- On the chosen lines, or the line under the pointer.
+  let onLines act = readIORef keysRef >>= mapM_ act
+  shortcut keys "c" (onLines (.comment))
+  shortcut keys "y" (onLines (\k -> k.copy 0))
+  shortcut keys "<Shift>y" (onLines (\k -> k.copy 1))
+  shortcut keys "<Shift>Down" (onLines (\k -> k.grow 1))
+  shortcut keys "<Shift>Up" (onLines (\k -> k.grow (-1)))
+  shortcut keys "Escape" (onLines (.clear))
   Gtk.widgetAddController columns keys
 
   #append columns scroll
@@ -676,6 +690,21 @@ fromFileDiff f = Diff.File
       D.Insertion {new = n, text = t} -> Added n t
       D.Deletion {old = o, text = t} -> Removed o t
 
+-- | The links to lines @a@ to @b@ of a file: in the pull request at
+-- @pull@ (its page's address), and at the commit @head@ when known.
+-- @hash@ is the path's digest the forge names a file's diff by: SHA-1 on
+-- Forgejo, SHA-256 on GitHub. Forgejo's page links one line, the first.
+lineLinks :: Forge.Kind -> Text -> Maybe Text -> (Text -> Text) -> Text -> (Int, Int) -> [(Text, Text)]
+lineLinks forge pull head' hash path (a, b) =
+  ("Link in this pull request", pull <> "/files#diff-" <> hash path <> "R" <> n a <> (if forge == Forge.GitHub && a /= b then "-R" <> n b else ""))
+    : [ ("Permalink at " <> T.take 7 sha, repo <> (if forge == Forge.GitHub then "/blob/" else "/src/commit/") <> sha <> "/" <> path <> "#L" <> n a <> (if a == b then "" else "-L" <> n b))
+      | Just sha <- [head'] ]
+  where
+    n = T.pack . show
+    -- The repository's page: the pull request's without "/pulls/12".
+    repo = T.intercalate "/" (dropEnd 2 (T.splitOn "/" pull))
+    dropEnd k xs = take (length xs - k) xs
+
 -- | The Files tab for a pull request's changes; @source@ says where they
 -- came from. Review threads, checks and reviewers come with the review.
 fromFileDiffs :: Clock -> Text -> [D.FileDiff] -> Model
@@ -693,6 +722,7 @@ fromFileDiffs c source changes = Model
       [ ((fromFileDiff f).path, (before f, after f))
       | f <- changes, f.binary, isImage f.path
       ]
+  , links = \_ _ -> []
   }
   where
     before f = case f.change of
@@ -739,6 +769,7 @@ sample = Model
   , reviewers = [(Warning, "abdivasiyev", "awaiting")]
   , approvalsNeeded = 1
   , images = []
+  , links = \_ _ -> []
   }
 
 css :: Text

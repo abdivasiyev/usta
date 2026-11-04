@@ -1,28 +1,36 @@
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
 
 -- | A unified diff of one file: a header with the path, counts and a
 -- "Viewed" toggle, then numbered lines colored by kind. Any widget (a
--- review thread, say) can be attached below a line, and a line of the
--- new version can be commented on.
+-- review thread, say) can be attached below a line, and lines of the new
+-- version can be chosen, by dragging down or Shift-clicking their
+-- numbers, to comment on or link to.
 module Usta.UI.Components.Diff
   ( Line (..)
   , File (..)
   , Commenting (..)
+  , Keys (..)
   , new
   , plain
   , css
   ) where
 
-import Control.Monad (forM, forM_, void)
+import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
-import Data.IORef (IORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.Gdk as Gdk
+import qualified GI.GLib as GLib
+import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Highlight as Highlight
 
@@ -42,15 +50,33 @@ data File = File
   , diffLines :: [Line]
   }
 
--- | How a diff lets the user start a note on a line of the new version:
--- a "+" shows by the line under the pointer.
+-- | How a diff lets the user note on lines of the new version, or link to
+-- them: a "+" shows by the line under the pointer, and chosen lines get a
+-- bar with Comment and Copy link.
 type Commenting :: Type
 data Commenting = Commenting
-  { start :: Int -> Gtk.Box -> IO ()
-    -- ^ The line's number in the new version and the box under it,
-    -- which the note is written in.
-  , hovered :: IORef (Maybe (IO ()))
-    -- ^ While the pointer is on such a line, what starting there does.
+  { start :: (Int, Int) -> [Text] -> Gtk.Box -> IO ()
+    -- ^ The first and last line's numbers in the new version, their code,
+    -- and the box under the last one, which the note is written in.
+  , links :: (Int, Int) -> [(Text, Text)]
+    -- ^ The links to those lines, each with its name: the first is Copy
+    -- link's, the second the permalink's.
+  , keys :: IORef (Maybe Keys)
+    -- ^ What the keys do on the diff the pointer is in, or whose lines
+    -- are chosen.
+  }
+
+-- | The keys' work on one diff.
+type Keys :: Type
+data Keys = Keys
+  { comment :: IO ()
+    -- ^ On the chosen lines, or the line under the pointer.
+  , copy :: Int -> IO ()
+    -- ^ Copies the link at that place in 'links'.
+  , grow :: Int -> IO ()
+    -- ^ Moves the chosen range's end down (1) or up (-1) a line; from the
+    -- line under the pointer when none are chosen.
+  , clear :: IO ()
   }
 
 -- | @attached@ pairs a line's index with a widget shown under it.
@@ -75,10 +101,10 @@ build file attached commenting onViewed = do
   label (stat file) ["muted", "small"] >>= #append header
   #append card header
 
-  body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                         , #visible := not file.viewed
-                         ]
-  codes <- forM (zip [0 ..] file.diffLines) $ \(index, line) -> do
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  -- The bar beside chosen lines floats over the diff.
+  bodyOverlay <- GI.new Gtk.Overlay [#child := body, #visible := not file.viewed]
+  rows <- forM (zip3 [0 :: Int ..] file.diffLines (hunks file.diffLines)) $ \(index, line, hunk) -> do
     (row, code) <- lineRow line
     slot <- case (commenting, newSide line) of
       (Just c, Just number) -> do
@@ -88,24 +114,21 @@ build file attached commenting onViewed = do
                                   , #cssClasses := ["comment-plus"] ]
         Gtk.overlayAddOverlay overlay plus
         under <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
-        let begin = c.start number under
-        void $ GI.on plus #clicked begin
-        motion <- Gtk.eventControllerMotionNew
-        void $ GI.on motion #enter $ \_ _ -> GI.set plus [#visible := True] >> writeIORef c.hovered (Just begin)
-        void $ GI.on motion #leave $ GI.set plus [#visible := False] >> writeIORef c.hovered Nothing
-        Gtk.widgetAddController overlay motion
+        void $ GI.on plus #clicked (c.start (number, number) [textOf line] under)
         #append body overlay
-        pure (Just under)
+        pure (Just (overlay, plus, under))
       _ -> Nothing <$ #append body row
     forM_ [w | (i, w) <- attached, i == index] $ \w -> do
       holder <- GI.new Gtk.Box [#cssClasses := ["diff-attached"]]
       #append holder w
       #append body holder
-    mapM_ (#append body) slot
-    pure code
+    forM_ slot $ \(_, _, under) -> #append body under
+    pure Row {index, line, hunk, widget = row, code, slot}
+  forM_ commenting (choosing file.path body bodyOverlay rows)
+  let codes = map (.code) rows
   Highlight.follow card $ \palette ->
     forM_ (zip codes (highlighted palette file)) $ \(code, marked) -> Gtk.labelSetMarkup code marked
-  #append card body
+  #append card bodyOverlay
   setCollapsed card file.viewed
 
   forM_ onViewed $ \report -> do
@@ -117,7 +140,7 @@ build file attached commenting onViewed = do
     #append header check
     void $ GI.on check #toggled $ do
       isViewed <- GI.get check #active
-      GI.set body [#visible := not isViewed]
+      GI.set bodyOverlay [#visible := not isViewed]
       setCollapsed card isViewed
       report isViewed
   pure card
@@ -125,6 +148,164 @@ build file attached commenting onViewed = do
     setCollapsed card collapsed
       | collapsed = Gtk.widgetAddCssClass card "collapsed"
       | otherwise = Gtk.widgetRemoveCssClass card "collapsed"
+
+-- | A drawn line, and where it is in the diff.
+type Row :: Type
+data Row = Row
+  { index :: Int
+  , line :: Line
+  , hunk :: Int
+    -- ^ Which hunk it is in, counting from 0.
+  , widget :: Gtk.Box
+  , code :: Gtk.Label
+  , slot :: Maybe (Gtk.Overlay, Gtk.Button, Gtk.Box)
+    -- ^ For a line of the new version: its overlay, its "+" and the box
+    -- under it.
+  }
+
+-- | Each line's hunk, counting from 0.
+hunks :: [Line] -> [Int]
+hunks = drop 1 . scanl (\n l -> case l of Hunk _ -> n + 1; _ -> n) (-1)
+
+-- | Choosing lines: a press on the numbers chooses that line, Shift
+-- extends from the first chosen one, and dragging down the numbers grows
+-- the range. A range stays in one hunk and holds the new version's lines
+-- in it. The bar beside it comments on it or copies a link.
+choosing :: Text -> Gtk.Box -> Gtk.Overlay -> [Row] -> Commenting -> IO ()
+choosing path body overlay rows c = do
+  picked <- newIORef Nothing
+  hoveredRow <- newIORef Nothing
+  bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal, #spacing := 2, #visible := False
+                        , #halign := Gtk.AlignEnd, #valign := Gtk.AlignStart, #marginEnd := 12
+                        , #cssClasses := ["range-bar"] ]
+  which <- label "" ["muted", "small", "which"]
+  commentButton <- GI.new Gtk.Button [#label := "+ Comment", #tooltipText := "Comment on these lines (c)", #cssClasses := ["comment"]]
+  copyButton <- GI.new Gtk.Button [#label := "Copy link", #tooltipText := "Copy the link to these lines (y)", #cssClasses := ["flat"]]
+  menuItems <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["menu"]]
+  menu <- GI.new Gtk.Popover [#child := menuItems, #hasArrow := False, #cssClasses := ["u-range-links"]]
+  more <- GI.new Gtk.MenuButton [#popover := menu, #iconName := "pan-down-symbolic", #tooltipText := "More links", #cssClasses := ["flat"]]
+  mapM_ (#append bar) =<< sequence [Gtk.toWidget which, Gtk.toWidget commentButton, Gtk.toWidget copyButton, Gtk.toWidget more]
+  Gtk.overlayAddOverlay overlay bar
+
+  let newRows = [r | r <- rows, isJust r.slot]
+      numberOf r = maybe 0 id (newSide r.line)
+      chosen = readIORef picked >>= \case
+        Nothing -> pure []
+        Just (a, b) -> pure [r | r <- newRows, r.index >= min a b, r.index <= max a b]
+      ends rs = case rs of
+        [] -> Nothing
+        first : _ -> Just (numberOf first, numberOf (last rs))
+      draw = do
+        rs <- chosen
+        forM_ newRows $ \r -> Gtk.widgetRemoveCssClass r.widget "picked"
+        forM_ rs $ \r -> Gtk.widgetAddCssClass r.widget "picked"
+        case (rs, ends rs) of
+          (first : _, Just (a, b)) -> do
+            GI.set which [#label := if a == b then "Line " <> number a else "Lines " <> number a <> "–" <> number b]
+            fillMenu (a, b)
+            -- Beside the first chosen line.
+            origin <- Graphene.newZeroPoint
+            (found, at) <- Gtk.widgetComputePoint first.widget body origin
+            y <- Graphene.getPointY at
+            when found $ GI.set bar [#marginTop := max 0 (round y - 4)]
+            GI.set bar [#visible := True]
+          _ -> GI.set bar [#visible := False]
+      -- The forge's links, then the lines as a Markdown quote.
+      allLinks rs range@(a, b) = c.links range <>
+        [("Copy as Markdown quote", "> " <> path <> (if a == b then " line " <> number a else " lines " <> number a <> "–" <> number b)
+            <> "\n> ```\n" <> T.concat ["> " <> textOf r.line <> "\n" | r <- rs] <> "> ```\n")]
+      fillMenu range = do
+        rs' <- chosen
+        let clearMenu = Gtk.widgetGetFirstChild menuItems >>= mapM_ (\w -> Gtk.boxRemove menuItems w >> clearMenu)
+        clearMenu
+        forM_ (zip [0 :: Int ..] (allLinks rs' range)) $ \(i, (name, link)) -> do
+          item <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2]
+          label name [] >>= #append item
+          shown <- label link ["muted", "small", "mono"]
+          GI.set shown [#ellipsize := Pango.EllipsizeModeMiddle, #maxWidthChars := 48]
+          #append item shown
+          b <- GI.new Gtk.Button [#child := item, #cssClasses := ["item"]]
+          void $ GI.on b #clicked (Gtk.popoverPopdown menu >> copyAt i)
+          #append menuItems b
+      copyAt i = do
+        rs <- chosen
+        forM_ (ends rs) $ \range -> forM_ (lookup i (zip [0 ..] (allLinks rs range))) $ \(_, link) -> do
+          clipboard <- Gtk.widgetGetClipboard body
+          provider <- GI.toGValue (Just link) >>= Gdk.contentProviderNewForValue
+          void (Gdk.clipboardSetContent clipboard (Just provider))
+          -- "Link copied" for a moment, in place of which lines.
+          before <- GI.get which #label
+          GI.set which [#label := "Link copied"]
+          void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 1500 (GI.set which [#label := before] >> pure False)
+      commentOn = do
+        rs <- chosen
+        case (rs, ends rs) of
+          (_ : _, Just range) | Just (_, _, under) <- (last rs).slot -> do
+            writeIORef picked Nothing
+            draw
+            c.start range (map (textOf . (.line)) rs) under
+          _ -> readIORef hoveredRow >>= mapM_ (\r -> forM_ r.slot $ \(_, _, under) ->
+            c.start (numberOf r, numberOf r) [textOf r.line] under)
+      -- Within the anchor's hunk, on a line of the new version.
+      extendTo r = readIORef picked >>= \case
+        Just (a, _) | Just anchor <- lookup a [(x.index, x) | x <- rows], anchor.hunk == r.hunk ->
+          writeIORef picked (Just (a, r.index)) >> draw
+        _ -> writeIORef picked (Just (r.index, r.index)) >> draw
+      -- With none chosen, the line under the pointer is chosen first.
+      grow by = readIORef picked >>= \case
+        Just (_, b) -> case [r | r <- (if by > 0 then id else reverse) newRows, if by > 0 then r.index > b else r.index < b] of
+          r : _ -> extendTo r
+          [] -> pure ()
+        Nothing -> readIORef hoveredRow >>= mapM_ (\r -> writeIORef picked (Just (r.index, r.index)) >> draw)
+      keys = Keys {comment = commentOn, copy = copyAt, grow, clear = writeIORef picked Nothing >> draw}
+      rowAt y = do
+        found <- filterM' (\r -> do
+          origin <- Graphene.newZeroPoint
+          (ok, at) <- Gtk.widgetComputePoint r.widget body origin
+          top <- Graphene.getPointY at
+          h <- fromIntegral <$> Gtk.widgetGetHeight r.widget
+          pure (ok && realToFrac y >= top && realToFrac y < top + h)) newRows
+        pure (case found of r : _ -> Just r; [] -> Nothing)
+
+  void $ GI.on commentButton #clicked commentOn
+  void $ GI.on copyButton #clicked (copyAt 0)
+
+  -- Pressing and dragging on the line numbers; the text keeps its own
+  -- selection. The handlers reach the gesture as ?self: once added, the
+  -- widget owns it.
+  drag <- Gtk.gestureDragNew
+  startY <- newIORef 0
+  void $ GI.on drag #dragBegin $ \x y ->
+    if x > numbersWidth
+      then void (Gtk.gestureSetState ?self Gtk.EventSequenceStateDenied)
+      else do
+        writeIORef startY y
+        state <- Gtk.eventControllerGetCurrentEventState ?self
+        rowAt y >>= mapM_ (\r ->
+          if Gdk.ModifierTypeShiftMask `elem` state then extendTo r
+          else writeIORef picked (Just (r.index, r.index)) >> draw)
+        writeIORef c.keys (Just keys)
+  void $ GI.on drag #dragUpdate $ \_ dy -> do
+    y0 <- readIORef startY
+    rowAt (y0 + dy) >>= mapM_ extendTo
+  Gtk.widgetAddController body drag
+
+  -- The "+" and the keys follow the pointer.
+  forM_ newRows $ \r -> forM_ r.slot $ \(o, plus, _) -> do
+    motion <- Gtk.eventControllerMotionNew
+    void $ GI.on motion #enter $ \_ _ -> do
+      GI.set plus [#visible := True]
+      writeIORef hoveredRow (Just r)
+      writeIORef c.keys (Just keys)
+    void $ GI.on motion #leave $ GI.set plus [#visible := False] >> writeIORef hoveredRow Nothing
+    Gtk.widgetAddController o motion
+  where
+    number = T.pack . show
+    filterM' p = foldr (\x acc -> p x >>= \keep -> (if keep then (x :) else id) <$> acc) (pure [])
+
+-- | Where the line numbers and sign end: two gutters and the sign column.
+numbersWidth :: Double
+numbersWidth = 108
 
 stat :: File -> Text
 stat file = "+" <> count isAdded <> " −" <> count isRemoved
@@ -154,11 +335,14 @@ highlighted palette file
       Context _ _ t -> Just t
       Added _ t -> Just t
       Removed _ t -> Just t
-    textOf line = case line of
-      Hunk t -> t
-      Context _ _ t -> t
-      Added _ t -> t
-      Removed _ t -> t
+
+-- | A line's text, without its sign.
+textOf :: Line -> Text
+textOf line = case line of
+  Hunk t -> t
+  Context _ _ t -> t
+  Added _ t -> t
+  Removed _ t -> t
 
 -- | A line's number in the new version, for a line that is there.
 newSide :: Line -> Maybe Int
@@ -222,6 +406,14 @@ css = mconcat
   , "box.u-diff box.diff-attached { padding: 8px 12px 8px 108px; background: var(--surface); }"
   -- The holder already indents what it holds.
   , "box.u-diff box.diff-attached > box.u-thread { margin: 0; }"
+  , "box.u-diff box.diff-line.picked { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }"
+  , "box.u-diff box.range-bar { padding: 3px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface); box-shadow: 0 6px 18px rgba(27,29,33,0.14); }"
+  , "box.u-diff box.range-bar label.which { padding: 0 8px; }"
+  , "box.u-diff box.range-bar button { min-height: 28px; padding: 0 10px; font-size: 13px; }"
+  , "box.u-diff box.range-bar button.comment { background: var(--accent); color: var(--on-accent); font-weight: 600; border: none; }"
+  , "popover.u-range-links > contents { padding: 4px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
+  , "popover.u-range-links button.item { padding: 6px 10px; border: none; box-shadow: none; background: transparent; background-image: none; }"
+  , "popover.u-range-links button.item:hover { background: var(--border-subtle); }"
   , "box.u-diff button.comment-plus { min-width: 18px; min-height: 18px; margin-left: 14px; padding: 0; border-radius: 4px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 12px; }"
   , "box.u-diff > box:last-child { border-radius: 0 0 8px 8px; }"
   , "box.u-diff.collapsed box.diff-header { border-bottom: none; border-radius: 8px; }"

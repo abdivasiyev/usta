@@ -12,6 +12,8 @@ module Usta.UI.Components.Thread
   , new
   , Writing (..)
   , writer
+  , quoteRange
+  , ranged
   , Card (..)
   , pending
   , css
@@ -77,6 +79,18 @@ new s = do
       fresh n = unparse n.author /= s.me && maybe True (< n.createdAt) s.lastReviewed
       anyNew = any fresh notes
       count = T.pack (show (length notes)) <> (if length notes == 1 then " comment" else " comments")
+      -- A note on several lines from a forge that takes one opens with
+      -- them quoted: shown as the range, without the quote.
+      range = ranged . (.body) =<< headOf notes
+      bodies = case range of
+        Just (_, _, rest) -> rest : map (.body) (drop 1 notes)
+        Nothing -> map (.body) notes
+      where' = case range of
+        Just (from, _, _) -> "lines " <> lines' from s.thread.line
+        Nothing -> "line " <> T.pack (show s.thread.line)
+      replaced = case range of
+        Just (_, code, _) -> code
+        Nothing -> [T.drop 1 l | l <- take 1 (reverse s.thread.code)]
 
   -- The one-line bar a resolved thread starts as, and any thread folds to.
   bar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["bar"]]
@@ -87,7 +101,7 @@ new s = do
     else do
       Badge.dot Warning >>= #append bar
       label "Open" ["open", "strong"] >>= #append bar
-  snippet <- label (maybe "" (\n -> unparse n.author <> ": “" <> firstLine n.body <> "”") (headOf notes)) ["muted"]
+  snippet <- label (maybe "" (\(n, b) -> unparse n.author <> ": “" <> firstLine b <> "”") (headOf (zip notes bodies))) ["muted"]
   GI.set snippet [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd]
   #append bar snippet
   label count ["muted"] >>= #append bar
@@ -102,13 +116,13 @@ new s = do
   if s.outdated
     then do
       Badge.new Neutral "Outdated" >>= #append top
-      label ("was on line " <> T.pack (show s.thread.line) <> " in " <> s.thread.commit) ["muted"] >>= #append top
+      label ("was on " <> where' <> " in " <> s.thread.commit) ["muted"] >>= #append top
     else if resolved'
       then label ("✓ Resolved by " <> maybe "someone" unparse s.thread.resolvedBy) ["tick", "strong"] >>= #append top
       else do
         Badge.dot Warning >>= #append top
         label "Open" ["open", "strong"] >>= #append top
-        label ("· line " <> T.pack (show s.thread.line) <> " · " <> count) ["muted"] >>= #append top
+        label ("· " <> where' <> " · " <> count) ["muted"] >>= #append top
   spacer <- GI.new Gtk.Box [#hexpand := True]
   #append top spacer
   forge <- GI.new Gtk.Button [ #label := if resolved' then "Unresolve on the forge" else "Resolve on the forge"
@@ -147,11 +161,11 @@ new s = do
         label ("· " <> when'') ["muted"] >>= #append top'
         when isFresh $ Badge.new Accent "New" >>= #append top'
         #append column top'
-        -- A suggestion replaces the line the thread is on.
-        Markdown.suggesting [T.drop 1 l | l <- take 1 (reverse s.thread.code)] body >>= #append column
+        -- A suggestion replaces the lines the thread is on.
+        Markdown.suggesting replaced body >>= #append column
         #append row column
         #append noteBox row
-  forM_ notes $ \n -> addNote (unparse n.author) (ago s.clock n.createdAt) (fresh n) n.body
+  forM_ (zip notes bodies) $ \(n, b) -> addNote (unparse n.author) (ago s.clock n.createdAt) (fresh n) b
   #append whole noteBox
 
   -- A reply goes to the forge, then shows here at once.
@@ -210,8 +224,12 @@ new s = do
 type Writing :: Type
 data Writing = Writing
   { path :: Text
+  , first :: Int
   , line :: Int
-    -- ^ In the file as the pull request leaves it.
+    -- ^ The first and last line it is on, in the file as the pull
+    -- request leaves it; the same for one line.
+  , code :: [Text]
+    -- ^ Those lines' code, for Suggest a change.
   , text :: Text
     -- ^ What the box starts with: empty, or a pending note being edited.
   , cancel :: IO ()
@@ -224,14 +242,42 @@ data Writing = Writing
     -- ^ Comment now worked.
   }
 
+-- | "213–215".
+lines' :: Int -> Int -> Text
+lines' a b = T.pack (show a) <> "–" <> T.pack (show b)
+
+-- | A note on lines @a@ to @b@ for a forge that takes one line: it opens
+-- with the lines quoted, which reads right on the forge's page, and
+-- 'ranged' reads back.
+quoteRange :: Int -> Int -> [Text] -> Text -> Text
+quoteRange a b code text
+  | a == b = text
+  | otherwise = "Lines " <> lines' a b <> ":\n```\n" <> T.unlines code <> "```\n\n" <> text
+
+-- | The first line, the code and the rest of a note 'quoteRange' made.
+ranged :: Text -> Maybe (Int, [Text], Text)
+ranged body = case T.lines body of
+  heading : "```" : rest
+    | Just numbers <- T.stripSuffix ":" =<< T.stripPrefix "Lines " heading
+    , (a, b) <- T.breakOn "–" numbers
+    , [(from, "")] <- reads (T.unpack a)
+    , [(_ :: Int, "")] <- reads (T.unpack (T.drop 1 b))
+    , (code, "```" : after) <- break (== "```") rest ->
+        Just (from, code, T.strip (T.unlines after))
+  _ -> Nothing
+
 -- | The box a new note on a line is written in, with the cursor in it.
 writer :: Text -> Writing -> IO Gtk.Widget
 writer me w = do
   frame <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-line-comment", "writing"]]
   top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["top"]]
   Avatar.new 24 (T.toUpper (T.take 2 me)) >>= #append top
-  label ("Comment on line " <> T.pack (show w.line)) ["strong"] >>= #append top
-  label w.path ["mono", "muted", "small"] >>= #append top
+  label (if w.first == w.line then "Comment on line " <> T.pack (show w.line) else "Comment on lines " <> lines' w.first w.line) ["strong"] >>= #append top
+  pathLabel <- label w.path ["mono", "muted", "small"]
+  GI.set pathLabel [#hexpand := True, #ellipsize := Pango.EllipsizeModeStart]
+  #append top pathLabel
+  suggest <- GI.new Gtk.Button [#label := "± Suggest a change", #tooltipText := "Puts the code into a suggestion to edit", #cssClasses := ["flat", "suggest"]]
+  #append top suggest
   #append frame top
 
   editor <- GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
@@ -245,13 +291,17 @@ writer me w = do
   buffer <- Gtk.textViewGetBuffer editor
   Gtk.textBufferSetText buffer w.text (-1)
   #append frame editor
+  void $ GI.on suggest #clicked $ do
+    Gtk.textBufferInsertAtCursor buffer ("```suggestion\n" <> T.unlines w.code <> "```\n") (-1)
+    void (Gtk.widgetGrabFocus editor)
 
   problem <- label "" ["problem"]
   GI.set problem [#visible := False, #wrap := True]
   #append frame problem
 
   bottom <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["bottom"]]
-  hint <- label "Markdown" ["muted", "small"]
+  hint <- label (if w.first == w.line then "Markdown" else "Markdown · it goes on line " <> T.pack (show w.line) <> ", opening with lines " <> lines' w.first w.line <> " quoted") ["muted", "small"]
+  GI.set hint [#ellipsize := Pango.EllipsizeModeEnd]
   GI.set hint [#hexpand := True]
   #append bottom hint
   cancelButton <- Button.new Button.defaults {Button.label = Just "Cancel", Button.variant = Button.Flat}

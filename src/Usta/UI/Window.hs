@@ -53,6 +53,7 @@ import qualified Usta.UI.Pages.NewIssue as NewIssue
 import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.RepositoryActions as RepositoryActions
+import qualified Usta.UI.Pages.RepositoryCommits as RepositoryCommits
 import qualified Usta.UI.Components.SidePanel as SidePanel
 import qualified Usta.UI.Components.BranchPicker as BranchPicker
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
@@ -389,6 +390,17 @@ buildAt start given app = do
     , tags = \r -> fmap snd <$> source.tagList r.host r.name
     , tabs = \r ->
         [ Repositories.Tab
+            { followsBranch = True
+            , title = "Commits"
+            , build = do
+                c <- clock
+                RepositoryCommits.new c RepositoryCommits.Actions
+                  { branch = r.defaultBranch
+                  , page = \n -> fmap snd <$> source.history r.host r.name r.defaultBranch n
+                  , changes = \x -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff r.host r.name x.sha
+                  }
+            }
+        , Repositories.Tab
             { followsBranch = False
             , title = counted "Pull requests" r.pullRequests
             , build = do
@@ -994,7 +1006,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

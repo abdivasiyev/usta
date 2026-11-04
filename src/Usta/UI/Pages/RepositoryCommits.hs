@@ -1,0 +1,186 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedLabels #-}
+
+-- | A repository's Commits tab: the chosen branch's history by day, newest
+-- first, 50 at a time, with a box that filters by message or author. A
+-- commit opens its diff in place; Back returns to the list where it was.
+module Usta.UI.Pages.RepositoryCommits
+  ( Actions (..)
+  , new
+  , css
+  ) where
+
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
+import Control.Monad (forM_, unless, void, when)
+import qualified Data.GI.Base as GI
+import Data.GI.Base (AttrOp ((:=)))
+import qualified Data.GI.Base.GValue as GValue
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
+import Data.List (groupBy)
+import Data.Function (on)
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Time (addDays, localDay, utcToLocalTime)
+import qualified GI.Gdk as Gdk
+import qualified GI.GLib as GLib
+import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
+
+import qualified Usta.UI.Components.Avatar as Avatar
+import Usta.UI.Components.CommandPalette (shortcut)
+import qualified Usta.UI.Components.Diff as Diff
+import Usta.UI.Format (Clock (..), ago, date)
+import Usta.Types.Commit (Commit (..))
+import Usta.Types.Parse (unparse)
+
+type Actions :: Type
+data Actions = Actions
+  { branch :: Text
+  , page :: Int -> IO (Either Text [Commit])
+    -- ^ The history's page, from 1, 50 commits each; off the main thread.
+  , changes :: Commit -> IO (Either Text [Diff.File])
+    -- ^ A commit's changes against its first parent; off the main thread.
+  }
+
+new :: Clock -> Actions -> IO Gtk.Widget
+new c a = do
+  stack <- GI.new Gtk.Stack [#vexpand := True, #hexpand := True, #cssClasses := ["u-repo-commits"]]
+  page' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["history"]]
+  top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
+  said <- label ("History of " <> a.branch) ["muted", "small"]
+  GI.set said [#hexpand := True]
+  #append top said
+  filterBox <- GI.new Gtk.SearchEntry [#placeholderText := "Filter by message or author", #widthRequest := 260]
+  #append top filterBox
+  #append page' top
+  groups <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
+  #append page' groups
+  more <- GI.new Gtk.Button [#label := "Load more", #halign := Gtk.AlignCenter, #visible := False, #cssClasses := ["more"]]
+  #append page' more
+  listScroll <- GI.new Gtk.ScrolledWindow [#child := page', #hscrollbarPolicy := Gtk.PolicyTypeNever, #vexpand := True]
+  void $ Gtk.stackAddNamed stack listScroll (Just "list")
+  detail <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #cssClasses := ["detail"]]
+  detailScroll <- GI.new Gtk.ScrolledWindow [#child := detail, #hscrollbarPolicy := Gtk.PolicyTypeNever, #vexpand := True]
+  void $ Gtk.stackAddNamed stack detailScroll (Just "commit")
+
+  loaded <- newIORef []
+  nextPage <- newIORef (1 :: Int)
+  selected <- newIORef Nothing
+  let clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
+      dayOf t = localDay (utcToLocalTime c.zone t)
+      today = dayOf c.now
+      dayName t
+        | dayOf t == today = "Today"
+        | dayOf t == addDays (-1) today = "Yesterday"
+        | otherwise = date c t
+      draw = do
+        clear groups
+        q <- T.toLower <$> Gtk.editableGetText filterBox
+        commits <- readIORef loaded
+        let shown = [x | x <- commits, T.null q || q `T.isInfixOf` T.toLower (x.subject <> " " <> x.author)]
+        when (null shown && not (null commits)) $ label "No commit matches." ["muted"] >>= #append groups
+        forM_ (groupBy ((==) `on` (dayOf . (.authoredAt))) shown) $ \day -> do
+          forM_ (take 1 day) $ \first -> label (dayName first.authoredAt) ["day"] >>= #append groups
+          list <- GI.new Gtk.ListBox [#selectionMode := Gtk.SelectionModeSingle, #cssClasses := ["u-card", "commits"]]
+          forM_ day $ \x -> commitRow c x >>= #append list
+          void $ GI.on list #rowActivated $ \row -> do
+            i <- Gtk.listBoxRowGetIndex row
+            when (i >= 0 && fromIntegral i < length day) $ open (day !! fromIntegral i)
+          void $ GI.on list #rowSelected $ \row -> forM_ row $ \r -> do
+            i <- Gtk.listBoxRowGetIndex r
+            when (i >= 0 && fromIntegral i < length day) $ writeIORef selected (Just (day !! fromIntegral i))
+          #append groups list
+      load = do
+        n <- readIORef nextPage
+        GI.set more [#sensitive := False, #label := "Loading…"]
+        void $ forkIO $ do
+          result <- try (a.page n)
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            case result of
+              Right (Right commits) -> do
+                modifyIORef' loaded (<> commits)
+                writeIORef nextPage (n + 1)
+                GI.set more [#visible := length commits == 50, #sensitive := True, #label := "Load more"]
+                draw
+              Right (Left problem) -> failed problem
+              Left (e :: SomeException) -> failed (T.pack (show e))
+            pure False
+      failed problem = do
+        GI.set more [#visible := False]
+        label problem ["muted"] >>= #append groups
+      open x = do
+        clear detail
+        back <- GI.new Gtk.Button [#label := "← Commits", #halign := Gtk.AlignStart, #cssClasses := ["flat", "back"]]
+        void $ GI.on back #clicked (Gtk.stackSetVisibleChildName stack "list")
+        #append detail back
+        head' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #cssClasses := ["u-card", "commit-head"]]
+        subject <- label x.subject ["subject"]
+        GI.set subject [#wrap := True, #selectable := True]
+        #append head' subject
+        unless (T.null x.body) $ label x.body ["body"] >>= \b -> GI.set b [#wrap := True, #selectable := True] >> #append head' b
+        label (x.author <> " committed " <> ago c x.authoredAt <> " · " <> unparse x.sha) ["muted", "small", "mono"] >>= \l ->
+          GI.set l [#selectable := True] >> #append head' l
+        #append detail head'
+        files <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12]
+        label "Loading the changes…" ["muted"] >>= #append files
+        #append detail files
+        Gtk.stackSetVisibleChildName stack "commit"
+        void $ forkIO $ do
+          result <- try (a.changes x)
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            clear files
+            case result of
+              Right (Right fs) -> forM_ fs $ \f -> Diff.plain f >>= #append files
+              Right (Left problem) -> label problem ["muted"] >>= #append files
+              Left (e :: SomeException) -> label (T.pack (show e)) ["muted"] >>= #append files
+            pure False
+  void $ GI.on filterBox #searchChanged draw
+  void $ GI.on more #clicked load
+
+  -- Enter opens the chosen commit, y copies its hash, Esc goes back.
+  keys <- GI.new Gtk.ShortcutController []
+  shortcut keys "Return" (readIORef selected >>= mapM_ open)
+  shortcut keys "y" $ readIORef selected >>= mapM_ (\x -> do
+    clipboard <- Gtk.widgetGetClipboard stack
+    value <- GValue.toGValue (Just (unparse x.sha))
+    provider <- Gdk.contentProviderNewForValue value
+    void (Gdk.clipboardSetContent clipboard (Just provider)))
+  shortcut keys "Escape" (Gtk.stackSetVisibleChildName stack "list")
+  Gtk.widgetAddController stack keys
+
+  label "Loading the history…" ["muted"] >>= #append groups
+  load
+  Gtk.toWidget stack
+
+commitRow :: Clock -> Commit -> IO Gtk.Box
+commitRow c x = do
+  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["commit"]]
+  Avatar.new 24 (T.toUpper (T.take 2 x.author)) >>= #append row
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #hexpand := True]
+  subject <- label x.subject ["subject"]
+  GI.set subject [#ellipsize := Pango.EllipsizeModeEnd]
+  #append body subject
+  label (x.author <> " committed " <> ago c x.authoredAt) ["muted", "small"] >>= #append body
+  #append row body
+  label (T.take 7 (unparse x.sha)) ["mono", "hash"] >>= #append row
+  pure row
+
+label :: Text -> [Text] -> IO Gtk.Label
+label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
+
+css :: Text
+css = mconcat
+  [ "stack.u-repo-commits box.history, stack.u-repo-commits box.detail { padding: 14px 20px; }"
+  , "stack.u-repo-commits label.day { padding: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }"
+  , "stack.u-repo-commits list.commits { background: transparent; border-radius: 8px; }"
+  , "stack.u-repo-commits list.commits row { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); }"
+  , "stack.u-repo-commits list.commits row:last-child { border-bottom: none; }"
+  , "stack.u-repo-commits list.commits row:selected { background: var(--accent-bg); }"
+  , "stack.u-repo-commits label.subject { font-weight: 500; }"
+  , "stack.u-repo-commits label.small { font-size: 12px; }"
+  , "stack.u-repo-commits label.hash { color: var(--accent); font-size: 12px; }"
+  , "stack.u-repo-commits box.commit-head { padding: 14px; }"
+  , "stack.u-repo-commits box.commit-head label.subject { font-size: 16px; font-weight: 600; }"
+  ]

@@ -48,10 +48,10 @@ parseLink raw = case T.splitOn "/" rest of
       _ -> Just (RepositoryAt host repo)
     a <|> b = maybe b Just a
 
--- | "pull request #41, Files tab", for the Settings' "Try a link".
+-- | "pull request #41", for the Settings' "Try a link".
 describe :: Target -> Text
 describe = \case
-  PullAt {number, files} -> "pull request #" <> n number <> if files then ", Files tab" else ", Conversation tab"
+  PullAt {number} -> "pull request #" <> n number
   IssueAt {number} -> "issue #" <> n number
   FileAt {repo, path, line} -> path <> maybe "" ((" line " <>) . n) line <> " in " <> repo
   RepositoryAt {repo} -> "the repository " <> repo

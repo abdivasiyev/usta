@@ -19,6 +19,7 @@ module Usta.UI.Components.Markdown
   , newIn
   , newAt
   , suggesting
+  , openLinksWith
   , slug
   , css
   ) where
@@ -28,6 +29,7 @@ import Control.Monad (forM_, void, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import System.IO.Unsafe (unsafePerformIO)
 import CMarkGFM (ListAttributes (..), ListType (..), Node (..), NodeType (..), TableCellAlignment (..), commonmarkToNode, extAutolink, extStrikethrough, extTable)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -263,12 +265,22 @@ text' doc markup classes = do
   links doc l
   Gtk.toWidget l
 
--- | A label's links with a scheme (https:, mailto:) open as GTK opens
--- them; the others go to the document's 'Follow'.
+-- | What every text's links with a scheme go to first: True when it
+-- opened one, as usta opens a forge's; otherwise GTK opens it.
+forgeLinks :: IORef (Text -> IO Bool)
+forgeLinks = unsafePerformIO (newIORef (const (pure False)))
+{-# NOINLINE forgeLinks #-}
+
+-- | Set once by the window, which knows the forges.
+openLinksWith :: (Text -> IO Bool) -> IO ()
+openLinksWith = writeIORef forgeLinks
+
+-- | A label's links with a scheme (https:, mailto:) go to 'forgeLinks',
+-- else open as GTK opens them; the others go to the document's 'Follow'.
 links :: Doc -> Gtk.Label -> IO ()
 links doc l = void $ GI.on l #activateLink $ \uri -> case T.stripPrefix "#" uri of
   Just name -> jump doc name >> pure True
-  Nothing | hasScheme uri -> pure False
+  Nothing | hasScheme uri -> readIORef forgeLinks >>= \handled -> handled uri
           | otherwise -> doc.follow uri >> pure True
   where
     hasScheme u = case T.breakOn ":" u of

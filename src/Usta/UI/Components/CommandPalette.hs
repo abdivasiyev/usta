@@ -49,6 +49,8 @@ data Model = Model
     -- ^ Everything searchable, commands included.
   , search :: Text -> IO [Item]
     -- ^ The forges' own search, closed ones too; off the main thread.
+  , link :: Text -> Maybe Item
+    -- ^ A pasted forge link, opened in usta.
   }
 
 -- | What was typed, parsed once: an optional kind prefix and the search term.
@@ -156,7 +158,7 @@ new content model = do
   Gtk.widgetAddCssClass footer "footer"
   #append palette footer
 
-  current <- newIORef (Model [] [] (const (pure [])))
+  current <- newIORef (Model [] [] (const (pure [])) (const Nothing))
   -- The forges' answer for a term, and the search waiting to start.
   remote <- newIORef ("", Nothing :: Maybe [Item])
   pending <- newIORef Nothing
@@ -176,15 +178,15 @@ new content model = do
         Gtk.listBoxRemoveAll list
         let Query typed term = parseQuery text
             kind = typed <|> selected
-            searchesForges = T.length term >= 3 && kind /= Just Command
+            searchesForges = T.length term >= 3 && kind /= Just Command && null (m.link (T.strip text))
         (asked, answer) <- readIORef remote
         let forgeSection
               | not searchesForges = []
               | asked /= term = [("On the forges · searching…", [])]
               | otherwise = case answer of
                   Nothing -> [("On the forges · searching…", [])]
-                  Just found -> [("On the forges", [i | i <- found, maybe True (== i.kind) kind, (i.title, i.detail) `notElem` cached])]
-            local = sections selected (parseQuery text) m
+                  Just found -> [("On the forges", xs) | let xs = [i | i <- found, maybe True (== i.kind) kind, (i.title, i.detail) `notElem` cached], not (null xs)]
+            local = [("Link", [i]) | Just i <- [m.link (T.strip text)]] <> sections selected (parseQuery text) m
             cached = [(i.title, i.detail) | (_, xs) <- local, i <- xs]
         rows <- fmap concat $ forM (local <> forgeSection) $ \(name, xs) -> do
           header <- GI.new Gtk.ListBoxRow [ #selectable := False

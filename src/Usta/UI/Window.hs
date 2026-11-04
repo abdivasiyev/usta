@@ -98,6 +98,8 @@ import qualified Usta.Forge as Forge
 import qualified Usta.Types.Search as Search
 import qualified Usta.Types.Link as Link
 import qualified Usta.Waiting as Waiting
+import qualified Usta.Log as Log
+import qualified Usta.UI.Pages.ReportProblem as ReportProblem
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
 import qualified Usta.Sync as Sync
 import Data.Containers.ListUtils (nubOrd)
@@ -122,13 +124,14 @@ build :: Source -> Gtk.Application -> IO Gtk.ApplicationWindow
 build = buildAt Ready
 
 buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildAt start = buildOpening start Nothing
+buildAt start = buildOpening start False Nothing
 
 -- | The pages show @source@'s lists, reload the ones that change, and
 -- reload all of them each minute so "5 min ago" stays true.
--- | Opens @link@, a forge link given on the command line, once built.
-buildOpening :: Start -> Maybe Text -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildOpening start link given app = do
+-- | Opens @link@, a forge link given on the command line, once built;
+-- @crashed@ when the last run did not end on its own.
+buildOpening :: Start -> Bool -> Maybe Text -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
+buildOpening start crashed link given app = do
   -- The Files tab's side panels, kept as left from one pull request to
   -- the next.
   panels <- Files.newPanels
@@ -179,7 +182,8 @@ buildOpening start link given app = do
         void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 400 $ do
           Gtk.stackGetChildByName screens old >>= mapM_ (Gtk.stackRemove screens)
           pure False
-      openPullRequestWith fetch backLabel summary =
+      openPullRequestWith fetch backLabel summary = do
+        Log.say "ui" ("open " <> summary.host <> "/" <> summary.repo <> " pull request #" <> T.pack (show summary.number))
         PullRequest.new backLabel backToMain (source.editTitle summary.host summary.repo summary.number)
           (Issue.Watch (source.watching summary.host summary.repo summary.number) (source.setWatching summary.host summary.repo summary.number))
           (checkOutFor summary)
@@ -226,6 +230,7 @@ buildOpening start link given app = do
       openNewPullRequest = openNewPullRequestIn Nothing
       -- The header shows at once; the thread loads from the forge under it.
       openIssue backLabel model = do
+        Log.say "ui" ("open " <> model.host <> "/" <> model.repo <> " issue #" <> T.pack (show model.number))
         let (h, r, n) = (model.host, model.repo, model.number)
             refresh = openIssue backLabel model
             actionsFor d goals me c = Issue.Actions
@@ -584,6 +589,12 @@ buildOpening start link given app = do
   -- Signing in or out changes the lists and the accounts at once.
   source.onChange $ \resource -> reload resource >> drawSyncChip >> drawFooter
   source.onStatus $ \status -> do
+    case status.state of
+      Sync.Failed f -> do
+        accounts <- source.accounts
+        let host = maybe "an account" (.host) (find ((== status.accountId) . (.accountId)) accounts)
+        Log.say "sync" (host <> " failed: " <> T.pack (show f))
+      _ -> pure ()
     modifyIORef' states (\known -> (status.accountId, status.state) : filter ((/= status.accountId) . fst) known)
     drawSyncChip
     drawSidebar
@@ -625,6 +636,9 @@ buildOpening start link given app = do
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
   #append root activity
+  when crashed $ do
+    anchor <- Gtk.toWidget root
+    ReportProblem.banner (ReportProblem.open anchor "usta quit unexpectedly") >>= #append root
   #append root screens
   #append root footerSlot
 
@@ -679,6 +693,7 @@ buildOpening start link given app = do
               , command "New issue" (keys "Shift I") openNewIssue
               , command "Add forge account" "" openAddAccount
               , command "Open settings" (keys ",") openSettings
+              , command "Report a problem" "" (Gtk.toWidget screens >>= \w -> ReportProblem.open w "")
               , command themeTitle "" $ do
                   chosen <- source.preferences
                   applyTheme nextTheme
@@ -1152,7 +1167,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
-  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, Skeleton.css, Progress.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, ReportProblem.css, Skeleton.css, Progress.css
   , windowCss
   ]
 

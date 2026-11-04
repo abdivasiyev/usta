@@ -4,6 +4,9 @@
 
 module Main (main) where
 
+import Control.Exception (SomeException, displayException, handle, throwIO)
+import GHC.Conc (setUncaughtExceptionHandler)
+import qualified Usta.Log as Log
 import Network.HTTP.Client (Manager)
 import qualified Usta.OAuth as OAuth
 import Usta.Types.Host (Host)
@@ -109,7 +112,12 @@ cache = do
     let link = case [a | a <- args, isJust (Link.parseLink (T.pack a))] of
           a : _ -> Just (T.pack a)
           [] -> Nothing
-    runApp (void . Window.buildOpening start link source)
+    crashed <- Log.start
+    -- An error no one caught goes to the log, from any thread.
+    setUncaughtExceptionHandler (\e -> Log.say "error" (T.pack (displayException e)))
+    handle (\(e :: SomeException) -> Log.say "error" (T.pack (displayException e)) >> throwIO e) $
+      runApp (void . Window.buildOpening start crashed link source)
+    Log.stop
 
 -- | Two sample accounts in a fresh cache file, synced each minute. Every
 -- 90 seconds the sample forges change and sync runs at once, so the pages

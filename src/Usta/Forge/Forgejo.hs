@@ -40,7 +40,7 @@ import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import Usta.Types.Diff (parseDiff)
-import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..))
+import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..), Verdict (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
@@ -100,7 +100,7 @@ forgejo manager base host token = do
     , merge = \repo n how delete ->
         () <$ run client (Api.api.merge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete})
     , review = \repo n verdict text ->
-        () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview {verdict = verdict, body = text})
+        () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview {verdict = verdict, body = text, lines = []})
     , createIssue = \repo new -> do
         ids <- labelIds client repo new.labels
         created <- run client $ Api.api.createIssue (owner repo) (shortName repo) Api.CreateIssue
@@ -146,6 +146,9 @@ forgejo manager base host token = do
         said <- concat <$> traverse (\r -> run client (Api.api.reviewComments (owner repo) (shortName repo) n r.id)) [r | r <- given, r.comments > 0]
         let mine = [t | r <- given, Just u <- [r.user], u.login == login, Just t <- [r.submittedAt]]
         pure Th.Threads {threads = threadsOf said, lastReviewed = if null mine then Nothing else Just (maximum mine)}
+    -- Forgejo has no reply to a thread; a comment on the same line joins it.
+    , reply = \repo n t text -> () <$ run client (Api.api.review (owner repo) (shortName repo) n
+        Api.NewReview {verdict = CommentOnly, body = "", lines = [Api.LineComment {path = t.path, line = t.line, body = text}]})
     , recentCommits = \repo branch -> map (.commit) <$> run client
         (Api.api.commits (owner repo) (shortName repo)
           Api.CommitsQuery {sha = branch, limit = 10, stat = False, verification = False, files = False})

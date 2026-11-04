@@ -49,6 +49,7 @@ module Usta.Forge.Forgejo.Api
   , Branch (..)
   , Review (..)
   , ReviewComment (..)
+  , LineComment (..)
   , CombinedStatus (..)
   ) where
 
@@ -440,6 +441,8 @@ type NewReview :: Type
 data NewReview = NewReview
   { verdict :: Verdict
   , body :: Text
+  , lines :: [LineComment]
+    -- ^ Comments on lines of the diff, with the review.
   }
 
 instance ToJSON NewReview where
@@ -449,7 +452,20 @@ instance ToJSON NewReview where
         RequestChanges -> "REQUEST_CHANGES"
         CommentOnly -> "COMMENT"
     , "body" .= r.body
+    , "comments" .= r.lines
     ]
+
+-- | A comment on one line of a file in the diff, by its line in the new
+-- file.
+type LineComment :: Type
+data LineComment = LineComment
+  { path :: Text
+  , line :: Int
+  , body :: Text
+  }
+
+instance ToJSON LineComment where
+  toJSON c = object ["path" .= c.path, "new_position" .= c.line, "body" .= c.body]
 
 -- | Labels go by id; the adapter finds them by name first.
 type CreateIssue :: Type

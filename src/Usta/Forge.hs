@@ -25,7 +25,7 @@ import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (PullRequest)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Repository (Repository)
-import Usta.Types.Thread (Threads)
+import Usta.Types.Thread (Thread, Threads)
 import Usta.Types.ThreadId (ThreadId)
 
 -- | Each list takes what sync already has of it, and answers
@@ -49,6 +49,8 @@ data Forge = Forge
     -- ^ Its commits, oldest first.
   , threads :: RepoName -> Number -> IO Threads
     -- ^ Its review conversations, and when the user last reviewed it.
+  , reply :: RepoName -> Number -> Thread -> Text -> IO ()
+    -- ^ Adds a note to a thread.
   , recentCommits :: RepoName -> Text -> IO [Commit]
     -- ^ The last commits on a branch, newest first.
   , readme :: RepoName -> Text -> IO (Maybe (Text, Text))

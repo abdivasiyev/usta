@@ -74,6 +74,9 @@ data Details = Details
     -- ^ A branch's history, newest first, 50 commits a page from 1.
   , changes :: AccountId -> RepoName -> Text -> Maybe UTCTime -> IO (Either Text [Change])
     -- ^ Each commit's size on a branch since a time; the mirror only.
+  , checkOut :: AccountId -> RepoName -> Number -> FilePath -> Text -> Text -> IO (Either Text ())
+    -- ^ A pull request in a worktree of the mirror, at a folder on a local
+    -- branch tracking its branch; fetches the mirror first.
   , blame :: AccountId -> RepoName -> Text -> Text -> IO (Either Text [Blamed])
     -- ^ A file on a branch, line by line with the last commit; the mirror only.
   , fileHistory :: AccountId -> RepoName -> Text -> Text -> IO (Either Text (From, [Commit]))
@@ -97,6 +100,9 @@ new settings = Details
   , branchList = \key repo base -> either' key repo (\path -> Git.branches path base) (\f -> f.branchList repo)
   , tagList = \key repo -> either' key repo Git.tags (\f -> f.tags repo)
   , changes = \key repo branch since -> mirrorOnly key repo (\path -> Git.changes path branch since)
+  , checkOut = \key repo n dir local upstream -> mirrorFor "A worktree needs the local mirror. Mirror this repository first, or check out a separate clone." key repo $ \path -> do
+      Git.fetch path
+      Git.worktree path dir local ("refs/pull/" <> T.pack (show (unparse n)) <> "/head") upstream
   , blame = \key repo branch file -> mirrorFor "Blame is read from a local mirror. Mirror this repository from its Overview to see it." key repo (\path -> Git.blame path branch file)
   , fileHistory = \key repo branch file -> either' key repo (\path -> Git.fileLog path branch file 50) (\f -> f.fileHistory repo branch file)
   , graph = \key repo scope firstParent n -> mirrorOnly key repo (\path -> Git.graph path scope firstParent ((n - 1) * 100) 100)

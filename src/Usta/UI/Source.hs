@@ -47,6 +47,7 @@ import Usta.Mirrors (Mirrors (..))
 import Usta.Preferences (Preferences (..))
 import qualified Usta.Preferences as Preferences
 import qualified Usta.Mirrors as Mirrors
+import qualified Usta.Git as Git
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
@@ -202,6 +203,11 @@ data Source = Source
     -- ^ By host, repository, branch and page, from 1.
   , changes :: Text -> Text -> Text -> Maybe UTCTime -> IO (Either Text [Insights.Change])
   , graph :: Text -> Text -> [Text] -> Bool -> Int -> IO (Either Text [Insights.Node])
+  , checkOut :: Text -> Text -> Int -> FilePath -> Text -> Text -> IO (Either Text ())
+    -- ^ By host, repository and number: a worktree of the mirror at a
+    -- folder, on a local branch tracking the pull request's branch.
+  , cloneTo :: Text -> FilePath -> Text -> Text -> IO (Either Text ())
+    -- ^ A clone of a url at a folder on a branch, named locally.
   , blame :: Text -> Text -> Text -> Text -> IO (Either Text [Insights.Blamed])
     -- ^ By host, repository, branch and path.
   , fileHistory :: Text -> Text -> Text -> Text -> IO (Either Text (From, [Commit]))
@@ -336,6 +342,8 @@ fromDatabase pool changes statuses sync = Source
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
   , blame = \_ _ _ _ -> pure (Left unavailable)
+  , checkOut = \_ _ _ _ _ _ -> pure (Left unavailable)
+  , cloneTo = \_ _ _ _ -> pure (Left unavailable)
   , fileHistory = \_ _ _ _ -> pure (Left unavailable)
   }
   where
@@ -424,6 +432,8 @@ samples = Source
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
   , blame = \_ _ _ _ -> pure (Left unavailable)
+  , checkOut = \_ _ _ _ _ _ -> pure (Left unavailable)
+  , cloneTo = \_ _ _ _ -> pure (Left unavailable)
   , fileHistory = \_ _ _ _ -> pure (Left unavailable)
   }
 
@@ -653,6 +663,8 @@ tracking track s = s
   , changes = \h r b t -> track (s.changes h r b t)
   , graph = \h r b f n -> track (s.graph h r b f n)
   , blame = \h r b p -> track (s.blame h r b p)
+  , checkOut = \h r n d l u -> track (s.checkOut h r n d l u)
+  , cloneTo = \u d b l -> track (s.cloneTo u d b l)
   , fileHistory = \h r b p -> track (s.fileHistory h r b p)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors
@@ -675,6 +687,8 @@ withDetails pool details source = source
   , changes = \host repo branch since -> repoOf host repo (\key name -> details.changes key name branch since)
   , graph = \host repo scope firstParent n -> repoOf host repo (\key name -> details.graph key name scope firstParent n)
   , blame = \host repo branch file -> repoOf host repo (\key name -> details.blame key name branch file)
+  , checkOut = \host repo n dir local upstream -> pullOf host repo n (\key name number -> details.checkOut key name number dir local upstream)
+  , cloneTo = \url dir branch local -> either (\(e :: SomeException) -> Left (T.pack (displayException e))) Right <$> try (Git.cloneBranch url dir branch local)
   , fileHistory = \host repo branch file -> repoOf host repo (\key name -> details.fileHistory key name branch file)
   }
   where

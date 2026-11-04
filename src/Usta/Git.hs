@@ -18,6 +18,8 @@ module Usta.Git
   , GitError (..)
   , clone
   , fetch
+  , worktree
+  , cloneBranch
   , resolve
   , diff
   , history
@@ -36,7 +38,7 @@ module Usta.Git
   ) where
 
 import Control.Exception (Exception, SomeException, throwIO, try)
-import Control.Monad (forM)
+import Control.Monad (forM, when)
 import qualified Data.ByteString.Lazy as BL
 import Data.Char (toLower)
 import Data.Kind (Type)
@@ -115,6 +117,22 @@ clone kind url path = do
 -- | Brings a mirror up to date, dropping refs the forge no longer has.
 fetch :: FilePath -> IO ()
 fetch path = () <$ git ["-C", path, "fetch", "--prune", "--quiet", "origin"]
+
+-- | A worktree of the mirror at @dir@ on a new branch @local@, made from
+-- @ref@ (such as "refs/pull/3/head"), tracking @upstream@ on the forge,
+-- so a push from it updates the pull request's branch.
+worktree :: FilePath -> FilePath -> Text -> Text -> Text -> IO ()
+worktree mirror dir local ref upstream = do
+  _ <- git ["-C", mirror, "worktree", "add", "-b", T.unpack local, "--", dir, T.unpack ref]
+  _ <- git ["-C", dir, "config", "branch." <> T.unpack local <> ".remote", "origin"]
+  () <$ git ["-C", dir, "config", "branch." <> T.unpack local <> ".merge", "refs/heads/" <> T.unpack upstream]
+
+-- | A clone of @url@ at @dir@ on @branch@, named @local@ there.
+cloneBranch :: Text -> FilePath -> Text -> Text -> IO ()
+cloneBranch url dir branch local = do
+  createDirectoryIfMissing True (takeDirectory dir)
+  _ <- git ["clone", "--quiet", "--branch", T.unpack branch, "--", T.unpack url, dir]
+  when (local /= branch) $ () <$ git ["-C", dir, "branch", "-m", T.unpack branch, T.unpack local]
 
 -- | The commit a ref names, such as "refs/pull/3/head" or "master";
 -- 'Nothing' when the mirror has no such ref.

@@ -46,6 +46,7 @@ import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
 import qualified Usta.Types.Label as L
+import Usta.Types.Milestone (Milestone (..))
 import Usta.Types.Login (Login)
 import qualified Usta.Types.Notification as N
 import Usta.Types.Number (Number)
@@ -127,6 +128,20 @@ forgejo manager base host token = do
     , setLabels = \repo n names -> do
         ids <- labelIds client repo names
         () <$ run client (Api.api.setIssueLabels (owner repo) (shortName repo) n Api.LabelIds {labels = ids})
+    , assignable = \repo -> do
+        people <- run client (Api.api.assignees (owner repo) (shortName repo))
+        pure [Rv.Candidate {who = Rv.Person p.login, about = p.fullName, changed = [], lastChanged = Nothing, members = Nothing} | p <- people]
+    , setAssignees = \repo n logins ->
+        () <$ run client (Api.api.setAssignees (owner repo) (shortName repo) n Api.AssigneesEdit {assignees = logins})
+    , milestones = \repo -> map (.milestone) . sortOn dueOrder <$> milestonesOf client repo
+    , setMilestone = \repo n title -> do
+        known <- milestonesOf client repo
+        target <- case title of
+          Nothing -> pure 0
+          Just t -> case [m.id | m <- known, m.milestone.title == t] of
+            found : _ -> pure found
+            [] -> throwIO (Refused ("The repository has no milestone " <> t <> "."))
+        () <$ run client (Api.api.setMilestone (owner repo) (shortName repo) n Api.MilestoneEdit {milestone = target})
     , createLabel = \repo d ->
         () <$ run client (Api.api.createLabel (owner repo) (shortName repo) Api.NewLabel {name = d.name, color = d.color, description = d.description})
     , tree = \repo ref -> do
@@ -241,6 +256,14 @@ authorization token = "token " <> encodeUtf8 (unparse token)
 repoLabels :: Client -> RepoName -> IO [Api.RepoLabel]
 repoLabels client repo = run client
   (everyPage (\page limit -> Api.api.labels (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+
+milestonesOf :: Client -> RepoName -> IO [Api.ApiMilestone]
+milestonesOf client repo = run client
+  (everyPage (\page limit -> Api.api.milestones (owner repo) (shortName repo) Api.MilestoneQuery {state = "all", page = page, limit = limit}))
+
+-- | Open ones first, those due soonest first, those without a date last.
+dueOrder :: Api.ApiMilestone -> (Bool, Bool, Maybe UTCTime, Text)
+dueOrder m = (not m.milestone.open, m.milestone.due == Nothing, m.milestone.due, m.milestone.title)
 
 -- | The ids of the labels named; a name the repository lacks is refused.
 labelIds :: Client -> RepoName -> [Text] -> IO [Int64]

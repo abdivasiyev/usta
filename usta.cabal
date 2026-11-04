@@ -124,6 +124,7 @@ executable usta
     Usta.UI.Components.Progress
     Usta.UI.Components.SearchField
     Usta.UI.Components.Segmented
+    Usta.UI.Components.Shortcodes
     Usta.UI.Components.Shortcut
     Usta.UI.Components.Skeleton
     Usta.UI.Components.Thread
@@ -162,6 +163,7 @@ executable usta
     cmark-gfm,
     containers,
     directory,
+    emojis,
     esqueleto,
     filepath,
     gi-cairo,

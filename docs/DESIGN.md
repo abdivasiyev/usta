@@ -198,8 +198,14 @@ Dark screens use the same layouts with the dark token values.
 
    ![Diff options](design/diff-options.png)
 
-10. **Checks.** Check runs on the left; log viewer on the right with
-    failing lines highlighted; re-run and copy log.
+10. **Checks.** The checks on the latest commit on the left, failures
+    first; the selected one's log on the right, read from the forge when
+    it is selected, numbered, with step lines and failing lines marked,
+    and Copy log. Open in browser shows the job on the forge, where it can
+    be run again. A skipped or waiting job says so instead of a log, and a
+    check from another service links its own page. Forgejo serves the
+    logs of a private repository's jobs only to the browser, so there
+    usta says that and offers Open in browser.
 
     ![Pull request checks](design/pull-request-checks.png)
 

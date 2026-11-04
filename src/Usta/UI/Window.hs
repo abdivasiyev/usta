@@ -603,9 +603,13 @@ tabContent source reopen fetch summary showState tab = case tab of
             Right sha -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff summary.host summary.repo sha
       Commits.new (said from "history from the local mirror" "history from the forge's API") changesOf
         (map (Commits.fromCommit c) commits)
-  PullRequest.Checks -> Checks.new $ case summary.checks of
-    Just (Danger, _) -> Checks.failing
-    _ -> Checks.passing
+  PullRequest.Checks ->
+    loadInto (source.checks summary.host summary.repo summary.number) $ \found ->
+      Checks.new Checks.Model
+        { provider = if summary.forge == Forge.Forgejo then "Forgejo Actions" else "Checks"
+        , checks = found
+        , logOf = source.checkLog summary.host summary.repo
+        }
 
 -- | The sidebar's pages that list notifications.
 inboxViews :: [(Sidebar.Page, Inbox.View)]

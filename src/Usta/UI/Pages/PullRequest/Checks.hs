@@ -1,284 +1,248 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
 
--- | The Checks tab of a pull request: the check runs on the left and the
--- selected run's log on the right.
+-- | The Checks tab of a pull request: the checks on its latest commit on
+-- the left and the selected one's log on the right, read from the forge
+-- when it is selected.
 module Usta.UI.Pages.PullRequest.Checks
-  ( Status (..)
-  , LogLine (..)
-  , Run (..)
+  ( LogLine (..)
   , Model (..)
-  , passing
-  , failing
+  , parseLog
   , new
   , css
   ) where
 
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (forM, forM_, void)
+import Data.Char (isDigit)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
-import Data.List (findIndex)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.Gdk as Gdk
+import qualified GI.Gio as Gio
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
 import Usta.UI.Style (Tone (..))
+import Usta.Types.Check (Check (..), Job, State (..))
 
-type Status :: Type
-data Status = Passed | Failed | Skipped
-  deriving (Eq, Show, Enum, Bounded)
-
--- | One line of a run's output.
+-- | One line of a job's log.
 type LogLine :: Type
 data LogLine
   = Step Text
-    -- ^ The start of a step, e.g. "▸ nix flake check".
+    -- ^ The start of a step, e.g. "nix flake check".
   | Output Text
   | Failure Text
     -- ^ A line that is part of the error.
   | Note Text
-    -- ^ Quiet output, e.g. the exit code.
-
-type Run :: Type
-data Run = Run
-  { name :: Text
-  , status :: Status
-  , duration :: Text
-  , output :: [LogLine]
-  }
+    -- ^ The runner's own lines, e.g. "Job failed".
+  deriving stock (Eq, Show)
 
 type Model :: Type
 data Model = Model
   { provider :: Text
-    -- ^ Where the runs come from, e.g. "Forgejo Actions".
-  , runs :: [Run]
+    -- ^ Where the checks come from, e.g. "Forgejo Actions".
+  , checks :: [Check]
+  , logOf :: Job -> IO (Either Text Text)
   }
 
 new :: Model -> IO Gtk.Widget
-new m = do
-  columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                            , #cssClasses := ["u-checks"]
-                            ]
-  side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                         , #widthRequest := 280
-                         , #hexpand := False
-                         , #cssClasses := ["runs"]
-                         ]
-  heading <- Card.sectionTitle m.provider
-  Gtk.widgetAddCssClass heading "provider"
-  #append side heading
-  #append columns side
-
-  detail <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                           , #hexpand := True
-                           , #cssClasses := ["run-detail"]
+new m = case m.checks of
+  [] -> do
+    w <- label "No checks ran on the latest commit." ["muted"]
+    GI.set w [#marginTop := 24, #marginStart := 24]
+    Gtk.toWidget w
+  _ -> do
+    columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                              , #cssClasses := ["u-checks"]
+                              ]
+    side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                           , #widthRequest := 280
+                           , #hexpand := False
+                           , #cssClasses := ["runs"]
                            ]
-  #append columns detail
+    heading <- Card.sectionTitle m.provider
+    Gtk.widgetAddCssClass heading "provider"
+    #append side heading
+    #append columns side
 
-  rows <- forM m.runs $ \run -> do
-    button <- runRow run
-    #append side button
-    pure (run, button)
+    detail <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                             , #hexpand := True
+                             , #cssClasses := ["run-detail"]
+                             ]
+    #append columns detail
 
-  let select run = do
-        forM_ rows $ \(other, button) ->
-          if other.name == run.name
-            then Gtk.widgetAddCssClass button "selected"
-            else Gtk.widgetRemoveCssClass button "selected"
-        old <- Gtk.widgetGetFirstChild detail
-        forM_ old $ Gtk.boxRemove detail
-        runDetail run >>= #append detail
-  forM_ rows $ \(run, button) -> void $ GI.on button #clicked (select run)
+    rows <- forM m.checks $ \check -> do
+      button <- checkRow check
+      #append side button
+      pure (check, button)
 
-  -- Open on the first failure, since that is what needs attention.
-  case filter ((== Failed) . (.status)) m.runs <> m.runs of
-    run : _ -> select run
-    [] -> pure ()
-  Gtk.toWidget columns
+    let select check = do
+          forM_ rows $ \(other, button) ->
+            if other.name == check.name
+              then Gtk.widgetAddCssClass button "selected"
+              else Gtk.widgetRemoveCssClass button "selected"
+          old <- Gtk.widgetGetFirstChild detail
+          forM_ old $ Gtk.boxRemove detail
+          checkDetail m check >>= #append detail
+    forM_ rows $ \(check, button) -> void $ GI.on button #clicked (select check)
 
-runRow :: Run -> IO Gtk.Button
-runRow run = do
+    -- Open on the first failure, since that is what needs attention.
+    case filter ((== Failed) . (.state)) m.checks <> m.checks of
+      check : _ -> select check
+      [] -> pure ()
+    Gtk.toWidget columns
+
+checkRow :: Check -> IO Gtk.Button
+checkRow check = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
-  statusIcon run >>= #append content
-  title <- label run.name ["mono"]
-  GI.set title [#hexpand := True]
+  stateIcon check.state >>= #append content
+  title <- label check.name ["mono"]
+  GI.set title [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd]
   #append content title
-  label (if run.status == Skipped then "Skipped" else run.duration) ["muted", "small"]
-    >>= #append content
+  label (shortState check) ["muted", "small"] >>= #append content
   GI.new Gtk.Button [ #child := content
                     , #hasFrame := False
-                    , #cssClasses := ["run", statusClass run.status]
+                    , #tooltipText := check.description
+                    , #cssClasses := ["run", stateClass check.state]
                     ]
 
-statusIcon :: Run -> IO Gtk.Image
-statusIcon run = case run.status of
+-- | What a row says on its right: how long a finished check took, as its
+-- description ends ("Successful in 48s"), or where it is.
+shortState :: Check -> Text
+shortState check = case check.state of
+  Skipped -> "Skipped"
+  Waiting -> "Waiting"
+  Running -> "Running"
+  _ -> case reverse (T.words check.description) of
+    d : _ | T.any isDigit (T.take 1 d), T.all (\c -> isDigit c || c `elem` ("hms" :: String)) d -> d
+    _ -> ""
+
+stateIcon :: State -> IO Gtk.Image
+stateIcon state = case state of
   Passed -> Icon.toned 16 Success Icon.Check
   Failed -> Icon.toned 16 Danger Icon.Cross
   Skipped -> Icon.toned 16 Neutral Icon.Skipped
+  Waiting -> Icon.toned 16 Neutral Icon.Skipped
+  Running -> Icon.toned 16 Warning Icon.Skipped
 
-statusClass :: Status -> Text
-statusClass = T.toLower . T.pack . show
+stateClass :: State -> Text
+stateClass = T.toLower . T.pack . show
 
-runDetail :: Run -> IO Gtk.Box
-runDetail run = do
+checkDetail :: Model -> Check -> IO Gtk.Box
+checkDetail m check = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #vexpand := True]
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
-  title <- label run.name ["mono", "run-title"]
+  title <- label check.name ["mono", "run-title"]
   GI.set title [#hexpand := True]
   #append header title
-  summary <- label (summaryText run) ["small", statusClass run.status]
+  summary <- label check.description ["small", stateClass check.state]
   #append header summary
-  Button.new Button.defaults { Button.label = Just "Copy log" } >>= #append header
-  Button.new Button.defaults { Button.label = Just "Re-run job", Button.variant = Button.Primary }
-    >>= #append header
+  copy <- Button.new Button.defaults { Button.label = Just "Copy log" }
+  GI.set copy [#visible := False]
+  #append header copy
+  forM_ check.url $ \url -> do
+    open <- Button.new Button.defaults { Button.label = Just "Open in browser", Button.variant = Button.Primary }
+    GI.set open [#tooltipText := "Its page on the forge, where it can be run again"]
+    void $ GI.on open #clicked (openUri url)
+    #append header open
   #append box header
-  logView run.output >>= #append box
+
+  let say text = label text ["muted"] >>= \l -> GI.set l [#wrap := True] >> #append box l
+  case (check.state, check.job) of
+    (Skipped, _) -> say "This job was skipped, so it has no log."
+    (Waiting, _) -> say "This job has not started yet."
+    (_, Nothing) -> say "This check runs outside the forge; its details are on its own page."
+    (_, Just job) -> do
+      waiting <- label "Loading the log…" ["muted"]
+      #append box waiting
+      void $ forkIO $ do
+        got <- try (m.logOf job)
+        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+          Gtk.boxRemove box waiting
+          case got of
+            Right (Right raw) -> do
+              let ls = parseLog (check.state == Failed) raw
+              logView ls >>= #append box
+              GI.set copy [#visible := True]
+              void $ GI.on copy #clicked $ do
+                clipboard <- Gtk.widgetGetClipboard copy
+                provider <- GI.toGValue (Just (T.unlines (map body ls))) >>= Gdk.contentProviderNewForValue
+                void (Gdk.clipboardSetContent clipboard (Just provider))
+            Right (Left _) -> say unreadable
+            Left (_ :: SomeException) -> say unreadable
+          pure False
   pure box
-
--- | "Failed on step 3 of 4", counted from the step markers in the log.
-summaryText :: Run -> Text
-summaryText run = case run.status of
-  Passed -> "Passed in " <> run.duration
-  Skipped -> "Skipped"
-  Failed -> case findIndex isFailure run.output of
-    Nothing -> "Failed"
-    Just at ->
-      let failedStep = length (filter isStep (take at run.output))
-      in "Failed on step " <> T.pack (show failedStep) <> " of " <> T.pack (show totalSteps)
   where
-    totalSteps = length (filter isStep run.output)
-    isStep (Step _) = True
-    isStep _ = False
-    isFailure (Failure _) = True
-    isFailure _ = False
+    unreadable = "usta could not read this job's log. Forgejo shows the logs of a private repository's jobs only in the browser; Open in browser shows it there."
 
--- | A dark, numbered log. Steps are highlighted, error lines marked.
---
--- Each step is a section that opens and closes from its header. Steps
--- that failed start open, the rest closed. Line numbers count every line,
--- so they stay the same whichever steps are open.
+openUri :: Text -> IO ()
+openUri url = do
+  launcher <- Gtk.uriLauncherNew (Just url)
+  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+
+-- | A job's log as Forgejo gives it: each line after its time, steps as
+-- "⭐ Run Main <name>", and the runner's own lines. In a failed job, lines
+-- that speak of an error are marked.
+parseLog :: Bool -> Text -> [LogLine]
+parseLog failed raw = map (classify . untimed) (T.lines raw)
+  where
+    untimed line = case T.breakOn " " line of
+      (t, rest) | isTime t -> T.drop 1 rest
+      _ -> line
+    isTime t = T.length t >= 20 && "Z" `T.isSuffixOf` t && T.all (\c -> isDigit c || c `elem` ("-:.TZ" :: String)) t
+    classify l
+      | Just step <- T.stripPrefix "⭐ Run " l = Step (dropPhase step)
+      | any (`T.isPrefixOf` l) ["🏁", "Job '"] || "received task" `T.isInfixOf` l || l == "workflow prepared" = Note l
+      | failed && any (`T.isInfixOf` T.toLower l) ["error", "fail", "fatal", "panic", "exception"] = Failure l
+      | otherwise = Output l
+    dropPhase step = case T.breakOn " " step of
+      (phase, rest) | phase `elem` ["Main", "Pre", "Post"] -> T.drop 1 rest
+      _ -> step
+
+body :: LogLine -> Text
+body l = case l of
+  Step t -> t
+  Output t -> t
+  Failure t -> t
+  Note t -> t
+
+-- | A dark, numbered log, steps in their own color and error lines
+-- marked. Forgejo marks only some steps in a log, so none fold away.
 logView :: [LogLine] -> IO Gtk.ScrolledWindow
 logView ls = do
   lines' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-log"]]
-  let (before, steps) = sections (zip [1 :: Int ..] ls)
-  forM_ before $ \(n, l) -> logLine n l >>= #append lines'
-  forM_ steps $ \((n, title), stepLines) -> do
-    let failed = any (isFailure . snd) stepLines
-    content <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                              , #visible := failed
-                              ]
-    forM_ stepLines $ \(m, l) -> logLine m l >>= #append content
-
-    arrow <- label (if failed then "▾" else "▸") ["log-arrow"]
-    header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
-    number n >>= #append header
-    #append header arrow
-    stepTitle <- label title ["log-text"]
-    GI.set stepTitle [#hexpand := True]
-    #append header stepTitle
-    button <- GI.new Gtk.Button [ #child := header
-                                , #hasFrame := False
-                                , #cssClasses := ["log-step"] <> ["failed" | failed]
-                                ]
-    void $ GI.on button #clicked $ do
-      open <- GI.get content #visible
-      GI.set content [#visible := not open]
-      GI.set arrow [#label := if open then "▸" else "▾"]
-    #append lines' button
-    #append lines' content
+  forM_ (zip [1 :: Int ..] ls) $ \(n, l) -> do
+    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["log-line", kind l]]
+    GI.new Gtk.Label [ #label := T.pack (show n), #xalign := 1, #widthRequest := 48
+                     , #cssClasses := ["log-number"] ] >>= #append row
+    text <- label (marked l) ["log-text"]
+    GI.set text [#selectable := True, #hexpand := True]
+    #append row text
+    #append lines' row
   GI.new Gtk.ScrolledWindow [ #child := lines'
                             , #vexpand := True
                             , #cssClasses := ["log-scroll"]
                             ]
   where
-    logLine n l = do
-      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["log-line", kind l]]
-      number n >>= #append row
-      text <- label (body l) ["log-text"]
-      GI.set text [#selectable := True, #hexpand := True]
-      #append row text
-      pure row
-    number n = GI.new Gtk.Label [ #label := T.pack (show n)
-                                , #xalign := 1
-                                , #widthRequest := 48
-                                , #cssClasses := ["log-number"]
-                                ]
-    isFailure (Failure _) = True
-    isFailure _ = False
     kind l = case l of
       Step _ -> "step"
       Output _ -> "out"
       Failure _ -> "failure"
       Note _ -> "note"
-    body l = case l of
-      Step t -> t
-      Output t -> t
-      Failure t -> t
-      Note t -> t
-
--- | Lines before the first step, then each step's numbered title with the
--- lines that belong to it.
-sections :: [(Int, LogLine)] -> ([(Int, LogLine)], [((Int, Text), [(Int, LogLine)])])
-sections numbered = (before, go rest)
-  where
-    (before, rest) = break (isStep . snd) numbered
-    go ((n, Step title) : more) =
-      let (body, next) = break (isStep . snd) more
-      in ((n, title), body) : go next
-    go _ = []
-    isStep (Step _) = True
-    isStep _ = False
+    marked l = case l of
+      Step t -> "▸ " <> t
+      _ -> body l
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
-
--- | Runs for a pull request whose checks passed.
-passing :: Model
-passing = Model "Forgejo Actions"
-  [ Run "nix build" Passed "3m 24s"
-      [ Step "Checkout"
-      , Output "  Fetched feat/gtk4-dep at e1c90fa"
-      , Step "Install Nix"
-      , Output "  nix (Nix) 2.31.2"
-      , Step "nix build"
-      , Output "  building '/nix/store/…-usta-0.1.0.0.drv'..."
-      , Output "  usta> [1 of 2] Compiling Main"
-      , Output "  usta> [2 of 2] Linking dist/build/usta/usta"
-      , Note "  Process exited with code 0"
-      ]
-  ]
-
--- | Runs for a pull request whose checks failed.
-failing :: Model
-failing = Model "Forgejo Actions"
-  [ Run "nix flake check" Failed "48s"
-      [ Step "Checkout"
-      , Output "  Fetched cache-priorities at 3f2a9d1"
-      , Step "Install Nix"
-      , Output "  nix (Nix) 2.31.2"
-      , Step "nix flake check"
-      , Output "  evaluating flake..."
-      , Output "  checking NixOS configuration 'homelab'..."
-      , Failure "  error:"
-      , Failure "         … while evaluating the option `nix.settings.substituters'"
-      , Failure "         error: A definition for option `nix.settings.substituters'"
-      , Failure "         is not of type `list of string'."
-      , Failure "         Definition value: \"https://cache.nixos.org?priority=1\""
-      , Failure "         defined in `modules/cache.nix', line 7"
-      , Step "Upload results"
-      , Note "  Process exited with code 1"
-      ]
-  , Run "nixfmt" Passed "6s"
-      [ Step "nixfmt --check ."
-      , Output "  All files are formatted."
-      , Note "  Process exited with code 0"
-      ]
-  , Run "deploy (dry run)" Skipped "" []
-  ]
 
 css :: Text
 css = mconcat
@@ -299,6 +263,8 @@ css = mconcat
   , "box.u-checks label.run-title { font-size: 16px; font-weight: 600; }"
   , "box.u-checks label.failed { color: var(--danger); font-weight: 500; }"
   , "box.u-checks label.passed { color: var(--success); font-weight: 500; }"
+  , "box.u-checks label.running { color: var(--warning); font-weight: 500; }"
+  , "box.u-checks button.run.waiting { color: var(--text-muted); }"
   -- The log stays dark in both themes, like a terminal.
   , "box.u-checks scrolledwindow.log-scroll { border-radius: 10px; background: #16181C; }"
   , "box.u-log { padding: 12px 0; background: #16181C; }"
@@ -308,12 +274,4 @@ css = mconcat
   , "box.u-log box.log-line.step { color: #8AB4F8; }"
   , "box.u-log box.log-line.failure { background: #3A1D1D; color: #F6B4AC; }"
   , "box.u-log box.log-line.note { color: #9AA0A9; }"
-  , "box.u-log button.log-step {"
-  , "  min-height: 0; padding: 0; border: none; border-radius: 0; box-shadow: none;"
-  , "  background: transparent; background-image: none;"
-  , "  font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 400; color: #8AB4F8;"
-  , "}"
-  , "box.u-log button.log-step:hover { background: #22252B; }"
-  , "box.u-log button.log-step.failed { color: #F6B4AC; }"
-  , "box.u-log label.log-arrow { min-width: 16px; }"
   ]

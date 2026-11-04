@@ -28,6 +28,7 @@ import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.Segmented as Segmented
+import qualified Usta.UI.Components.Shortcodes as Shortcodes
 
 type Config :: Type
 data Config = Config
@@ -67,6 +68,7 @@ new cfg = do
                              , #heightRequest := cfg.height
                              , #cssClasses := ["preview"]
                              ]
+  Shortcodes.attach view
   stack <- GI.new Gtk.Stack []
   void $ Gtk.stackAddNamed stack view (Just "write")
   void $ Gtk.stackAddNamed stack rendered (Just "preview")
@@ -301,8 +303,9 @@ lines' style whole (s, e) = Edit first last' changed selection
       | s == e = let c = max first (s + grown) in (c, c)
       | otherwise = (first, first + T.length changed)
 
+-- | With the shortcode list's, which only the editor uses.
 css :: Text
-css = mconcat
+css = Shortcodes.css <> mconcat
   [ "box.u-markdown-editor textview.editor {"
   , "  border: 1px solid var(--input-border); border-radius: 0 8px 8px 8px;"
   , "  font-family: 'JetBrains Mono', monospace; font-size: 13px;"

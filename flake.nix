@@ -32,6 +32,7 @@
           cmark-gfm
           containers
           directory
+          emojis
           esqueleto
           filepath
           gi-cairo

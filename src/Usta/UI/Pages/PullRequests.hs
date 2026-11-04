@@ -8,18 +8,25 @@ module Usta.UI.Pages.PullRequests
   , Relation (..)
   , PullRequest (..)
   , fromPullRequest
+  , listed
   , sample
   , new
+  , forRepository
   , css
   ) where
 
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import Data.List (nub, sortOn)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -80,7 +87,7 @@ data PullRequest = PullRequest
   , review :: Review
   , comments :: Int
   , updated :: Text
-  , draft :: Bool
+  , state :: P.State
   , relations :: [Relation]
   , changes :: (Int, Int)
     -- ^ Changed files and commits.
@@ -199,7 +206,7 @@ pullRequestRow :: PullRequest -> IO Gtk.Box
 pullRequestRow pr = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 14]
 
-  icon <- Icon.toned 16 (if pr.draft then Neutral else Success) Icon.PullRequest
+  icon <- Icon.toned 16 (stateTone pr.state) Icon.PullRequest
   #append row icon
 
   body <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
@@ -210,7 +217,7 @@ pullRequestRow pr = do
   titleLabel <- label pr.title ["title"]
   GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
   #append titleLine titleLabel
-  when pr.draft $ Badge.new Neutral "Draft" >>= #append titleLine
+  when (pr.state == P.Draft) $ Badge.new Neutral "Draft" >>= #append titleLine
   #append body titleLine
 
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
@@ -238,30 +245,41 @@ pullRequestRow pr = do
   where
     toneText tone = "tone-" <> T.toLower (T.pack (show tone))
 
+stateTone :: P.State -> Tone
+stateTone s = case s of
+  P.Open -> Success
+  P.Draft -> Neutral
+  P.Merged -> Merged
+  P.Closed -> Danger
+
 -- | The list row for a synced pull request; 'Nothing' once it is merged or
 -- closed, since the list shows open ones.
 fromPullRequest :: Clock -> Forge.Kind -> P.PullRequest -> Maybe PullRequest
 fromPullRequest c forge pr
   | pr.state `elem` [P.Merged, P.Closed] = Nothing
-  | otherwise = Just PullRequest
-      { forge = forge
-      , host = unparse pr.ref.host
-      , repo = unparse pr.ref.repo
-      , number = unparse pr.ref.number
-      , title = pr.title
-      , branch = pr.headBranch
-      , base = pr.baseBranch
-      , author = unparse pr.author
-      , checks = maybe NoChecks checks pr.checks
-      , review = maybe NoReviewers review pr.review
-      , comments = unparse pr.comments
-      , updated = short c pr.updatedAt
-      , draft = pr.state == P.Draft
-      , relations = [rel | Just rel <- map relation pr.involvement]
-      , changes = (maybe 0 unparse pr.changedFiles, maybe 0 unparse pr.commits)
-        -- 0 until the details are fetched.
-      , fetching = Nothing
-      }
+  | otherwise = Just (listed c forge pr)
+
+-- | The row for a pull request in any state.
+listed :: Clock -> Forge.Kind -> P.PullRequest -> PullRequest
+listed c forge pr = PullRequest
+  { forge = forge
+  , host = unparse pr.ref.host
+  , repo = unparse pr.ref.repo
+  , number = unparse pr.ref.number
+  , title = pr.title
+  , branch = pr.headBranch
+  , base = pr.baseBranch
+  , author = unparse pr.author
+  , checks = maybe NoChecks checks pr.checks
+  , review = maybe NoReviewers review pr.review
+  , comments = unparse pr.comments
+  , updated = short c pr.updatedAt
+  , state = pr.state
+  , relations = [rel | Just rel <- map relation pr.involvement]
+  , changes = (maybe 0 unparse pr.changedFiles, maybe 0 unparse pr.commits)
+    -- 0 until the details are fetched.
+  , fetching = Nothing
+  }
   where
     checks state = case state of
       P.ChecksPassed -> ChecksPassed
@@ -277,23 +295,176 @@ fromPullRequest c forge pr
       AsAssignee -> Just AssignedToMe
       AsMentioned -> Nothing
 
+-- | Which pull requests the repository tab's first control shows.
+type Showing :: Type
+data Showing = ShowOpen | ShowDraft | ShowMerged | ShowClosed | ShowAll
+  deriving (Eq, Enum, Bounded)
+
+shows' :: Showing -> PullRequest -> Bool
+shows' s pr = case s of
+  ShowOpen -> pr.state == P.Open
+  ShowDraft -> pr.state == P.Draft
+  ShowMerged -> pr.state == P.Merged
+  ShowClosed -> pr.state == P.Closed
+  ShowAll -> True
+
+showingLabel :: Showing -> Text
+showingLabel s = case s of
+  ShowOpen -> "Open"
+  ShowDraft -> "Draft"
+  ShowMerged -> "Merged"
+  ShowClosed -> "Closed"
+  ShowAll -> "All"
+
+-- | A repository's own pull requests, for its tab: @synced@ at once, those
+-- that involve the user, then the repository's latest from @load@, or a
+-- note when the forge cannot be reached. The state, author and review
+-- filters, the filter box and the sort stay as the user left them.
+forRepository :: [PullRequest] -> IO (Either Text [PullRequest]) -> (PullRequest -> IO ()) -> IO Gtk.Box
+forRepository synced load onOpen = do
+  items <- newIORef synced
+  page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #spacing := 10
+                         , #hexpand := True
+                         , #cssClasses := ["u-pull-requests", "in-repo"]
+                         ]
+  let count s shown = case length (filter (shows' s) shown) of
+        n | n > 0, s `elem` [ShowOpen, ShowDraft] -> showingLabel s <> "  " <> T.pack (show n)
+        _ -> showingLabel s
+  (states, stateButtons) <- Segmented.new (map (`count` synced) [minBound ..]) 0
+  Gtk.widgetAddCssClass states "tabs"
+  authors <- Gtk.dropDownNewFromStrings ["All authors"]
+  reviews <- Gtk.dropDownNewFromStrings ("Any review" : map (snd . reviewLabel) [minBound ..])
+  filterBox <- GI.new Gtk.SearchEntry [#placeholderText := "Filter", #hexpand := True, #halign := Gtk.AlignEnd, #widthRequest := 200]
+  sorts <- Gtk.dropDownNewFromStrings ["Recently updated", "Newest", "Oldest"]
+  toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  mapM_ (#append toolbar) =<< sequence [Gtk.toWidget states, Gtk.toWidget authors, Gtk.toWidget reviews, Gtk.toWidget filterBox, Gtk.toWidget sorts]
+  #append page toolbar
+
+  list <- GI.new Gtk.ListBox [#selectionMode := Gtk.SelectionModeNone, #cssClasses := ["u-pr-list"]]
+  empty <- GI.new Gtk.Label [#label := "No pull requests here", #cssClasses := ["muted", "empty"]]
+  Gtk.listBoxSetPlaceholder list (Just empty)
+  card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "list-card"]]
+  #append card list
+  scroll <- GI.new Gtk.ScrolledWindow [ #child := card, #vexpand := True, #hscrollbarPolicy := Gtk.PolicyTypeNever
+                                      , #propagateNaturalHeight := True, #valign := Gtk.AlignStart ]
+  #append page scroll
+  note <- GI.new Gtk.Label [#label := "Loading the repository's pull requests…", #xalign := 0, #cssClasses := ["meta", "note"]]
+  #append page note
+
+  showing <- newIORef ShowOpen
+  shownRows <- newIORef []
+  let draw = do
+        everything <- readIORef items
+        s <- readIORef showing
+        who <- selectedText authors
+        verdict <- Gtk.dropDownGetSelected reviews
+        query <- T.toLower <$> Gtk.editableGetText filterBox
+        order <- Gtk.dropDownGetSelected sorts
+        let wanted pr = shows' s pr
+              && maybe True (== pr.author) who
+              && (verdict == 0 || fromIntegral verdict - 1 == fromEnum pr.review)
+              && (T.null query || query `T.isInfixOf` T.toLower pr.title || query `T.isInfixOf` T.pack (show pr.number))
+            sorted = case order of
+              1 -> sortOn (Down . (.number)) everything
+              2 -> sortOn (.number) everything
+              _ -> everything
+            rows = filter wanted sorted
+        writeIORef shownRows rows
+        refill list repositoryRow rows
+        forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> GI.set b [#label := count st everything]
+      fill shown = do
+        writeIORef items shown
+        let names = "All authors" : nub (map (.author) shown)
+        model <- Gtk.stringListNew (Just names)
+        before <- selectedText authors
+        Gtk.dropDownSetModel authors (Just model)
+        Gtk.dropDownSetSelected authors (maybe 0 (\n -> fromIntegral (length (takeWhile (/= n) names))) before)
+        draw
+  fill synced
+  forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> void $ GI.on b #toggled $ do
+    active <- GI.get b #active
+    when active (writeIORef showing st >> draw)
+  forM_ [authors, reviews, sorts] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const draw)
+  void $ GI.on filterBox #searchChanged draw
+  void $ GI.on list #rowActivated $ \row -> do
+    index <- Gtk.listBoxRowGetIndex row
+    rows <- readIORef shownRows
+    when (index >= 0 && fromIntegral index < length rows) $ onOpen (rows !! fromIntegral index)
+
+  void $ forkIO $ do
+    result <- try load
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      case result of
+        Right (Right shown) -> fill shown >> GI.set note [#visible := False]
+        Right (Left problem) -> offline problem note
+        Left (e :: SomeException) -> offline (T.pack (show e)) note
+      pure False
+  pure page
+  where
+    offline problem note = GI.set note
+      [#label := "Only the ones that involve you: the forge could not list the rest. " <> problem]
+    selectedText d = do
+      item <- Gtk.dropDownGetSelectedItem d
+      index <- Gtk.dropDownGetSelected d
+      case item of
+        Just o | index > 0 -> do
+          s <- GI.unsafeCastTo Gtk.StringObject o
+          Just <$> Gtk.stringObjectGetString s
+        _ -> pure Nothing
+
+-- | A row in a repository's tab: no repository, but where it would merge.
+repositoryRow :: PullRequest -> IO Gtk.Box
+repositoryRow pr = do
+  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
+  Icon.toned 16 (stateTone pr.state) Icon.PullRequest >>= #append row
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 3, #hexpand := True]
+  titleLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  titleLabel <- label pr.title ["title"]
+  GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
+  #append titleLine titleLabel
+  when (pr.state == P.Draft) $ Badge.new Neutral "Draft" >>= #append titleLine
+  #append body titleLine
+  label ("#" <> T.pack (show pr.number) <> " · " <> pr.branch <> " → " <> pr.base <> " · " <> pr.author <> " · updated " <> pr.updated) ["meta"]
+    >>= #append body
+  #append row body
+  checksIcon <- case pr.checks of
+    ChecksPassed -> Just <$> Icon.toned 15 Success Icon.Check
+    ChecksFailed -> Just <$> Icon.toned 15 Danger Icon.Cross
+    ChecksRunning -> Just <$> Icon.toned 15 Warning Icon.Clock
+    NoChecks -> pure Nothing
+  slot <- GI.new Gtk.Box [#widthRequest := 20, #halign := Gtk.AlignCenter]
+  forM_ checksIcon $ \i -> GI.set i [#tooltipText := snd (checksLabel pr.checks)] >> #append slot i
+  #append row slot
+  let (tone, text) = reviewLabel pr.review
+  -- Vertical, so the chip can sit at its right edge.
+  reviewSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #widthRequest := 150, #valign := Gtk.AlignCenter]
+  chip <- if pr.review == NoReviewers then label text ["meta"] else Badge.new tone text
+  GI.set chip [#halign := Gtk.AlignEnd]
+  #append reviewSlot chip
+  #append row reviewSlot
+  comments <- label (if pr.comments > 0 then "💬 " <> T.pack (show pr.comments) else "") ["meta", "number"]
+  GI.set comments [#widthRequest := 40, #xalign := 1]
+  #append row comments
+  pure row
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
 sample :: [PullRequest]
 sample =
   [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "master" "abdivasiyev"
-      ChecksPassed ReviewRequested 1 "5m" False [WaitingForMyReview] (2, 1) Nothing
+      ChecksPassed ReviewRequested 1 "5m" P.Open [WaitingForMyReview] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "master" "abdivasiyev"
-      ChecksFailed ReviewRequested 0 "22m" False [WaitingForMyReview] (2, 1) Nothing
+      ChecksFailed ReviewRequested 0 "22m" P.Open [WaitingForMyReview] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "master" "abdivasiyev"
-      ChecksRunning NoReviewers 2 "Yesterday" False [CreatedByMe] (2, 1) Nothing
+      ChecksRunning NoReviewers 2 "Yesterday" P.Open [CreatedByMe] (2, 1) Nothing
   , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "master" "abdivasiyev"
-      NoChecks NoReviewers 0 "Mon" True [CreatedByMe] (2, 1) Nothing
+      NoChecks NoReviewers 0 "Mon" P.Draft [CreatedByMe] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "master" "abdivasiyev"
-      ChecksPassed Approved 3 "Mon" False [CreatedByMe] (2, 1) Nothing
+      ChecksPassed Approved 3 "Mon" P.Open [CreatedByMe] (2, 1) Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 21 "refactor: move every host to den aspects" "refactor/den-aspects" "master" "abdivasiyev"
-      ChecksRunning ReviewRequested 0 "1h" False [WaitingForMyReview] (212, 14) (Just 64)
+      ChecksRunning ReviewRequested 0 "1h" P.Open [WaitingForMyReview] (212, 14) (Just 64)
   ]
 
 css :: Text
@@ -326,4 +497,6 @@ css = mconcat
   , "list.u-pr-list label.tone-warning { color: var(--warning); }"
   , "list.u-pr-list label.tone-danger { color: var(--danger); }"
   , "list.u-pr-list label.empty { padding: 32px; }"
+  , "box.u-pull-requests.in-repo { padding: 14px 20px; }"
+  , "box.u-pull-requests.in-repo label.note { font-size: 12px; color: var(--text-muted); padding: 2px 4px; }"
   ]

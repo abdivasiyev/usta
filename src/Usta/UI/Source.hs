@@ -181,6 +181,10 @@ data Source = Source
   , compare :: Text -> Text -> Text -> Text -> IO (Either Text ([Commit], [Text]))
     -- ^ By host, repository, base branch and branch: the commits and
     -- paths a pull request between them would have.
+  , repoPullRequests :: Text -> Text -> IO (Either Text [P.PullRequest])
+    -- ^ A repository's latest pull requests in any state, from the forge,
+    -- whoever they involve.
+  , repoIssues :: Text -> Text -> IO (Either Text [I.Issue])
   }
 
 -- | A signed-in account, as the window names it.
@@ -297,6 +301,8 @@ fromDatabase pool changes statuses sync = Source
   , milestones = \_ _ -> pure (Left unavailable)
   , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
+  , repoPullRequests = \_ _ -> pure (Left unavailable)
+  , repoIssues = \_ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -372,6 +378,8 @@ samples = Source
   , milestones = \_ _ -> pure (Left unavailable)
   , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
+  , repoPullRequests = \_ _ -> pure (Left unavailable)
+  , repoIssues = \_ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -437,6 +445,8 @@ withAccounts pool accounts source = source
   , milestones = \host repo -> onRepo host repo (\f name -> f.milestones name)
   , setMilestone = \host repo n t -> changing (onForge host repo n (\f name number -> f.setMilestone name number t))
   , compare = \host repo into from -> onRepo host repo (\f name -> f.compare name into from)
+  , repoPullRequests = \host repo -> onRepo host repo (\f name -> f.repoPullRequests name)
+  , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
   }
   where
     onRepo :: Text -> Text -> (Forge.Forge -> RepoName -> IO a) -> IO (Either Text a)
@@ -582,6 +592,8 @@ tracking track s = s
   , milestones = \h r -> track (s.milestones h r)
   , setMilestone = \h r n t -> track (s.setMilestone h r n t)
   , compare = \h r a b -> track (s.compare h r a b)
+  , repoPullRequests = \h r -> track (s.repoPullRequests h r)
+  , repoIssues = \h r -> track (s.repoIssues h r)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors
   }

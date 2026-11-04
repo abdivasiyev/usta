@@ -78,6 +78,7 @@ import Usta.Preferences (Preferences (..), Theme (..))
 import Usta.Types.Discussion (Merge (..))
 import Usta.Types.Login (Login)
 import Usta.Types.Milestone (Milestone (..))
+import qualified Usta.Types.PullRequest as P
 import qualified Usta.Types.Timeline as Tl
 import Usta.Types.Parse (parse, unparse)
 -- For the commits' fields.
@@ -377,6 +378,18 @@ buildAt start given app = do
         }
         RepositoryFiles.Place {forge = r.forge, host = r.host, repo = r.name, branch = r.defaultBranch}
         opening
+    , tabs = \r ->
+        [ Repositories.Tab
+            { title = counted "Pull requests" r.pullRequests
+            , build = do
+                synced <- filter (\pr -> pr.host == r.host && pr.repo == r.name) <$> source.pullRequests
+                let load = do
+                      c <- clock
+                      fmap (map (PullRequests.listed c r.forge)) <$> source.repoPullRequests r.host r.name
+                PullRequests.forRepository synced load (\pr -> openPullRequestWith pr.fetching "Repositories" (summaryOf pr))
+                  >>= Gtk.toWidget
+            }
+        ]
     }
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
   source.onMirrorStatus (source.repositories >>= repositoryPage.update)
@@ -796,6 +809,10 @@ repositoryItem :: IO () -> Repositories.Repository -> CommandPalette.Item
 repositoryItem open r = CommandPalette.Item CommandPalette.Repository r.name
   r.host open
 
+-- | A tab's title with its count, e.g. "Pull requests  3"; no count for 0.
+counted :: Text -> Int -> Text
+counted title n = if n > 0 then title <> "  " <> T.pack (show n) else title
+
 summaryOf :: PullRequests.PullRequest -> PullRequest.Summary
 summaryOf pr = PullRequest.Summary
   { PullRequest.forge = pr.forge
@@ -803,7 +820,11 @@ summaryOf pr = PullRequest.Summary
   , PullRequest.repo = pr.repo
   , PullRequest.number = pr.number
   , PullRequest.title = pr.title
-  , PullRequest.state = if pr.draft then PullRequest.Draft else PullRequest.Open
+  , PullRequest.state = case pr.state of
+      P.Open -> PullRequest.Open
+      P.Draft -> PullRequest.Draft
+      P.Merged -> PullRequest.MergedState
+      P.Closed -> PullRequest.Closed
   , PullRequest.comments = pr.comments
   , PullRequest.files = fst pr.changes
   , PullRequest.commits = snd pr.changes

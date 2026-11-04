@@ -55,6 +55,7 @@ import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.RepositoryActions as RepositoryActions
 import qualified Usta.UI.Pages.RepositoryCommits as RepositoryCommits
 import qualified Usta.UI.Pages.RepositoryInsights as RepositoryInsights
+import qualified Usta.UI.Pages.RepositoryReleases as RepositoryReleases
 import qualified Usta.UI.Components.SidePanel as SidePanel
 import qualified Usta.UI.Components.BranchPicker as BranchPicker
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
@@ -402,20 +403,6 @@ buildAt start given app = do
                   }
             }
         , Repositories.Tab
-            { followsBranch = True
-            , title = "Insights"
-            , build = do
-                c <- clock
-                RepositoryInsights.new c RepositoryInsights.Actions
-                  { branch = r.defaultBranch
-                  , changes = source.changes r.host r.name r.defaultBranch
-                  , graph = source.graph r.host r.name
-                  , files = \sha -> case parse sha of
-                      Left _ -> pure (Left "That commit hash is not one usta can read.")
-                      Right x -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff r.host r.name x
-                  }
-            }
-        , Repositories.Tab
             { followsBranch = False
             , title = counted "Pull requests" r.pullRequests
             , build = do
@@ -442,6 +429,31 @@ buildAt start given app = do
             , build = do
                 c <- clock
                 RepositoryActions.new c (source.runs r.host r.name) (source.checkLog r.host r.name)
+            }
+        , Repositories.Tab
+            { followsBranch = True
+            , title = "Insights"
+            , build = do
+                c <- clock
+                RepositoryInsights.new c RepositoryInsights.Actions
+                  { branch = r.defaultBranch
+                  , changes = source.changes r.host r.name r.defaultBranch
+                  , graph = source.graph r.host r.name
+                  , files = \sha -> case parse sha of
+                      Left _ -> pure (Left "That commit hash is not one usta can read.")
+                      Right x -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff r.host r.name x
+                  }
+            }
+        , Repositories.Tab
+            { followsBranch = False
+            , title = "Releases"
+            , build = do
+                c <- clock
+                RepositoryReleases.new c RepositoryReleases.Actions
+                  { releases = source.releases r.host r.name
+                  , tags = fmap snd <$> source.tagList r.host r.name
+                  , tagUrl = \t -> "https://" <> r.host <> "/" <> r.name <> (if r.forge == Forge.GitHub then "/releases/tag/" else "/src/tag/") <> t
+                  }
             }
         ]
     }
@@ -1021,7 +1033,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

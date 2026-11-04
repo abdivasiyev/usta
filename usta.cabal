@@ -164,6 +164,7 @@ executable usta
     Usta.UI.Pages.RepositoryActions
     Usta.UI.Pages.RepositoryCommits
     Usta.UI.Pages.RepositoryInsights
+    Usta.UI.Pages.RepositoryReleases
     Usta.UI.Pages.RepositoryFiles
     Usta.UI.Pages.Settings
     Usta.UI.Pages.Welcome

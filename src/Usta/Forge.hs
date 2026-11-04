@@ -22,6 +22,7 @@ import Usta.Types.Tree (Entry)
 import Usta.Types.Discussion (Comment, Discussion, Merge, NewIssue, NewPull, Verdict)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
+import Usta.Types.Label (Definition)
 import Usta.Types.Notification (Notification)
 import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (PullRequest)
@@ -105,8 +106,11 @@ data Forge = Forge
   , createIssue :: RepoName -> NewIssue -> IO Number
   , createPull :: RepoName -> NewPull -> IO Number
   , branches :: RepoName -> IO [Text]
-  , labels :: RepoName -> IO [Text]
-    -- ^ The names of the labels the repository defines.
+  , labels :: RepoName -> IO [Definition]
+    -- ^ The labels the repository defines.
+  , setLabels :: RepoName -> Number -> [Text] -> IO ()
+    -- ^ An issue's or pull request's labels, by name, all at once.
+  , createLabel :: RepoName -> Definition -> IO ()
   , compare :: RepoName -> Text -> Text -> IO ([Commit], [Text])
     -- ^ What a branch has that the base branch does not: its commits,
     -- oldest first, and the paths they change.

@@ -50,6 +50,7 @@ import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Check (Check, Job)
+import Usta.Types.Label (Definition)
 import Usta.Types.Readiness (Readiness, UpdateStyle)
 import Usta.Types.Reviewer (Candidate, Reviewer, Who)
 import Usta.Types.Commit (Commit, Sha)
@@ -159,7 +160,9 @@ data Source = Source
     -- ^ Files it in the repository on a host, and gives its number.
   , createPull :: Text -> Text -> NewPull -> IO (Either Text Int)
   , branches :: Text -> Text -> IO (Either Text [Text])
-  , labels :: Text -> Text -> IO (Either Text [Text])
+  , labels :: Text -> Text -> IO (Either Text [Definition])
+  , setLabels :: Text -> Text -> Int -> [Text] -> IO (Either Text ())
+  , createLabel :: Text -> Text -> Definition -> IO (Either Text ())
   , compare :: Text -> Text -> Text -> Text -> IO (Either Text ([Commit], [Text]))
     -- ^ By host, repository, base branch and branch: the commits and
     -- paths a pull request between them would have.
@@ -265,6 +268,8 @@ fromDatabase pool changes statuses sync = Source
   , createPull = \_ _ _ -> pure (Left unavailable)
   , branches = \_ _ -> pure (Left unavailable)
   , labels = \_ _ -> pure (Left unavailable)
+  , setLabels = \_ _ _ _ -> pure (Left unavailable)
+  , createLabel = \_ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
   }
   where
@@ -327,6 +332,8 @@ samples = Source
   , createPull = \_ _ _ -> pure (Left unavailable)
   , branches = \_ _ -> pure (Left unavailable)
   , labels = \_ _ -> pure (Left unavailable)
+  , setLabels = \_ _ _ _ -> pure (Left unavailable)
+  , createLabel = \_ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
   }
 
@@ -379,6 +386,8 @@ withAccounts pool accounts source = source
   , createPull = \host repo new -> changing (onRepo host repo (\f name -> unparse <$> f.createPull name new))
   , branches = \host repo -> onRepo host repo (\f name -> f.branches name)
   , labels = \host repo -> onRepo host repo (\f name -> f.labels name)
+  , setLabels = \host repo n names -> changing (onForge host repo n (\f name number -> f.setLabels name number names))
+  , createLabel = \host repo d -> onRepo host repo (\f name -> f.createLabel name d)
   , compare = \host repo into from -> onRepo host repo (\f name -> f.compare name into from)
   }
   where
@@ -511,6 +520,8 @@ tracking track s = s
   , createPull = \h r x -> track (s.createPull h r x)
   , branches = \h r -> track (s.branches h r)
   , labels = \h r -> track (s.labels h r)
+  , setLabels = \h r n l -> track (s.setLabels h r n l)
+  , createLabel = \h r d -> track (s.createLabel h r d)
   , compare = \h r a b -> track (s.compare h r a b)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors

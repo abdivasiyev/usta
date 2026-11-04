@@ -22,6 +22,9 @@ module Usta.Forge.Forgejo.Api
   , ApiCommit (..)
   , IssueDetail (..)
   , ApiComment (..)
+  , ApiReaction (..)
+  , ReactionBody (..)
+  , BodyEdit (..)
   , NewComment (..)
   , IssueEdit (..)
   , MergeOption (..)
@@ -73,6 +76,7 @@ module Usta.Forge.Forgejo.Api
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.!=), (.:), (.:?), (.=))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BL
+import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Aeson.Types (Parser)
 import Data.Int (Int64)
@@ -82,13 +86,13 @@ import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8Lenient)
-import Data.Time (UTCTime)
+import Data.Time (UTCTime, diffUTCTime)
 import GHC.Generics (Generic)
 import Servant.API
 import Servant.Client (AsClientT, ClientM, client)
 
 import Usta.Types.Commit (Commit (..), Sha)
-import Usta.Types.Discussion (Comment (..), Merge (..), Verdict (..))
+import Usta.Types.Discussion (Comment (..), Feeling (..), Merge (..), Verdict (..))
 import Usta.Types.Count (Count)
 import Usta.Types.Label (Color)
 import qualified Usta.Types.Label as L
@@ -151,6 +155,36 @@ data Routes mode = Routes
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> "comments" :> Get '[JSON] [ApiComment]
     -- ^ Every comment at once; Forgejo does not page them.
+  , editComment
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
+           :> ReqBody '[JSON] BodyEdit :> Verb 'PATCH 200 '[JSON] NoContent
+  , deleteComment
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
+           :> Verb 'DELETE 204 '[JSON] NoContent
+  , editBody
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> ReqBody '[JSON] BodyEdit :> Verb 'PATCH 201 '[JSON] NoContent
+  , editTitle
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> ReqBody '[JSON] PullEdit :> Verb 'PATCH 201 '[JSON] NoContent
+  , commentReactions
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
+           :> "reactions" :> Get '[JSON] [ApiReaction]
+  , issueReactions
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "reactions" :> RecordQueryParam ListQuery :> Get '[JSON] [ApiReaction]
+  , reactToComment
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'POST 201 '[JSON] NoContent
+  , unreactToComment
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'DELETE 200 '[JSON] NoContent
+  , reactToIssue
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'POST 201 '[JSON] NoContent
+  , unreactToIssue
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Verb 'DELETE 200 '[JSON] NoContent
   , postComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> "comments" :> ReqBody '[JSON] NewComment :> Verb 'POST 201 '[JSON] ApiComment
@@ -485,8 +519,9 @@ instance FromJSON IssueDetail where
     pull <- o .:? "pull_request"
     merged <- maybe (pure False) (\p -> p .:? "merged" .!= False) pull
     title <- traverse (.: "title") milestone
+    url <- o .:? "html_url" .!= ""
     pure IssueDetail
-      { opening = Comment {author = (user :: User).login, body = body, createdAt = createdAt}
+      { opening = Comment {author = (user :: User).login, body = body, createdAt = createdAt, id = Nothing, edited = False, url = url, reactions = []}
       , closed = state == "closed"
       , merged = merged
       , assignees = map (\(User login) -> login) assignees
@@ -502,7 +537,42 @@ instance FromJSON ApiComment where
     user <- o .: "user"
     body <- o .: "body"
     createdAt <- o .: "created_at"
-    pure (ApiComment Comment {author = (user :: User).login, body = body, createdAt = createdAt})
+    updatedAt <- o .:? "updated_at" .!= createdAt
+    i <- o .: "id"
+    url <- o .:? "html_url" .!= ""
+    -- Forgejo moves updated_at only when the text changes.
+    let edited = diffUTCTime updatedAt createdAt > 1
+    pure (ApiComment Comment {author = (user :: User).login, body = body, createdAt = createdAt, id = Just i, edited = edited, url = url, reactions = []})
+
+-- | Someone's reaction: the feeling as Forgejo names it, and who.
+type ApiReaction :: Type
+data ApiReaction = ApiReaction {feeling :: Feeling, user :: Login}
+
+instance FromJSON ApiReaction where
+  parseJSON = withObject "Reaction" $ \o -> do
+    content <- o .: "content"
+    feeling <- maybe (fail ("a reaction usta does not know: " <> T.unpack content)) pure (lookup content feelingNames)
+    u <- o .: "user"
+    pure (ApiReaction feeling (u :: User).login)
+
+-- | A reaction to add or take back, by Forgejo's name for it.
+type ReactionBody :: Type
+newtype ReactionBody = ReactionBody Feeling
+
+instance ToJSON ReactionBody where
+  toJSON (ReactionBody f) = object ["content" .= maybe "" fst (find ((== f) . snd) feelingNames)]
+
+feelingNames :: [(Text, Feeling)]
+feelingNames =
+  [ ("+1", ThumbsUp), ("-1", ThumbsDown), ("laugh", Laugh), ("hooray", Hooray)
+  , ("confused", Confused), ("heart", Heart), ("rocket", Rocket), ("eyes", Eyes) ]
+
+-- | A comment's or description's new text.
+type BodyEdit :: Type
+newtype BodyEdit = BodyEdit {body :: Text}
+
+instance ToJSON BodyEdit where
+  toJSON e = object ["body" .= e.body]
 
 type NewComment :: Type
 newtype NewComment = NewComment {body :: Text}

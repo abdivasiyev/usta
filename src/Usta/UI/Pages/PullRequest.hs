@@ -136,6 +136,7 @@ header s backLabel onBack rename watch = do
     launcher <- Gtk.uriLauncherNew (Just url)
     Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
   #append bar browser
+  Issue.centred bar
   pure (bar, showState)
   where
     path = case s.forge of

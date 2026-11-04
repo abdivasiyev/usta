@@ -11,6 +11,7 @@ module Usta.UI.Pages.Issue
   , editableTitle
   , Watch (..)
   , watchButton
+  , centred
   , Event (..)
   , Model (..)
   , Actions (..)
@@ -167,6 +168,13 @@ watchButton w = do
 
 -- | A title with a pencil that edits it in place: Enter or Save renames,
 -- Esc or Cancel keeps it.
+-- | Centres a header's buttons on its row, so they keep their size when
+-- the title's editor makes the row taller.
+centred :: Gtk.Box -> IO ()
+centred bar = go =<< Gtk.widgetGetFirstChild bar
+  where
+    go = mapM_ (\w -> GI.set w [#valign := Gtk.AlignCenter] >> Gtk.widgetGetNextSibling w >>= go)
+
 editableTitle :: Text -> [Text] -> (Text -> IO (Either Text ())) -> IO Gtk.Box
 editableTitle start classes rename = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6, #cssClasses := ["u-title-edit"]]
@@ -366,6 +374,7 @@ header m backLabel onBack rename watch = do
     launcher <- Gtk.uriLauncherNew (Just url)
     Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
   #append bar browser
+  centred bar
   pure (bar, showClosed)
   where
     issues = if m.forge == Forge.GitLab then "/-/issues/" else "/issues/"

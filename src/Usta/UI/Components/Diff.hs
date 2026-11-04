@@ -12,12 +12,15 @@ module Usta.UI.Components.Diff
   , File (..)
   , Commenting (..)
   , Keys (..)
+  , Options (..)
+  , defaultOptions
   , new
+  , newWith
   , plain
   , css
   ) where
 
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
@@ -80,17 +83,38 @@ data Keys = Keys
   , clear :: IO ()
   }
 
+-- | How a diff is drawn, kept for every pull request.
+type Options :: Type
+data Options = Options
+  { split :: Bool
+    -- ^ The old and new version side by side.
+  , ignoreSpace :: Bool
+    -- ^ Lines changed only in their whitespace are shown unchanged.
+  , changedWords :: Bool
+    -- ^ In a changed line, the part that changed is marked.
+  }
+  deriving stock (Eq, Show)
+
+defaultOptions :: Options
+defaultOptions = Options {split = False, ignoreSpace = False, changedWords = True}
+
 -- | @attached@ pairs a line's index with a widget shown under it.
 -- A viewed file shows only its header; @onViewed@ hears every toggle.
 new :: File -> [(Int, Gtk.Widget)] -> Commenting -> (Bool -> IO ()) -> IO Gtk.Box
-new file attached commenting onViewed = build file attached (Just commenting) (Just onViewed)
+new = newWith defaultOptions
+
+newWith :: Options -> File -> [(Int, Gtk.Widget)] -> Commenting -> (Bool -> IO ()) -> IO Gtk.Box
+newWith opts file attached commenting onViewed = build opts file attached (Just commenting) (Just onViewed)
 
 -- | A diff to read, without the "Viewed" toggle, e.g. for one commit.
 plain :: File -> IO Gtk.Box
-plain file = build file { viewed = False } [] Nothing Nothing
+plain file = build defaultOptions file { viewed = False } [] Nothing Nothing
 
-build :: File -> [(Int, Gtk.Widget)] -> Maybe Commenting -> Maybe (Bool -> IO ()) -> IO Gtk.Box
-build file attached commenting onViewed = do
+build :: Options -> File -> [(Int, Gtk.Widget)] -> Maybe Commenting -> Maybe (Bool -> IO ()) -> IO Gtk.Box
+build opts original attached commenting onViewed = do
+  -- Whitespace-only changes become unchanged lines; the removed half is
+  -- kept, hidden, so the lines keep their places for threads.
+  let (file, hidden) = if opts.ignoreSpace then whitespaceFolded original else (original, [])
   card <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #cssClasses := ["u-card", "u-diff"]
                          ]
@@ -100,13 +124,16 @@ build file attached commenting onViewed = do
                            ]
   label file.path ["mono", "strong"] >>= #append header
   label (stat file) ["muted", "small"] >>= #append header
+  unless (null hidden) $
+    label ("· " <> T.pack (show (length hidden)) <> (if length hidden == 1 then " whitespace-only line hidden" else " whitespace-only lines hidden")) ["muted", "small"] >>= #append header
   #append card header
 
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   -- The bar beside chosen lines floats over the diff.
   bodyOverlay <- GI.new Gtk.Overlay [#child := body, #visible := not file.viewed]
-  rows <- forM (zip3 [0 :: Int ..] file.diffLines (hunks file.diffLines)) $ \(index, line, hunk) -> do
+  rows <- if opts.split then splitRows file attached commenting body else forM (zip3 [0 :: Int ..] file.diffLines (hunks file.diffLines)) $ \(index, line, hunk) -> do
     (row, code) <- lineRow line
+    when (index `elem` hidden) $ GI.set row [#visible := False]
     slot <- case (commenting, newSide line) of
       (Just c, Just number) -> do
         overlay <- GI.new Gtk.Overlay [#child := row]
@@ -124,11 +151,16 @@ build file attached commenting onViewed = do
       #append holder w
       #append body holder
     forM_ slot $ \(_, _, under) -> #append body under
-    pure Row {index, line, hunk, widget = row, code, slot}
-  forM_ commenting (choosing file.path body bodyOverlay rows)
-  let codes = map (.code) rows
-  Highlight.follow card $ \palette ->
-    forM_ (zip codes (highlighted palette file)) $ \(code, marked) -> Gtk.labelSetMarkup code marked
+    pure Row {index, line, hunk, widget = row, code, slot, twin = Nothing}
+  -- Choosing a range of lines works on the unified diff.
+  unless opts.split $ forM_ commenting (choosing file.path body bodyOverlay rows)
+  let wordMarks = if opts.changedWords then changedParts file.diffLines hidden else []
+  Highlight.follow card $ \palette -> do
+    let marked = highlighted palette file
+    forM_ rows $ \r -> forM_ (lookup r.index (zip [0 ..] marked)) $ \m ->
+      Gtk.labelSetMarkup r.code (maybe m id (lookup r.index wordMarks))
+    -- A split row's second label, for a line both sides show.
+    forM_ rows $ \r -> forM_ r.twin $ \t -> forM_ (lookup r.index (zip [0 ..] marked)) (Gtk.labelSetMarkup t)
   #append card bodyOverlay
   setCollapsed card file.viewed
 
@@ -162,7 +194,135 @@ data Row = Row
   , slot :: Maybe (Gtk.Overlay, Gtk.Button, Gtk.Box)
     -- ^ For a line of the new version: its overlay, its "+" and the box
     -- under it.
+  , twin :: Maybe Gtk.Label
+    -- ^ In a split diff, the other side's label for an unchanged line.
   }
+
+-- | The lines with each pair of a removed and an added line that differ
+-- only in whitespace turned into one unchanged line; the removed one's
+-- index is in the second list, to hide.
+whitespaceFolded :: File -> (File, [Int])
+whitespaceFolded f = (f {diffLines = map snd changed}, hiddenOnes)
+  where
+    pairs = runPairs f.diffLines
+    same = [(r, a) | (r, a) <- pairs, squash (textOf (f.diffLines !! r)) == squash (textOf (f.diffLines !! a))]
+    hiddenOnes = map fst same
+    changed = [ (i, case lookup i [(a, r) | (r, a) <- same] of
+                     Just r | Removed old _ <- f.diffLines !! r, Added new' t <- l -> Context old new' t
+                     _ -> l)
+              | (i, l) <- zip [0 ..] f.diffLines ]
+    squash = T.filter (not . (`elem` (" \t" :: String)))
+
+-- | Each removed line paired with the added line at the same place in the
+-- same run of changes, by index.
+runPairs :: [Line] -> [(Int, Int)]
+runPairs ls = go (zip [0 ..] ls)
+  where
+    go [] = []
+    go xs =
+      let (removed, rest) = span (isRemoved . snd) xs
+          (added, rest') = span (isAdded . snd) rest
+      in if null removed && null added then go (drop 1 xs) else zip (map fst removed) (map fst added) <> go rest'
+    isRemoved l = case l of Removed _ _ -> True; _ -> False
+    isAdded l = case l of Added _ _ -> True; _ -> False
+
+-- | For each paired removed and added line, its text with the part that
+-- changed marked, by index.
+changedParts :: [Line] -> [Int] -> [(Int, Text)]
+changedParts ls hidden = concat
+  [ [(r, marked "#E5484D" old (prefix, suffix)), (a, marked "#30A46C" new' (prefix, suffix'))]
+  | (r, a) <- runPairs ls, r `notElem` hidden
+  , let old = textOf (ls !! r)
+        new' = textOf (ls !! a)
+        prefix = common old new'
+        suffix = common (T.reverse (T.drop prefix old)) (T.reverse (T.drop prefix new'))
+        suffix' = suffix
+  , prefix + suffix < max (T.length old) (T.length new')
+  ]
+  where
+    marked color t (p, q) =
+      let (front, rest) = T.splitAt p t
+          (middle, back) = T.splitAt (T.length rest - q) rest
+      in Highlight.plain front <> (if T.null middle then "" else "<span background='" <> color <> "' bgalpha='35%'>" <> Highlight.plain middle <> "</span>") <> Highlight.plain back
+    common x y = maybe 0 (\(c, _, _) -> T.length c) (T.commonPrefixes x y)
+
+-- | The rows of a split diff: unchanged lines on both sides, and each run
+-- of changes with its removed lines on the left beside its added ones on
+-- the right. A line of the new version can be commented on with its "+".
+splitRows :: File -> [(Int, Gtk.Widget)] -> Maybe Commenting -> Gtk.Box -> IO [Row]
+splitRows file attached commenting body = go (zip3 [0 :: Int ..] file.diffLines (hunks file.diffLines))
+  where
+    go [] = pure []
+    go xs@((i, l, h) : rest) = case l of
+      Hunk _ -> do
+        (row, code) <- lineRow l
+        #append body row
+        (Row {index = i, line = l, hunk = h, widget = row, code, slot = Nothing, twin = Nothing} :) <$> go rest
+      Context _ _ _ -> do
+        (row, left, right, slot) <- pairRow (Just (i, l)) (Just (i, l))
+        attach i
+        (Row {index = i, line = l, hunk = h, widget = row, code = left, slot, twin = Just right} :) <$> go rest
+      _ -> do
+        let (removed, after) = span (isRemoved . snd3) xs
+            (added, rest') = span (isAdded . snd3) after
+            n = max (length removed) (length added)
+            pick ys k = if k < length ys then Just (let (j, line', _) = ys !! k in (j, line')) else Nothing
+        made <- mapM (\k -> do
+          (row, left, right, slot) <- pairRow (pick removed k) (pick added k)
+          forM_ (pick added k) (attach . fst)
+          pure ( [Row {index = j, line = line', hunk = h, widget = row, code = left, slot = Nothing, twin = Nothing} | Just (j, line') <- [pick removed k]]
+              <> [Row {index = j, line = line', hunk = h, widget = row, code = right, slot, twin = Nothing} | Just (j, line') <- [pick added k]] )) [0 .. n - 1]
+        if n == 0 then go (drop 1 xs) else (concat made <>) <$> go rest'
+    snd3 (_, b, _) = b
+    isRemoved l = case l of Removed _ _ -> True; _ -> False
+    isAdded l = case l of Added _ _ -> True; _ -> False
+    attach i = forM_ [w | (j, w) <- attached, j == i] $ \w -> do
+      holder <- GI.new Gtk.Box [#cssClasses := ["diff-attached"]]
+      #append holder w
+      #append body holder
+    -- One row: the left half for the old version, the right for the new.
+    pairRow left right = do
+      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #homogeneous := True, #cssClasses := ["split-row"]]
+      (l, lCode) <- half (fmap snd left) True
+      (r, rCode) <- half (fmap snd right) False
+      #append row l
+      slot <- case (commenting, right >>= newSide . snd, right) of
+        (Just c, Just number, Just (_, line')) -> do
+          overlay <- GI.new Gtk.Overlay [#child := r]
+          plus <- GI.new Gtk.Button [ #label := "+", #halign := Gtk.AlignStart, #valign := Gtk.AlignCenter
+                                    , #visible := False, #tooltipText := "Comment on this line (c)", #cssClasses := ["comment-plus"] ]
+          Gtk.overlayAddOverlay overlay plus
+          under <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+          void $ GI.on plus #clicked (c.start (number, number) [textOf line'] under)
+          motion <- Gtk.eventControllerMotionNew
+          void $ GI.on motion #enter $ \_ _ -> GI.set plus [#visible := True]
+          void $ GI.on motion #leave $ GI.set plus [#visible := False]
+          Gtk.widgetAddController overlay motion
+          #append row overlay
+          pure (Just (overlay, plus, under))
+        _ -> Nothing <$ #append row r
+      #append body row
+      forM_ slot $ \(_, _, under) -> #append body under
+      pure (row, lCode, rCode, slot)
+    half line' isOld = do
+      box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["diff-line", kindOf line' isOld]]
+      let (n, sign) = case line' of
+            Just (Context a b _) -> (T.pack (show (if isOld then a else b)), "")
+            Just (Removed a _) -> (T.pack (show a), "−")
+            Just (Added b _) -> (T.pack (show b), "+")
+            _ -> ("", "")
+      gutter n >>= #append box
+      label sign ["sign"] >>= #append box
+      code <- label "" ["code"]
+      GI.set code [#hexpand := True, #selectable := True, #wrap := True, #wrapMode := Pango.WrapModeWordChar]
+      #append box code
+      pure (box, code)
+    kindOf line' isOld = case line' of
+      Just (Context _ _ _) -> "context"
+      Just (Removed _ _) -> "removed"
+      Just (Added _ _) -> "added"
+      Nothing -> if isOld then "empty" else "empty"
+      _ -> "context"
 
 -- | Each line's hunk, counting from 0.
 hunks :: [Line] -> [Int]
@@ -408,6 +568,8 @@ css = mconcat
   , "box.u-diff box.diff-attached { padding: 8px 12px 8px 108px; background: var(--surface); }"
   -- The holder already indents what it holds.
   , "box.u-diff box.diff-attached > box.u-thread { margin: 0; }"
+  , "box.u-diff box.split-row box.diff-line.empty { background: var(--window); }"
+  , "box.u-diff box.split-row > box:first-child, box.u-diff box.split-row > overlay:first-child { border-right: 1px solid var(--border-subtle); }"
   , "box.u-diff box.diff-line.picked { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }"
   , "box.u-diff box.range-bar { padding: 3px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface); box-shadow: 0 6px 18px rgba(27,29,33,0.14); }"
   , "box.u-diff box.range-bar label.which { padding: 0 8px; }"

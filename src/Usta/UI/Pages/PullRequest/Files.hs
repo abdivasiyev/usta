@@ -124,10 +124,12 @@ type Panels :: Type
 data Panels = Panels
   { files :: IORef SidePanel.Side
   , review :: IORef SidePanel.Side
+  , options :: IORef Diff.Options
+    -- ^ How diffs are drawn: split, whitespace, changed words.
   }
 
 newPanels :: IO Panels
-newPanels = Panels <$> SidePanel.newSide 260 <*> SidePanel.newSide 300
+newPanels = Panels <$> SidePanel.newSide 260 <*> SidePanel.newSide 300 <*> newIORef Diff.defaultOptions
 
 new :: Actions -> Panels -> Model -> IO Gtk.Widget
 new actions panels m = do
@@ -161,8 +163,17 @@ new actions panels m = do
                          , #cssClasses := ["diffs"]
                          ]
   toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
-  label m.source ["muted", "small"] >>= #append toolbar
-  when (not (T.null m.range)) $ label m.range ["muted", "small", "mono"] >>= #append toolbar
+  -- Unified or split, whitespace and changed words; kept for every pull
+  -- request, and redrawn at once unless notes are waiting for the review.
+  opts <- readIORef panels.options
+  (layout, layoutButtons) <- Segmented.new ["Unified", "Split"] (if opts.split then 1 else 0)
+  #append toolbar layout
+  spaceCheck <- GI.new Gtk.CheckButton [#label := "Hide whitespace changes", #active := opts.ignoreSpace]
+  wordsCheck <- GI.new Gtk.CheckButton [#label := "Highlight changed words", #active := opts.changedWords]
+  mapM_ (#append toolbar) [spaceCheck, wordsCheck]
+  sourceNote <- label (m.source <> (if T.null m.range then "" else "  " <> m.range)) ["muted", "small"]
+  GI.set sourceNote [#hexpand := True, #xalign := 1]
+  #append toolbar sourceNote
   #append main toolbar
   threadBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #visible := False, #cssClasses := ["thread-bar"]]
   (threadFilter, filterButtons) <- Segmented.new ["All threads", "Open only", "Hidden"] 0
@@ -261,7 +272,7 @@ new actions panels m = do
           pure False
       (,) 0 <$> Gtk.toWidget slot
     markBox <- viewedMark f.viewed
-    diff <- Diff.new f (attached <> maybe [] pure pictures) (commenting f.path) $ \isViewed -> do
+    diff <- Diff.newWith opts f (attached <> maybe [] pure pictures) (commenting f.path) $ \isViewed -> do
       setViewed markBox isViewed
       updateProgress
     #append main diff
@@ -269,6 +280,17 @@ new actions panels m = do
     #append side button
     pure (Entry f button markBox diff)
   writeIORef entriesRef entries
+  let choose change = do
+        modifyIORef' panels.options change
+        waiting <- readIORef pendingRef
+        if null waiting
+          then actions.refresh
+          else GI.set sourceNote [#label := "Applies when the Files tab opens again: notes are waiting for your review."]
+  forM_ (zip [False, True] layoutButtons) $ \(isSplit, b) -> void $ GI.on b #toggled $ do
+    active <- GI.get b #active
+    when (active && isSplit /= opts.split) $ choose (\o -> o {Diff.split = isSplit})
+  void $ GI.on spaceCheck #toggled $ GI.get spaceCheck #active >>= \on' -> choose (\o -> o {Diff.ignoreSpace = on'})
+  void $ GI.on wordsCheck #toggled $ GI.get wordsCheck #active >>= \on' -> choose (\o -> o {Diff.changedWords = on'})
   #append side progress
   updateProgress
 
@@ -349,6 +371,9 @@ new actions panels m = do
         when (i >= 0 && i < length placed) $ let (_, _, d) = placed !! i in act d
   shortcut keys "Return" (onCurrent (.toggle))
   shortcut keys "r" (onCurrent (.focusReply))
+  -- s switches unified and split, w hides whitespace changes.
+  shortcut keys "s" (forM_ (zip [False, True] layoutButtons) (\(isSplit, b) -> when (isSplit /= opts.split) (GI.set b [#active := True])))
+  shortcut keys "w" (GI.get spaceCheck #active >>= \on' -> GI.set spaceCheck [#active := not on'])
   -- On the chosen lines, or the line under the pointer.
   let onLines act = readIORef keysRef >>= mapM_ act
   shortcut keys "c" (onLines (.comment))

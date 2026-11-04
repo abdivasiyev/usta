@@ -6,30 +6,41 @@
 module Usta.UI.Components.DiagramView
   ( new
   , colorOf
+  , css
   ) where
 
-import Control.Monad (forM_, unless)
+import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Kind (Type)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Traversable (for)
 import qualified Data.Text as T
 import qualified GI.Cairo as GICairo
 import qualified GI.Cairo.Render as Cairo
 import GI.Cairo.Render.Connector (renderWithContext)
+import qualified GI.Gdk as Gdk
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 import qualified GI.PangoCairo as PangoCairo
 import Numeric (readHex)
 
 import Usta.Diagram.Scene
+import Usta.UI.Components.CommandPalette (shortcut)
+import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Highlight as Highlight
 
 -- | @layout@ gets a Pango measure and gives the scene; it runs once, when
 -- the view is made.
+--
+-- The view zooms and pans inside its own size, so a page around it keeps
+-- its scrolling: Ctrl + scroll and pinch zoom around the pointer, dragging
+-- pans, and the tools in its corner show on hover or focus.
 new :: (Measure IO -> IO Scene) -> IO Gtk.Widget
 new layout = do
-  area <- GI.new Gtk.DrawingArea [#halign := Gtk.AlignStart]
+  area <- GI.new Gtk.DrawingArea [#hexpand := True, #focusable := True]
   let measure font text = do
         l <- Gtk.widgetCreatePangoLayout area (Just text)
         Pango.fontDescriptionFromString (describe font) >>= Pango.layoutSetFontDescription l . Just
@@ -54,11 +65,130 @@ new layout = do
       height = max laid.size.h (maximum (0 : map snd points) + dy + 4)
       drawn = Scene {size = Size width height, items = map (translate dx dy) laid.items}
   GI.set area [#contentWidth := ceiling drawn.size.w, #contentHeight := ceiling drawn.size.h]
-  Gtk.drawingAreaSetDrawFunc area $ Just $ \_ context _ _ -> do
+  -- Nothing until the reader zooms or pans: then the scene sits at its own
+  -- size in the middle, whatever the width.
+  camera <- newIORef Nothing
+  pointer <- newIORef Nothing
+  let sizeOf = do
+        w <- Gtk.widgetGetWidth area
+        h <- Gtk.widgetGetHeight area
+        pure (fromIntegral w, fromIntegral h)
+      current = readIORef camera >>= maybe (uncurry (actual drawn.size) <$> sizeOf) pure
+  Gtk.drawingAreaSetDrawFunc area $ Just $ \_ context w h -> do
     palette <- Highlight.currentPalette
+    c <- fromMaybe (actual drawn.size (fromIntegral w) (fromIntegral h)) <$> readIORef camera
+    renderWithContext (Cairo.translate c.dx c.dy >> Cairo.scale c.zoom c.zoom) context
     forM_ drawn.items $ \item -> paint area palette context item
   Highlight.follow area (const (Gtk.widgetQueueDraw area))
-  Gtk.toWidget area
+
+  overlay <- GI.new Gtk.Overlay [#child := area, #cssClasses := ["u-diagram"]]
+  tools <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal, #spacing := 2
+                          , #halign := Gtk.AlignEnd, #valign := Gtk.AlignStart
+                          , #visible := False, #cssClasses := ["tools"] ]
+  Gtk.overlayAddOverlay overlay tools
+  let tool child hint = GI.new Gtk.Button [#child := child, #focusOnClick := False, #tooltipText := hint, #cssClasses := ["tool"]]
+      glyph t = GI.new Gtk.Label [#label := t] >>= Gtk.toWidget
+  zoomOut <- glyph "−" >>= \g -> tool g "Zoom out (Ctrl −)"
+  percent <- GI.new Gtk.Button [#label := "100%", #focusOnClick := False, #tooltipText := "Actual size", #cssClasses := ["tool", "percent"]]
+  zoomIn <- glyph "+" >>= \g -> tool g "Zoom in (Ctrl +)"
+  fitButton <- Icon.new 16 Icon.Fit >>= Gtk.toWidget >>= \g -> tool g "Fit (Ctrl 0)"
+  #append tools zoomOut >> #append tools percent >> #append tools zoomIn >> #append tools fitButton
+
+  let place c = do
+        writeIORef camera (Just c)
+        GI.set percent [#label := T.pack (show (round (c.zoom * 100) :: Int)) <> "%"]
+        Gtk.widgetQueueDraw area
+      zoomBy factor = do
+        (w, h) <- sizeOf
+        at <- fromMaybe (w / 2, h / 2) <$> readIORef pointer
+        current >>= place . zoomAround factor at
+      fit = sizeOf >>= place . uncurry (fitted drawn.size)
+      reset = sizeOf >>= place . uncurry (actual drawn.size)
+  void $ GI.on zoomOut #clicked (zoomBy (1 / step))
+  void $ GI.on zoomIn #clicked (zoomBy step)
+  void $ GI.on percent #clicked reset
+  void $ GI.on fitButton #clicked fit
+
+  -- The tools show while the pointer is over the diagram or it has focus.
+  hovered <- newIORef False
+  focused <- newIORef False
+  let showTools = do
+        on' <- (||) <$> readIORef hovered <*> readIORef focused
+        GI.set tools [#visible := on']
+  motion <- GI.new Gtk.EventControllerMotion []
+  void $ GI.on motion #enter $ \_ _ -> writeIORef hovered True >> showTools
+  void $ GI.on motion #leave $ writeIORef hovered False >> writeIORef pointer Nothing >> showTools
+  void $ GI.on motion #motion $ \x y -> writeIORef pointer (Just (x, y))
+  Gtk.widgetAddController overlay motion
+  focus <- GI.new Gtk.EventControllerFocus []
+  void $ GI.on focus #enter $ writeIORef focused True >> showTools
+  void $ GI.on focus #leave $ writeIORef focused False >> showTools
+  Gtk.widgetAddController overlay focus
+
+  -- Scrolling without Ctrl goes on to the page.
+  scroll <- GI.new Gtk.EventControllerScroll [#flags := [Gtk.EventControllerScrollFlagsVertical]]
+  void $ GI.on scroll #scroll $ \_ amount -> do
+    state <- Gtk.eventControllerGetCurrentEventState scroll
+    let zooming = any (`elem` state) [Gdk.ModifierTypeControlMask, Gdk.ModifierTypeMetaMask]
+    when zooming $ zoomBy (if amount < 0 then 1.1 else 1 / 1.1)
+    pure zooming
+  Gtk.widgetAddController area scroll
+  pinch <- GI.new Gtk.GestureZoom []
+  pinchStart <- newIORef (Camera 1 0 0, (0, 0))
+  void $ GI.on pinch #begin $ \_ -> do
+    c <- current
+    (_, x, y) <- Gtk.gestureGetBoundingBoxCenter pinch
+    writeIORef pinchStart (c, (x, y))
+  void $ GI.on pinch #scaleChanged $ \scale -> do
+    (c, at) <- readIORef pinchStart
+    place (zoomAround scale at c)
+  Gtk.widgetAddController area pinch
+  drag <- GI.new Gtk.GestureDrag []
+  dragStart <- newIORef (Camera 1 0 0)
+  void $ GI.on drag #dragBegin $ \_ _ -> do
+    void (Gtk.widgetGrabFocus area)
+    current >>= writeIORef dragStart
+  void $ GI.on drag #dragUpdate $ \ox oy -> do
+    c <- readIORef dragStart
+    unless (ox == 0 && oy == 0) $ place c {dx = c.dx + ox, dy = c.dy + oy}
+  Gtk.widgetAddController area drag
+
+  keys <- GI.new Gtk.ShortcutController []
+  forM_ ["<Primary>plus", "<Primary>equal", "<Primary>KP_Add"] $ \k -> shortcut keys k (zoomBy step)
+  forM_ ["<Primary>minus", "<Primary>KP_Subtract"] $ \k -> shortcut keys k (zoomBy (1 / step))
+  shortcut keys "<Primary>0" fit
+  Gtk.widgetAddController overlay keys
+  Gtk.toWidget overlay
+
+-- | How much one press of the tools zooms.
+step :: Double
+step = 1.25
+
+-- | Where the scene sits in the view: scaled by @zoom@, then moved by
+-- @dx@ and @dy@ pixels.
+type Camera :: Type
+data Camera = Camera { zoom :: Double, dx :: Double, dy :: Double }
+
+-- | The scene at its own size, in the middle of a view @w@ by @h@.
+actual :: Size -> Double -> Double -> Camera
+actual s w h = Camera 1 (max 0 (w - s.w) / 2) (max 0 (h - s.h) / 2)
+
+-- | The whole scene, as large as the view allows, in its middle.
+fitted :: Size -> Double -> Double -> Camera
+fitted s w h = Camera z ((w - s.w * z) / 2) ((h - s.h * z) / 2)
+  where
+    z = bounded (min (w / max 1 s.w) (h / max 1 s.h))
+
+-- | Zooms by @factor@, keeping the point under @(px, py)@ where it is.
+zoomAround :: Double -> (Double, Double) -> Camera -> Camera
+zoomAround factor (px, py) c = Camera z (px - (px - c.dx) * k) (py - (py - c.dy) * k)
+  where
+    z = bounded (c.zoom * factor)
+    k = z / c.zoom
+
+-- | From a quarter to four times the scene's own size.
+bounded :: Double -> Double
+bounded = max 0.25 . min 4
 
 describe :: Font -> Text
 describe font =
@@ -230,3 +360,17 @@ colorOf palette role = hex $ case role of
         channel i = case readHex (T.unpack (T.take 2 (T.drop i t))) of
           [(n, "")] -> fromIntegral (n :: Int) / 255
           _ -> 0
+
+css :: Text
+css = mconcat
+  [ "overlay.u-diagram box.tools {"
+  , "  margin: 8px; padding: 3px; border-radius: 8px; border: 1px solid var(--border);"
+  , "  background: var(--surface); box-shadow: 0 2px 8px rgba(0,0,0,0.08);"
+  , "}"
+  , "overlay.u-diagram button.tool {"
+  , "  min-height: 26px; min-width: 26px; padding: 0 4px; border-radius: 6px;"
+  , "  background: transparent; border: none; box-shadow: none; color: var(--text-soft);"
+  , "}"
+  , "overlay.u-diagram button.tool:hover { background: var(--border-subtle); color: var(--text); }"
+  , "overlay.u-diagram button.percent { min-width: 48px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }"
+  ]

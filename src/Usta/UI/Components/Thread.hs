@@ -38,6 +38,8 @@ data Shown = Shown
   { thread :: Th.Thread
   , outdated :: Bool
     -- ^ Its line has changed since; it sits at the nearest one left.
+  , showCode :: Bool
+    -- ^ Shows its file, line and code, away from the diff.
   , lastReviewed :: Maybe UTCTime
   , me :: Text
     -- ^ The user's login, whose own notes are never new.
@@ -106,8 +108,11 @@ new s = do
   when (resolved' || s.outdated) $ #append top hide
   #append whole top
 
-  -- An outdated thread shows the code it was about.
-  when s.outdated $ do
+  -- An outdated thread shows the code it was about, and so does one
+  -- shown away from the diff, with where that code is.
+  when (s.showCode && not s.outdated) $
+    label (s.thread.path <> ":" <> T.pack (show s.thread.line)) ["mono", "where"] >>= #append whole
+  when (s.outdated || s.showCode) $ do
     code <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["code"]]
     forM_ s.thread.code $ \l -> do
       let kind = case T.uncons l of
@@ -194,6 +199,8 @@ css = mconcat
   , "box.u-thread box.code label.add { background: var(--success-bg); }"
   , "box.u-thread box.code label.del { background: var(--danger-bg); }"
   , "box.u-thread box.note { padding: 10px 12px; }"
+  , "box.u-thread label.where { padding: 10px 12px 0; font-size: 12px; color: var(--accent); }"
+  , ".u-conversation box.u-thread { margin: 0; }"
   , "box.u-thread box.reply { padding: 10px 12px; border-top: 1px solid var(--border-subtle); }"
   , "box.u-thread label.problem { padding: 0 12px 10px; color: var(--danger); font-size: 12px; }"
   ]

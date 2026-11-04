@@ -281,6 +281,22 @@ Dark screens use the same layouts with the dark token values.
 
     ![Reviewers, labels and state](design/pull-request-people.png)
 
+    **Request a review.** Request beside Reviewers, or `Ctrl Shift R`,
+    opens the picker with the search focused. Under their headings it
+    lists the collaborators who changed the pull request's files before,
+    with the files and when, latest first; the other collaborators with
+    their full names; and teams with their description and size. The
+    author never shows. A chosen row is tinted and marked new; someone
+    already reviewing is ticked for good with their stance. Typing
+    filters every section and marks the match. The footer counts the
+    matches, or those asked already, and the button what it adds
+    ("Request 1 more"). `↓` leaves the search for the rows, `Space`
+    chooses, `Enter` asks and `Esc` closes. While loading, rows wait as
+    shapes; with nobody left to ask, or when loading fails (with Try
+    again), the picker says so.
+
+    ![Request a review](design/review-picker.png)
+
 19. **Labels.** The picker filters as you type, shows each label's colour
     and description, and offers to create a label with the name typed.
     Creating or editing a label takes a name, an optional description and
@@ -406,7 +422,7 @@ machine; a log too long for a link is saved to Downloads to attach.
 |---|---|
 | Everywhere | `Ctrl K` search and commands, `Ctrl R` sync now |
 | Inbox | `j` / `k` move, `Enter` open, `e` done, `Shift E` all done, `s` star, `o` open in browser |
-| Pull request | `Ctrl Shift R` request a review |
+| Pull request | `Ctrl Shift R` request a review; in the picker `↓` rows, `Space` choose, `Enter` ask, `Esc` close |
 | Pull request files | `n` / `p` next / previous file, `[` / `]` previous / next thread, `Enter` fold / unfold that thread, `r` reply to it, `c` comment on line, `v` mark viewed, `s` split, `w` whitespace, `x` expand context, `Ctrl Enter` submit review |
 | Markdown editor | `Ctrl B` bold, `Ctrl I` italic, `Ctrl E` code, `Ctrl K` link, `Ctrl Shift P` Write / Preview |
 | Diagrams | `Ctrl +` / `Ctrl −` zoom, `Ctrl 0` fit, `F` fullscreen, `←` / `→` other diagrams and `Esc` close in fullscreen |

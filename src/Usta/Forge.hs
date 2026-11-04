@@ -16,7 +16,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 
-import Usta.Types.Check (Check, Job)
+import Usta.Types.Check (Check, Job, Run)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
@@ -114,6 +114,8 @@ data Forge = Forge
     -- involve, recently updated first.
   , repoIssues :: RepoName -> IO [Issue]
     -- ^ A repository's latest issues in any state, newest first.
+  , runs :: RepoName -> IO [Run]
+    -- ^ A repository's latest CI runs, newest first.
     -- ^ What happened besides comments, oldest first.
   , react :: RepoName -> Number -> Maybe Int64 -> Feeling -> Bool -> IO ()
     -- ^ Adds a reaction ('True') or takes it back, on a comment by its id

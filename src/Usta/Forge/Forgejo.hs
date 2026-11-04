@@ -30,7 +30,7 @@ import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
-import Data.Time (UTCTime, addUTCTime, getCurrentTime, nominalDay)
+import Data.Time (UTCTime, addUTCTime, diffUTCTime, getCurrentTime, nominalDay)
 import qualified Network.HTTP.Client as HTTP
 import Servant.Client (BaseUrl (..), ClientM)
 import Data.Traversable (for)
@@ -123,6 +123,9 @@ forgejo manager base host token = do
         latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
           Api.RepoIssuesQuery {kind = Named Api.Issues, state = Api.AnyState, page = Just 1, limit = Just 50})
         pure (map (issueOf host) [(i, []) | i <- latest])
+    , runs = \repo -> do
+        Api.Tasks tasks <- run client (Api.api.tasks (owner repo) (shortName repo) Api.ListQuery {page = Just 1, limit = Just 50})
+        pure (runsOf tasks)
     , timeline = \repo n -> mapMaybe (.event) <$> run client
         (everyPage (\page limit -> Api.api.timeline (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
     , watching = \repo n -> (.watching) <$> run client (Api.api.subscription (owner repo) (shortName repo) n)
@@ -589,6 +592,56 @@ checkOf host s = C.Check
         | otherwise -> Just u
   , job = jobOf s.targetUrl
   }
+
+-- | Jobs gathered into their runs, newest run first. A run's jobs come in
+-- the order the run made them, which is how its pages number them.
+runsOf :: [Api.Task] -> [C.Run]
+runsOf tasks =
+  [ C.Run
+      { number = n
+      , workflow = t.workflowId
+      , title = t.displayTitle
+      , branch = t.headBranch
+      , event = t.event
+      , sha = t.headSha
+      , state = overall (map (.state) jobs)
+      , started = minimum (map (.startedAt) ts)
+      , updated = maximum (map (.updatedAt) ts)
+      , url = t.url
+      , jobs = jobs
+      }
+  | ts@(t : _) <- map (sortOn (.id)) (sortOn (Down . maximum . map (.id)) (Map.elems byRun))
+  , Just n <- [readMaybe (T.unpack (T.takeWhileEnd (/= '/') t.url))]
+  , let jobs = zipWith (jobCheck n) [0 ..] ts
+  ]
+  where
+    byRun = Map.fromListWith (flip (<>)) [(t.url, [t]) | t <- tasks]
+    jobCheck n i t = C.Check
+      { name = t.name
+      , state = taskState t.status
+      , description = case taskState t.status of
+          C.Running -> "Running"
+          C.Waiting -> "Waiting"
+          C.Skipped -> "Skipped"
+          _ -> "Took " <> took (diffUTCTime t.updatedAt t.startedAt)
+      , url = Just (t.url <> "/jobs/" <> T.pack (show i))
+      , job = Just C.Job {run = n, index = i}
+      }
+    took d = let s = round d :: Int in
+      if s < 60 then T.pack (show s) <> "s" else T.pack (show (s `div` 60)) <> "m " <> T.pack (show (s `mod` 60)) <> "s"
+    taskState s = case s of
+      "success" -> C.Passed
+      "failure" -> C.Failed
+      "cancelled" -> C.Failed
+      "skipped" -> C.Skipped
+      "running" -> C.Running
+      _ -> C.Waiting
+    overall states
+      | C.Failed `elem` states = C.Failed
+      | C.Running `elem` states = C.Running
+      | C.Waiting `elem` states = C.Waiting
+      | all (== C.Skipped) states = C.Skipped
+      | otherwise = C.Passed
 
 -- | The job a status links, "…/actions/runs/{run}/jobs/{index}".
 jobOf :: Text -> Maybe C.Job

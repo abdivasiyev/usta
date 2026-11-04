@@ -50,7 +50,7 @@ import qualified Usta.Mirrors as Mirrors
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
-import Usta.Types.Check (Check, Job)
+import Usta.Types.Check (Check, Job, Run)
 import Usta.Types.Label (Definition)
 import Usta.Types.Login (Login)
 import Usta.Types.Milestone (Milestone)
@@ -185,6 +185,8 @@ data Source = Source
     -- ^ A repository's latest pull requests in any state, from the forge,
     -- whoever they involve.
   , repoIssues :: Text -> Text -> IO (Either Text [I.Issue])
+  , runs :: Text -> Text -> IO (Either Text [Run])
+    -- ^ A repository's latest CI runs, from the forge.
   }
 
 -- | A signed-in account, as the window names it.
@@ -303,6 +305,7 @@ fromDatabase pool changes statuses sync = Source
   , compare = \_ _ _ _ -> pure (Left unavailable)
   , repoPullRequests = \_ _ -> pure (Left unavailable)
   , repoIssues = \_ _ -> pure (Left unavailable)
+  , runs = \_ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -380,6 +383,7 @@ samples = Source
   , compare = \_ _ _ _ -> pure (Left unavailable)
   , repoPullRequests = \_ _ -> pure (Left unavailable)
   , repoIssues = \_ _ -> pure (Left unavailable)
+  , runs = \_ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -447,6 +451,7 @@ withAccounts pool accounts source = source
   , compare = \host repo into from -> onRepo host repo (\f name -> f.compare name into from)
   , repoPullRequests = \host repo -> onRepo host repo (\f name -> f.repoPullRequests name)
   , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
+  , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
   }
   where
     onRepo :: Text -> Text -> (Forge.Forge -> RepoName -> IO a) -> IO (Either Text a)
@@ -594,6 +599,7 @@ tracking track s = s
   , compare = \h r a b -> track (s.compare h r a b)
   , repoPullRequests = \h r -> track (s.repoPullRequests h r)
   , repoIssues = \h r -> track (s.repoIssues h r)
+  , runs = \h r -> track (s.runs h r)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors
   }

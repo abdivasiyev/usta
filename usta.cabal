@@ -102,6 +102,7 @@ executable usta
     Usta.Types.Resource
     Usta.Types.Servant.NamedQueryParam
     Usta.Types.ThreadId
+    Usta.Types.Thread
     Usta.Types.Tree
     Usta.Types.Token
     Usta.UI.Components.Avatar

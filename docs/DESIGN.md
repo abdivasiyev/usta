@@ -191,6 +191,20 @@ Dark screens use the same layouts with the dark token values.
 
    ![Review threads](design/review-threads.png)
 
+   **A range of lines.** Drag down the line numbers, or click one and
+   Shift-click another, to choose lines of the new version within one
+   hunk; `Shift ↓` / `Shift ↑` grow the range from the line under the
+   pointer and `Esc` clears it. A bar beside the range has Comment (`c`),
+   Copy link (`y`) to the lines in the pull request, and under its arrow
+   the permalink at the newest commit (`Shift Y`) and the lines as a
+   Markdown quote. The comment box says which lines it is on, and Suggest
+   a change puts their code into a suggestion block. GitHub and GitLab
+   take a range; Forgejo takes one line, so the comment goes on the last
+   one and opens with the lines quoted, and usta shows it as a range
+   again. Forgejo's page links one line, the range's first.
+
+   ![A range of lines](design/line-ranges.png)
+
    **Diff options.** Unified or split, hide whitespace-only changes,
    highlight the changed words in a line, and expand the context 20 lines
    at a time or to the next change. The choice is kept per pull request;

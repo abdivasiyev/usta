@@ -26,6 +26,10 @@ module Usta.Forge.Forgejo.Api
   , IssueEdit (..)
   , MergeOption (..)
   , PullEdit (..)
+  , AssigneesEdit (..)
+  , MilestoneEdit (..)
+  , MilestoneQuery (..)
+  , ApiMilestone (..)
   , LabelIds (..)
   , NewLabel (..)
   , TimelineEvent (..)
@@ -91,6 +95,7 @@ import qualified Usta.Types.Label as L
 import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
 import Usta.Types.Parse (parseM, unparse)
+import qualified Usta.Types.Milestone as M
 import Usta.Types.Readiness (UpdateStyle (..))
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Servant.NamedQueryParam (Named (..), RecordQueryParam, ToQuery)
@@ -204,6 +209,17 @@ data Routes mode = Routes
   , labels
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels"
            :> RecordQueryParam ListQuery :> Get '[JSON] [RepoLabel]
+  , assignees
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "assignees" :> Get '[JSON] [Person]
+  , milestones
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "milestones"
+           :> RecordQueryParam MilestoneQuery :> Get '[JSON] [ApiMilestone]
+  , setAssignees
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> ReqBody '[JSON] AssigneesEdit :> Verb 'PATCH 201 '[JSON] NoContent
+  , setMilestone
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> ReqBody '[JSON] MilestoneEdit :> Verb 'PATCH 201 '[JSON] NoContent
   , setIssueLabels
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> "labels" :> ReqBody '[JSON] LabelIds :> Put '[JSON] [Label]
@@ -526,6 +542,43 @@ newtype TimelineEvent = TimelineEvent {kind :: Text}
 
 instance FromJSON TimelineEvent where
   parseJSON = withObject "TimelineEvent" $ \o -> TimelineEvent <$> o .:? "type" .!= ""
+
+-- | Who an issue or pull request is assigned to, all at once.
+type AssigneesEdit :: Type
+newtype AssigneesEdit = AssigneesEdit {assignees :: [Login]}
+
+instance ToJSON AssigneesEdit where
+  toJSON e = object ["assignees" .= map unparse e.assignees]
+
+-- | The milestone an issue or pull request counts toward, by id; 0 for none.
+type MilestoneEdit :: Type
+newtype MilestoneEdit = MilestoneEdit {milestone :: Int64}
+
+instance ToJSON MilestoneEdit where
+  toJSON e = object ["milestone" .= e.milestone]
+
+-- | Every milestone, open and closed.
+type MilestoneQuery :: Type
+data MilestoneQuery = MilestoneQuery {state :: Text, page :: Maybe Int, limit :: Maybe Int}
+  deriving stock (Generic)
+
+instance ToQuery MilestoneQuery
+
+type ApiMilestone :: Type
+data ApiMilestone = ApiMilestone {id :: Int64, milestone :: M.Milestone}
+
+instance FromJSON ApiMilestone where
+  parseJSON = withObject "Milestone" $ \o -> do
+    i <- o .: "id"
+    state <- o .:? "state" .!= ("open" :: Text)
+    m <- M.Milestone
+      <$> o .: "title"
+      <*> pure (state == "open")
+      <*> o .:? "due_on"
+      <*> o .:? "closed_at"
+      <*> o .:? "open_issues" .!= 0
+      <*> o .:? "closed_issues" .!= 0
+    pure (ApiMilestone i m)
 
 -- | A new title, which says whether it is a draft ("WIP: …").
 type PullEdit :: Type

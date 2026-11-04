@@ -91,6 +91,7 @@ executable usta
     Usta.Types.Issue
     Usta.Types.Label
     Usta.Types.Login
+    Usta.Types.Milestone
     Usta.Types.Mirror
     Usta.Types.Notification
     Usta.Types.Number

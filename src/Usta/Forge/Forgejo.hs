@@ -22,7 +22,7 @@ import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
-import Data.List (nub, sortOn)
+import Data.List (nub, partition, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -40,7 +40,7 @@ import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import qualified Usta.Types.Check as C
-import Usta.Types.Diff (parseDiff)
+import Usta.Types.Diff (FileDiff (..), parseDiff)
 import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..), Verdict (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
@@ -165,11 +165,23 @@ forgejo manager base host token = do
         () <$ run client (Api.api.requestReviewers (owner repo) (shortName repo) n (requestOf whos))
     , unrequestReview = \repo n who ->
         () <$ run client (Api.api.unrequestReviewers (owner repo) (shortName repo) n (requestOf [who]))
-    , reviewCandidates = \repo -> do
-        people <- run client (everyPage (\page limit -> Api.api.collaborators (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+    , reviewCandidates = \repo pr -> do
+        let (o, r) = (owner repo, shortName repo)
+        people <- run client (everyPage (\page limit -> Api.api.collaborators o r Api.ListQuery {page = page, limit = limit}))
         -- A repository a person owns has no teams; Forgejo refuses to list them.
-        teams <- try (run client (Api.api.teams (owner repo) (shortName repo)))
-        pure (map (Rv.Person . (.login)) people <> either (\(_ :: Failure) -> []) (map (Rv.Team . (.name))) teams)
+        teams <- either (\(_ :: Failure) -> []) id <$> try (run client (Api.api.teams o r))
+        sized <- traverse (\t -> (,) t . either (\(_ :: Failure) -> Nothing) (Just . length) <$> try (run client (Api.api.teamMembers t.id))) teams
+        -- Suggestions are a help: without them the list still comes.
+        (author, touched) <- case pr of
+          Nothing -> pure (Nothing, [])
+          Just n -> either (\(_ :: Failure) -> (Nothing, [])) id <$> try (do
+            pull <- run client (Api.api.pullRequest o r n)
+            text <- run client (Api.api.pullDiff o r (Api.DiffOf n))
+            let paths = take 10 (either (const []) (map (.path)) (parseDiff text))
+                commitsOf p = map ((,) p) <$> run client (Api.api.fileCommits o r
+                  Api.FileCommitsQuery {sha = pull.base.ref, path = p, limit = 5, stat = False, verification = False, files = False})
+            (,) (Just pull.user.login) . concat <$> traverse commitsOf paths)
+        pure (candidatesOf author people touched sized)
     -- Forgejo has no reply to a thread; a comment on the same line joins it.
     , reply = \repo n t text -> () <$ run client (Api.api.review (owner repo) (shortName repo) n
         Api.NewReview {verdict = CommentOnly, body = "", lines = [Api.LineComment {path = t.path, line = t.line, body = text}]})
@@ -397,6 +409,21 @@ reviewersOf pull given = reviewed <> pending <> teams
       "REQUEST_CHANGES" -> Just Rv.ChangesRequested
       "COMMENT" -> Just Rv.Commented
       _ -> Nothing
+
+-- | Collaborators who changed the files, latest first, then the other
+-- collaborators, then teams; never the author. @touched@ pairs a file with
+-- a commit that changed it.
+candidatesOf :: Maybe Login -> [Api.Person] -> [(Text, Api.Authored)] -> [(Api.Team, Maybe Int)] -> [Rv.Candidate]
+candidatesOf author people touched teams = sortOn (Down . (.lastChanged)) suggested <> others <> teamCandidates
+  where
+    everyone = [p | p <- people, Just p.login /= author]
+    person p = Rv.Candidate {who = Rv.Person p.login, about = p.fullName, changed = changedBy p.login, lastChanged = lastBy p.login, members = Nothing}
+    byOf login = sortOn (Down . snd) [(path, c.date) | (path, c) <- touched, Just u <- [c.author], u.login == login]
+    changedBy login = nub (map (fileName . fst) (byOf login))
+    lastBy login = snd <$> listToMaybe (byOf login)
+    (suggested, others) = partition (not . null . (.changed)) (map person everyone)
+    teamCandidates = [Rv.Candidate {who = Rv.Team t.name, about = t.description, changed = [], lastChanged = Nothing, members = size} | (t, size) <- teams]
+    fileName = last . (:) "" . T.splitOn "/"
 
 -- | People and teams as Forgejo takes them in a review request.
 requestOf :: [Rv.Who] -> Api.Reviewers

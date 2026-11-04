@@ -27,7 +27,7 @@ import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (PullRequest)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Repository (Repository)
-import Usta.Types.Reviewer (Reviewer, Who)
+import Usta.Types.Reviewer (Candidate, Reviewer, Who)
 import Usta.Types.Thread (Thread, Threads)
 import Usta.Types.ThreadId (ThreadId)
 
@@ -70,8 +70,9 @@ data Forge = Forge
     -- ^ Who reviewed a pull request or is asked to, and where each stands.
   , requestReview :: RepoName -> Number -> [Who] -> IO ()
   , unrequestReview :: RepoName -> Number -> Who -> IO ()
-  , reviewCandidates :: RepoName -> IO [Who]
-    -- ^ Who can be asked to review: collaborators, then teams.
+  , reviewCandidates :: RepoName -> Maybe Number -> IO [Candidate]
+    -- ^ Who can be asked to review: with a pull request, first those who
+    -- changed its files before, then collaborators, then teams.
     -- ^ Its review conversations, and when the user last reviewed it.
   , reply :: RepoName -> Number -> Thread -> Text -> IO ()
     -- ^ Adds a note to a thread.

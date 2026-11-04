@@ -7,6 +7,7 @@ module Usta.UI.Pages.Issue
   ( Comment (..)
   , Talk (..)
   , commentWidget
+  , editableTitle
   , Event (..)
   , Model (..)
   , Actions (..)
@@ -95,6 +96,43 @@ commentWidget t reply opener c = case c.forge of
     , changed = t.refresh
     } >>= Gtk.toWidget
 
+-- | A title with a pencil that edits it in place: Enter or Save renames,
+-- Esc or Cancel keeps it.
+editableTitle :: Text -> [Text] -> (Text -> IO (Either Text ())) -> IO Gtk.Box
+editableTitle start classes rename = do
+  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6, #cssClasses := ["u-title-edit"]]
+  shown <- GI.new Gtk.Label [#label := start, #xalign := 0, #ellipsize := Pango.EllipsizeModeEnd, #cssClasses := classes]
+  pencil <- GI.new Gtk.Button [#iconName := "document-edit-symbolic", #tooltipText := "Edit the title", #cssClasses := ["pencil"]]
+  entry <- GI.new Gtk.Entry [#text := start, #hexpand := True, #visible := False]
+  cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
+  save <- Button.new Button.defaults {Button.label = Just "Save", Button.variant = Button.Primary}
+  forM_ [cancel, save] $ \b -> GI.set b [#visible := False]
+  mapM_ (#append box) =<< sequence [Gtk.toWidget shown, Gtk.toWidget pencil, Gtk.toWidget entry, Gtk.toWidget cancel, Gtk.toWidget save]
+  let editing on' = do
+        GI.set shown [#visible := not on']
+        GI.set pencil [#visible := not on']
+        forM_ [cancel, save] $ \b -> GI.set b [#visible := on']
+        GI.set entry [#visible := on']
+        when on' $ do
+          now <- GI.get shown #label
+          GI.set entry [#text := now, #tooltipText := ""]
+          void (Gtk.widgetGrabFocus entry)
+      commit = do
+        typed <- T.strip <$> GI.get entry #text
+        old <- GI.get shown #label
+        if T.null typed || typed == old then editing False else
+          Button.busy save [cancel] "Saving…" (rename typed) $ \case
+            Left e -> GI.set entry [#tooltipText := e] >> Gtk.widgetAddCssClass entry "error"
+            Right () -> GI.set shown [#label := typed] >> Gtk.widgetRemoveCssClass entry "error" >> editing False
+  void $ GI.on pencil #clicked (editing True)
+  void $ GI.on cancel #clicked (editing False)
+  void $ GI.on save #clicked commit
+  void $ GI.on entry #activate commit
+  keys <- GI.new Gtk.ShortcutController []
+  shortcut keys "Escape" (editing False)
+  Gtk.widgetAddController entry keys
+  pure box
+
 -- | Something that happened on the issue besides comments.
 type Event :: Type
 data Event
@@ -161,14 +199,14 @@ fromDiscussion c d m = m
 -- @content@ gets what sets the header's Open or Closed badge, for when the
 -- forge says otherwise than the list did. @backLabel@ names where Back
 -- goes, e.g. "Issues" or "Inbox".
-new :: Text -> IO () -> Model -> ((Bool -> IO ()) -> IO Gtk.Widget) -> IO Gtk.Widget
-new backLabel onBack m content = do
+new :: Text -> IO () -> (Text -> IO (Either Text ())) -> Model -> ((Bool -> IO ()) -> IO Gtk.Widget) -> IO Gtk.Widget
+new backLabel onBack rename m content = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
                          , #cssClasses := ["u-issue"]
                          ]
-  (bar, showClosed) <- header m backLabel onBack
+  (bar, showClosed) <- header m backLabel onBack rename
   #append page bar
   content showClosed >>= #append page
   Gtk.toWidget page
@@ -203,8 +241,8 @@ thread actions m = do
   details actions m >>= #append columns
   Gtk.toWidget columns
 
-header :: Model -> Text -> IO () -> IO (Gtk.Box, Bool -> IO ())
-header m backLabel onBack = do
+header :: Model -> Text -> IO () -> (Text -> IO (Either Text ())) -> IO (Gtk.Box, Bool -> IO ())
+header m backLabel onBack rename = do
   bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 12
                         , #cssClasses := ["issue-header"]
@@ -234,9 +272,7 @@ header m backLabel onBack = do
   showClosed m.closed
   #append meta state
   #append titles meta
-  titleLabel <- label m.title ["issue-title"]
-  GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
-  #append titles titleLabel
+  editableTitle m.title ["issue-title"] rename >>= #append titles
   #append bar titles
 
   browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
@@ -358,7 +394,9 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 css :: Text
 css = mconcat
-  [ "box.u-issue button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
+  [ "box.u-title-edit button.pencil { min-height: 24px; min-width: 24px; padding: 0; border: none; box-shadow: none; background: transparent; color: var(--text-muted); }"
+  , "box.u-title-edit button.pencil:hover { color: var(--text); }"
+  , "box.u-issue button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
   , "box.u-issue box.issue-header {"
   , "  padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);"
   , "}"

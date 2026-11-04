@@ -156,7 +156,7 @@ buildAt start given app = do
           Gtk.stackGetChildByName screens old >>= mapM_ (Gtk.stackRemove screens)
           pure False
       openPullRequestWith fetch backLabel summary =
-        PullRequest.new backLabel backToMain
+        PullRequest.new backLabel backToMain (source.editTitle summary.host summary.repo summary.number)
           (tabContent source (openPullRequestWith fetch backLabel summary) fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
@@ -205,7 +205,7 @@ buildAt start given app = do
               goals <- either (const []) id <$> source.milestones h r
               me <- maybe "" (.login) . find (\a -> a.host == h) <$> source.accounts
               pure (fmap (\x -> (x, goals, me)) d)
-        Issue.new backLabel backToMain model (\showClosed ->
+        Issue.new backLabel backToMain (source.editTitle h r n) model (\showClosed ->
           loadInto load $ \(d, goals, me) -> do
             c <- clock
             showClosed d.closed

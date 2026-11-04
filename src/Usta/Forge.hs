@@ -34,6 +34,7 @@ import Usta.Types.Readiness (Readiness, UpdateStyle)
 import Usta.Types.Repository (Repository)
 import Usta.Types.Reviewer (Candidate, Reviewer, Who)
 import Usta.Types.Thread (Thread, Threads)
+import Usta.Types.Timeline (Event)
 import Usta.Types.ThreadId (ThreadId)
 
 -- | A note on one line of a pull request's new version, sent with a
@@ -104,6 +105,8 @@ data Forge = Forge
     -- ^ A comment's new text, by its id; 'Nothing' for the description.
   , deleteComment :: RepoName -> Int64 -> IO ()
   , editTitle :: RepoName -> Number -> Text -> IO ()
+  , timeline :: RepoName -> Number -> IO [Event]
+    -- ^ What happened besides comments, oldest first.
   , react :: RepoName -> Number -> Maybe Int64 -> Feeling -> Bool -> IO ()
     -- ^ Adds a reaction ('True') or takes it back, on a comment by its id
     -- or on the description.

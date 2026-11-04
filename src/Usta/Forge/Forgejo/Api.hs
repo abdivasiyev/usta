@@ -279,6 +279,13 @@ data Routes mode = Routes
   , upload
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
            :> "assets" :> QueryParam "name" Text :> MultipartForm Mem (MultipartData Mem) :> PostCreated '[JSON] Attachment
+  , isStarred
+      :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> Verb 'GET 204 '[JSON] NoContent
+    -- ^ 204 when starred; 404 otherwise.
+  , star
+      :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> Verb 'PUT 204 '[JSON] NoContent
+  , unstar
+      :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> Verb 'DELETE 204 '[JSON] NoContent
   , releases
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "releases"
            :> RecordQueryParam ListQuery :> Get '[JSON] [ApiRelease]

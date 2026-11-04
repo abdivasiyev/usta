@@ -304,6 +304,14 @@ forgejo manager base host token = do
         boundary <- genBoundary
         let form = MultipartData [] [FileData "attachment" name (mimeOf name) (BL.fromStrict bytes)]
         (.browserDownloadUrl) <$> run client (Api.api.upload (owner repo) (shortName repo) n (Just name) (boundary, form))
+    -- Forgejo answers 404 for a repository the user has not starred.
+    , starred = \repo -> do
+        answer <- try (run client (Api.api.isStarred (owner repo) (shortName repo)))
+        case answer of
+          Right _ -> pure True
+          Left (Refused why) | "404" `T.isInfixOf` why -> pure False
+          Left failure -> throwIO failure
+    , setStarred = \repo on -> () <$ run client ((if on then Api.api.star else Api.api.unstar) (owner repo) (shortName repo))
     , releases = \repo -> map releaseOf <$> run client
         (everyPage (\page limit -> Api.api.releases (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , tags = \repo -> map (\t -> Br.Tag {name = t.name, at = t.made}) <$> run client

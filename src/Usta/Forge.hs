@@ -140,6 +140,8 @@ data Forge = Forge
   , upload :: RepoName -> Number -> Text -> ByteString -> IO Text
     -- ^ Attaches a file, by name, to an issue or pull request, and says
     -- where it is served, for a comment to link or show it.
+  , starred :: RepoName -> IO Bool
+  , setStarred :: RepoName -> Bool -> IO ()
   , releases :: RepoName -> IO [Release]
     -- ^ Newest first.
   , fileHistory :: RepoName -> Text -> Text -> IO [Commit]

@@ -41,6 +41,7 @@ import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import qualified Usta.Types.Check as C
 import Usta.Types.Diff (FileDiff (..), parseDiff)
+import qualified Usta.Types.Discussion as D
 import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..), Verdict (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
@@ -88,11 +89,18 @@ forgejo manager base host token = do
     , markRead = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Read)))
     , markUnread = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Unread)))
     , discussion = \repo n -> do
-        d <- run client (Api.api.issue (owner repo) (shortName repo) n)
-        cs <- run client (Api.api.issueComments (owner repo) (shortName repo) n)
+        let (o, r) = (owner repo, shortName repo)
+        d <- run client (Api.api.issue o r n)
+        cs <- run client (Api.api.issueComments o r n)
+        login <- myLogin
+        -- One more call for each comment: Forgejo lists reactions apart.
+        opened <- run client (everyPage (\page limit -> concat <$> Api.api.issueReactions o r n Api.ListQuery {page = page, limit = limit}))
+        said <- traverse (\c -> case c.comment.id of
+          Just i -> (\rs -> c.comment {D.reactions = tally login (concat rs)}) <$> run client (Api.api.commentReactions o r i)
+          Nothing -> pure c.comment) cs
         pure Discussion
-          { opening = d.opening
-          , comments = map (.comment) cs
+          { opening = d.opening {D.reactions = tally login opened}
+          , comments = said
           , closed = d.closed
           , merged = d.merged
           , assignees = d.assignees
@@ -101,6 +109,19 @@ forgejo manager base host token = do
           }
     , comment = \repo n text ->
         (.comment) <$> run client (Api.api.postComment (owner repo) (shortName repo) n (Api.NewComment text))
+    , editComment = \repo n which text -> case which of
+        Just i -> () <$ run client (Api.api.editComment (owner repo) (shortName repo) i Api.BodyEdit {body = text})
+        Nothing -> () <$ run client (Api.api.editBody (owner repo) (shortName repo) n Api.BodyEdit {body = text})
+    , deleteComment = \repo i -> () <$ run client (Api.api.deleteComment (owner repo) (shortName repo) i)
+    , editTitle = \repo n title -> () <$ run client (Api.api.editTitle (owner repo) (shortName repo) n Api.PullEdit {title = title})
+    , react = \repo n which feeling adding -> do
+        let (o, r) = (owner repo, shortName repo)
+            body = Api.ReactionBody feeling
+        case (which, adding) of
+          (Just i, True) -> () <$ run client (Api.api.reactToComment o r i body)
+          (Just i, False) -> () <$ run client (Api.api.unreactToComment o r i body)
+          (Nothing, True) -> () <$ run client (Api.api.reactToIssue o r n body)
+          (Nothing, False) -> () <$ run client (Api.api.unreactToIssue o r n body)
     , setClosed = \repo n closed ->
         () <$ run client (Api.api.editIssue (owner repo) (shortName repo) n (Api.IssueEdit closed))
     , merge = \repo n how delete ->
@@ -501,6 +522,15 @@ unDraft title = T.stripStart (go (T.stripStart title))
     go t = case [rest | p <- ["wip:", "[wip]"], let (h, rest) = T.splitAt (T.length p) t, T.toLower h == p] of
       rest : _ -> rest
       [] -> t
+
+-- | Reactions counted per feeling, in the forges' order, marking the
+-- user's own.
+tally :: Login -> [Api.ApiReaction] -> [D.Reaction]
+tally login rs =
+  [ D.Reaction {feeling = f, count = length mine' + length others, mine = not (null mine')}
+  | f <- [minBound .. maxBound]
+  , let (mine', others) = partition ((== login) . (.user)) [x | x <- rs, x.feeling == f]
+  , not (null mine' && null others) ]
 
 -- | People and teams as Forgejo takes them in a review request.
 requestOf :: [Rv.Who] -> Api.Reviewers

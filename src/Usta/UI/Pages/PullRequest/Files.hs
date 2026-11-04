@@ -257,6 +257,11 @@ new actions m = do
   keys <- GI.new Gtk.ShortcutController []
   shortcut keys "bracketright" (step 1)
   shortcut keys "bracketleft" (step (-1))
+  -- Enter and r act on the thread the brackets last went to.
+  let onCurrent act = readIORef currentThread >>= \i ->
+        when (i >= 0 && i < length placed) $ let (_, _, d) = placed !! i in act d
+  shortcut keys "Return" (onCurrent (.toggle))
+  shortcut keys "r" (onCurrent (.focusReply))
   Gtk.widgetAddController columns keys
 
   #append columns scroll

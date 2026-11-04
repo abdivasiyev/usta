@@ -385,6 +385,6 @@ machine; a log too long for a link is saved to Downloads to attach.
 |---|---|
 | Everywhere | `Ctrl K` search and commands, `Ctrl R` sync now |
 | Inbox | `j` / `k` move, `Enter` open, `e` done, `Shift E` all done, `s` star, `o` open in browser |
-| Pull request files | `n` / `p` next / previous file, `[` / `]` previous / next thread, `r` reply, `c` comment on line, `v` mark viewed, `s` split, `w` whitespace, `x` expand context, `Ctrl Enter` submit review |
+| Pull request files | `n` / `p` next / previous file, `[` / `]` previous / next thread, `Enter` fold / unfold that thread, `r` reply to it, `c` comment on line, `v` mark viewed, `s` split, `w` whitespace, `x` expand context, `Ctrl Enter` submit review |
 | Palette | `↑` / `↓` move, `Enter` open, `Ctrl Enter` open in browser, `Esc` close |
 | Creating | `Ctrl Shift P` new pull request, `Ctrl Shift I` new issue |

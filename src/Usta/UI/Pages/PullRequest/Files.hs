@@ -21,7 +21,7 @@ import Control.Monad (filterM, forM, forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
 import Data.Kind (Type)
 import Data.Maybe (isNothing)
@@ -51,6 +51,7 @@ import qualified Usta.Types.Diff as D
 import Usta.Types.Thread (Threads (..))
 import qualified Usta.Types.Thread as Th
 import Usta.Types.Discussion (Verdict (..))
+import Usta.Forge (LineNote (..))
 
 type Model :: Type
 data Model = Model
@@ -79,8 +80,9 @@ data Model = Model
 -- said in the panel.
 type Actions :: Type
 data Actions = Actions
-  { review :: Verdict -> Text -> IO (Either Text ())
-    -- ^ Submits the review; the panel then says so and empties.
+  { review :: Verdict -> Text -> [LineNote] -> IO (Either Text ())
+    -- ^ Submits the review with notes on lines; the panel then says so
+    -- and empties. Comment now sends one note alone this way.
   , merge :: IO (Either Text ())
     -- ^ Squash and merge; 'refresh' runs after.
   , version :: Bool -> Text -> IO (Either Text ByteString)
@@ -149,6 +151,52 @@ new actions m = do
         GI.set progress [ #label := T.pack (show seen) <> " of " <> T.pack (show (length entries))
                                     <> " files viewed" ]
 
+  -- Notes on lines: the boxes open, and the notes waiting for the review.
+  hovered <- newIORef Nothing
+  writingRef <- newIORef []
+  pendingRef <- newIORef []
+  nextPending <- newIORef (0 :: Int)
+  pendingChanged <- newIORef (pure ())
+  let changed = readIORef pendingChanged >>= id
+      writeOn path number text under = do
+        self <- newIORef Nothing
+        let close = do
+              readIORef self >>= mapM_ (Gtk.boxRemove under)
+              modifyIORef' writingRef (filter (/= (path, number)))
+        w <- Thread.writer m.me Thread.Writing
+          { path = path, line = number, text = text
+          , cancel = close
+          , add = \t -> close >> addPending path number t under
+          , now = \t -> actions.review CommentOnly "" [LineNote {path = path, line = number, body = t}]
+          , posted = \t -> do
+              close
+              c <- Thread.pending m.me t (pure ()) (pure ())
+              c.sent
+              #append under c.widget
+          }
+        writeIORef self (Just w)
+        modifyIORef' writingRef ((path, number) :)
+        #append under w
+      addPending path number t under = do
+        i <- readIORef nextPending
+        writeIORef nextPending (i + 1)
+        self <- newIORef Nothing
+        let remove = do
+              readIORef self >>= mapM_ (\c -> Gtk.boxRemove under c.widget)
+              modifyIORef' pendingRef (filter ((/= i) . fst))
+              changed
+        c <- Thread.pending m.me t (remove >> writeOn path number t under) remove
+        writeIORef self (Just c)
+        #append under c.widget
+        modifyIORef' pendingRef (<> [(i, (LineNote {path = path, line = number, body = t}, c))])
+        changed
+      commenting path = Diff.Commenting
+        { start = \number under -> do
+            open <- elem (path, number) <$> readIORef writingRef
+            unless open $ writeOn path number "" under
+        , hovered = hovered
+        }
+
   placedRef <- newIORef []
   entries <- forM m.files $ \f -> do
     placed <- forM [(t, at) | t <- m.threads.threads, t.path == f.path, Just at <- [place f.diffLines t]] $ \(t, (index, outdated)) -> do
@@ -174,7 +222,7 @@ new actions m = do
           pure False
       (,) 0 <$> Gtk.toWidget slot
     markBox <- viewedMark f.viewed
-    diff <- Diff.new f (attached <> maybe [] pure pictures) $ \isViewed -> do
+    diff <- Diff.new f (attached <> maybe [] pure pictures) (commenting f.path) $ \isViewed -> do
       setViewed markBox isViewed
       updateProgress
     #append main diff
@@ -262,10 +310,12 @@ new actions m = do
         when (i >= 0 && i < length placed) $ let (_, _, d) = placed !! i in act d
   shortcut keys "Return" (onCurrent (.toggle))
   shortcut keys "r" (onCurrent (.focusReply))
+  -- c comments on the line under the pointer.
+  shortcut keys "c" (readIORef hovered >>= sequence_)
   Gtk.widgetAddController columns keys
 
   #append columns scroll
-  review actions m (zip placed (map jump placed)) >>= #append columns
+  review actions m (zip placed (map jump placed)) pendingRef pendingChanged >>= #append columns
   Gtk.toWidget columns
 
 -- | The last part of a path, as the Threads list names files.
@@ -331,8 +381,10 @@ fileRow f markBox threads' = do
 
 -- | The review panel; @listed@ are the threads, each with how to jump to
 -- it.
-review :: Actions -> Model -> [((Th.Thread, Bool, Thread.Thread), IO ())] -> IO Gtk.Box
-review actions m listed = do
+review
+  :: Actions -> Model -> [((Th.Thread, Bool, Thread.Thread), IO ())]
+  -> IORef [(Int, (LineNote, Thread.Card))] -> IORef (IO ()) -> IO Gtk.Box
+review actions m listed pendingRef pendingChanged = do
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #widthRequest := 280
@@ -359,11 +411,32 @@ review actions m listed = do
                                  , #cssClasses := ["editor"]
                                  ]
   #append verdict summary
+
+  -- The notes on lines that go out with the review.
+  pendingBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6, #visible := False]
+  pendingTitle <- label "" ["soft", "small"]
+  #append pendingBox pendingTitle
+  pendingList <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
+  #append pendingBox pendingList
+  #append verdict pendingBox
   submit <- Button.new Button.defaults { Button.label = Just "Submit review", Button.variant = Button.Primary }
   #append verdict submit
   said <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["small"]]
   #append verdict said
   #append side verdict
+  let counted n = T.pack (show n) <> (if n == 1 then " comment" else " comments")
+      showPending = do
+        notes <- map (fst . snd) <$> readIORef pendingRef
+        let clear = Gtk.widgetGetFirstChild pendingList >>= mapM_ (\w -> Gtk.boxRemove pendingList w >> clear)
+        clear
+        forM_ notes $ \n -> do
+          row' <- label (fileName n.path <> ":" <> T.pack (show n.line) <> " · " <> T.takeWhile (/= '\n') n.body) ["small", "pending-note"]
+          GI.set row' [#ellipsize := Pango.EllipsizeModeEnd]
+          #append pendingList row'
+        GI.set pendingBox [#visible := not (null notes)]
+        GI.set pendingTitle [#label := "Pending · " <> counted (length notes)]
+        GI.set submit [#label := if null notes then "Submit review" else "Submit review · " <> counted (length notes)]
+  writeIORef pendingChanged showPending
 
   -- Every thread, to jump to.
   unless (null listed) $ do
@@ -395,10 +468,15 @@ review actions m listed = do
         let pick = [v | (v, r) <- zip verdicts radios, r `elem` chosen]
         buffer <- Gtk.textViewGetBuffer summary
         text <- maybe "" id <$> GI.get buffer #text
-        -- A comment-only review needs words; the forge refuses an empty one.
-        forM_ (take 1 pick) $ \v -> unless (v == CommentOnly && T.null (T.strip text)) $
-          run submit "Submitting…" (actions.review v text) $ do
+        waiting <- readIORef pendingRef
+        -- A comment-only review needs words or notes; the forge refuses
+        -- an empty one.
+        forM_ (take 1 pick) $ \v -> unless (v == CommentOnly && T.null (T.strip text) && null waiting) $
+          run submit "Submitting…" (actions.review v text (map (fst . snd) waiting)) $ do
             Gtk.textBufferSetText buffer "" (-1)
+            mapM_ (\(_, (_, c)) -> c.sent) waiting
+            writeIORef pendingRef []
+            showPending
             GI.set said [#label := "Review submitted.", #visible := True, #cssClasses := ["small", "muted"]]
   void $ GI.on submit #clicked send
   keys <- GI.new Gtk.ShortcutController []

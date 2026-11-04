@@ -4,11 +4,16 @@
 -- | A review thread under a line of a diff, as the design draws it: an
 -- open one expanded, a resolved one a single line that opens on click,
 -- an outdated one with the code it was left on. Notes written since the
--- user's last review are marked new.
+-- user's last review are marked new. Also the box a new note on a line
+-- is written in, and the card it shows as while it waits for the review.
 module Usta.UI.Components.Thread
   ( Shown (..)
   , Thread (..)
   , new
+  , Writing (..)
+  , writer
+  , Card (..)
+  , pending
   , css
   ) where
 
@@ -26,6 +31,7 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
+import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Markdown as Markdown
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Style (Tone (..))
@@ -197,6 +203,121 @@ new s = do
       [] -> Nothing
     firstLine = T.takeWhile (/= '\n') . T.strip
 
+-- New notes on lines
+
+-- | What the box is for and what its buttons do.
+type Writing :: Type
+data Writing = Writing
+  { path :: Text
+  , line :: Int
+    -- ^ In the file as the pull request leaves it.
+  , text :: Text
+    -- ^ What the box starts with: empty, or a pending note being edited.
+  , cancel :: IO ()
+    -- ^ Esc or Cancel; the box is gone after.
+  , add :: Text -> IO ()
+    -- ^ Add to review (Ctrl Enter): the note waits for the review.
+  , now :: Text -> IO (Either Text ())
+    -- ^ Comment now: the note goes out alone, off the main thread.
+  , posted :: Text -> IO ()
+    -- ^ Comment now worked.
+  }
+
+-- | The box a new note on a line is written in, with the cursor in it.
+writer :: Text -> Writing -> IO Gtk.Widget
+writer me w = do
+  frame <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-line-comment", "writing"]]
+  top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["top"]]
+  Avatar.new 24 (T.toUpper (T.take 2 me)) >>= #append top
+  label ("Comment on line " <> T.pack (show w.line)) ["strong"] >>= #append top
+  label w.path ["mono", "muted", "small"] >>= #append top
+  #append frame top
+
+  editor <- GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
+                                , #heightRequest := 64
+                                , #topMargin := 10
+                                , #bottomMargin := 10
+                                , #leftMargin := 12
+                                , #rightMargin := 12
+                                , #cssClasses := ["editor"]
+                                ]
+  buffer <- Gtk.textViewGetBuffer editor
+  Gtk.textBufferSetText buffer w.text (-1)
+  #append frame editor
+
+  problem <- label "" ["problem"]
+  GI.set problem [#visible := False, #wrap := True]
+  #append frame problem
+
+  bottom <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["bottom"]]
+  hint <- label "Markdown" ["muted", "small"]
+  GI.set hint [#hexpand := True]
+  #append bottom hint
+  cancelButton <- Button.new Button.defaults {Button.label = Just "Cancel", Button.variant = Button.Flat}
+  nowButton <- Button.new Button.defaults {Button.label = Just "Comment now"}
+  GI.set nowButton [#tooltipText := "Posts it alone, as a comment"]
+  addButton <- Button.new Button.defaults {Button.label = Just "Add to review", Button.variant = Button.Primary}
+  mapM_ (#append bottom) [cancelButton, nowButton, addButton]
+  #append frame bottom
+
+  let written = T.strip . maybe "" id <$> GI.get buffer #text
+      addIt = written >>= \t -> unless (T.null t) (w.add t)
+      postIt = written >>= \t -> unless (T.null t) $ do
+        GI.set problem [#visible := False]
+        Button.busy nowButton [cancelButton, addButton] "Posting…" (w.now t) $ \case
+          Left why -> GI.set problem [#label := why, #visible := True]
+          Right () -> w.posted t
+  void $ GI.on cancelButton #clicked w.cancel
+  void $ GI.on nowButton #clicked postIt
+  void $ GI.on addButton #clicked addIt
+  keys <- GI.new Gtk.ShortcutController []
+  shortcut keys "<Primary>Return" addIt
+  shortcut keys "Escape" w.cancel
+  Gtk.widgetAddController editor keys
+
+  -- The cursor goes in once the box is on screen.
+  void $ GI.on frame #map (void (Gtk.widgetGrabFocus editor))
+  Gtk.toWidget frame
+
+-- | A note shown under its line, waiting for the review or posted.
+type Card :: Type
+data Card = Card
+  { widget :: Gtk.Widget
+  , sent :: IO ()
+    -- ^ It went out with the review: no more Edit or Delete.
+  }
+
+-- | A pending note by @me@, with Edit and Delete; 'sent' marks it sent.
+pending :: Text -> Text -> IO () -> IO () -> IO Card
+pending me body edit delete = do
+  frame <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-line-comment", "pending"]]
+  top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["top"]]
+  Avatar.new 24 (T.toUpper (T.take 2 me)) >>= #append top
+  label me ["strong"] >>= #append top
+  pill <- GI.new Gtk.Box []
+  Badge.new Warning "Pending" >>= #append pill
+  #append top pill
+  status <- label "sent with your review" ["muted", "small"]
+  GI.set status [#hexpand := True]
+  #append top status
+  editButton <- Button.new Button.defaults {Button.label = Just "Edit", Button.variant = Button.Flat}
+  deleteButton <- Button.new Button.defaults {Button.label = Just "Delete", Button.variant = Button.Danger}
+  mapM_ (#append top) [editButton, deleteButton]
+  #append frame top
+  text <- label body ["body"]
+  GI.set text [#wrap := True, #selectable := True]
+  #append frame text
+  void $ GI.on editButton #clicked edit
+  void $ GI.on deleteButton #clicked delete
+  let markSent = do
+        Gtk.widgetGetFirstChild pill >>= mapM_ (Gtk.boxRemove pill)
+        Badge.new Success "Sent" >>= #append pill
+        GI.set status [#label := "just now"]
+        mapM_ (\b -> GI.set b [#visible := False]) [editButton, deleteButton]
+        Gtk.widgetRemoveCssClass frame "pending"
+  w <- Gtk.toWidget frame
+  pure Card {widget = w, sent = markSent}
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
@@ -219,4 +340,13 @@ css = mconcat
   , ".u-conversation box.u-thread { margin: 0; }"
   , "box.u-thread box.reply { padding: 10px 12px; border-top: 1px solid var(--border-subtle); }"
   , "box.u-thread label.problem { padding: 0 12px 10px; color: var(--danger); font-size: 12px; }"
+  , "box.u-line-comment { margin: 6px 12px 10px 108px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }"
+  , "box.u-line-comment.writing { border: 2px solid var(--accent); }"
+  , "box.u-line-comment.pending { border-style: dashed; }"
+  , "box.u-line-comment box.top { padding: 8px 12px; font-size: 13px; }"
+  , "box.u-line-comment.writing box.top { border-bottom: 1px solid var(--border-subtle); }"
+  , "box.u-line-comment label.strong { font-weight: 600; }"
+  , "box.u-line-comment label.body { padding: 0 12px 10px 44px; }"
+  , "box.u-line-comment box.bottom { padding: 8px 12px; border-top: 1px solid var(--border-subtle); background: var(--window); border-radius: 0 0 8px 8px; }"
+  , "box.u-line-comment label.problem { padding: 0 12px 8px; color: var(--danger); font-size: 12px; }"
   ]

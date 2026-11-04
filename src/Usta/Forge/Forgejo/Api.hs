@@ -6,6 +6,8 @@
 module Usta.Forge.Forgejo.Api
   ( Routes (..)
   , api
+  , Web (..)
+  , web
   , ListQuery (..)
   , CommitsQuery (..)
   , RefQuery (..)
@@ -51,6 +53,7 @@ module Usta.Forge.Forgejo.Api
   , ReviewComment (..)
   , LineComment (..)
   , CombinedStatus (..)
+  , CommitStatus (..)
   ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.!=), (.:), (.:?), (.=))
@@ -174,6 +177,20 @@ data Routes mode = Routes
 
 api :: Routes (AsClientT ClientM)
 api = client (Proxy @(NamedRoutes Routes))
+
+-- | Paths of Forgejo's web pages, from the site's root, for what the API
+-- does not give: an Actions job's log, as plain text, one line per line
+-- the job printed, each after its time.
+type Web :: Type -> Type
+data Web mode = Web
+  { jobLog
+      :: mode :- Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int
+           :> "jobs" :> Capture "job" Int :> "attempt" :> Capture "attempt" Int :> "logs" :> Get '[RawText] Text
+  }
+  deriving stock (Generic)
+
+web :: Web (AsClientT ClientM)
+web = client (Proxy @(NamedRoutes Web))
 
 -- | One page of a list. Forgejo pages from 1; a short page is the last.
 type ListQuery :: Type
@@ -749,9 +766,31 @@ type CombinedStatus :: Type
 data CombinedStatus = CombinedStatus
   { state :: Text
   , total :: Int
+  , statuses :: [CommitStatus]
+    -- ^ The latest of each context.
   }
 
 instance FromJSON CombinedStatus where
   parseJSON = withObject "CombinedStatus" $ \o -> CombinedStatus
     <$> o .:? "state" .!= ""
     <*> o .:? "total_count" .!= 0
+    <*> o .:? "statuses" .!= []
+
+-- | One check's latest status. Forgejo Actions names it
+-- "workflow / job (event)" and links it to the job's page, e.g.
+-- "/owner/repo/actions/runs/1/jobs/0"; a skipped job is a "success" that
+-- says "Has been skipped".
+type CommitStatus :: Type
+data CommitStatus = CommitStatus
+  { status :: Text
+  , context :: Text
+  , description :: Text
+  , targetUrl :: Text
+  }
+
+instance FromJSON CommitStatus where
+  parseJSON = withObject "CommitStatus" $ \o -> CommitStatus
+    <$> o .:? "status" .!= ""
+    <*> o .:? "context" .!= ""
+    <*> o .:? "description" .!= ""
+    <*> o .:? "target_url" .!= ""

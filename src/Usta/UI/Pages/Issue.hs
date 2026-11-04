@@ -27,6 +27,7 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
+import qualified Usta.UI.Components.AssignPickers as AssignPickers
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Forge as Forge
@@ -39,6 +40,7 @@ import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
+import Usta.Types.Milestone (Milestone)
 import Usta.Types.Parse (unparse)
 
 type Comment :: Type
@@ -82,6 +84,10 @@ data Actions = Actions
   , setClosed :: Bool -> IO (Either Text ())
   , labels :: [Text] -> LabelPicker.Picker
     -- ^ The labels picker, from the labels it has.
+  , assigning :: AssignPickers.Assignees
+  , milestoning :: AssignPickers.Milestones
+  , milestoneNow :: Maybe Milestone
+    -- ^ Its milestone in full, for the progress.
   , refresh :: IO ()
     -- ^ Loads the page again, with the change.
   }
@@ -263,13 +269,8 @@ details actions m = do
                          , #hexpand := False
                          , #cssClasses := ["details"]
                          ]
-  section side "Assignees" $ \box -> do
-    when (null m.assignees) $ label "No one" ["muted"] >>= #append box
-    forM_ m.assignees $ \(short, name) -> do
-      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-      Avatar.new 22 short >>= #append row
-      label name [] >>= #append row
-      #append box row
+  (people, openPeople) <- AssignPickers.assigneesSection actions.assigning
+  #append side people
   labelsBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
   labelsHead <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
   labelsTitle <- Card.sectionTitle "Labels"
@@ -287,9 +288,11 @@ details actions m = do
   void $ GI.on editLabels #clicked openLabels
   labelKeys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
   shortcut labelKeys "l" openLabels
+  shortcut labelKeys "a" openPeople
   Gtk.widgetAddController side labelKeys
-  section side "Milestone" $ \box ->
-    label (maybe "None" id m.milestone) [] >>= #append box
+  (goal, openGoal) <- AssignPickers.milestoneSection actions.milestoning actions.milestoneNow
+  #append side goal
+  shortcut labelKeys "m" openGoal
   unless (null m.linkedPullRequests) $
     section side "Linked pull requests" $ \box ->
       forM_ m.linkedPullRequests $ \pr -> label pr ["link"] >>= #append box

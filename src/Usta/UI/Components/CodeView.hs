@@ -4,6 +4,7 @@
 -- | A file's text, highlighted by its language, with line numbers.
 module Usta.UI.Components.CodeView
   ( new
+  , withView
   , css
   ) where
 
@@ -18,7 +19,11 @@ import qualified Usta.UI.Highlight as Highlight
 
 -- | @path@ picks the language; @text@ is the whole file.
 new :: Text -> Text -> IO Gtk.Widget
-new path text = do
+new path text = fst <$> withView path text
+
+-- | Like 'new', with the text view, to search it.
+withView :: Text -> Text -> IO (Gtk.Widget, Gtk.TextView)
+withView path text = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["u-code"]]
   let count = max 1 (length (T.lines text))
   numbers <- GI.new Gtk.Label [ #label := T.intercalate "\n" (map (T.pack . show) [1 .. count])
@@ -48,7 +53,8 @@ new path text = do
                                       , #vscrollbarPolicy := Gtk.PolicyTypeNever
                                       , #propagateNaturalHeight := True
                                       ]
-  Gtk.toWidget scroll
+  w <- Gtk.toWidget scroll
+  pure (w, view)
 
 css :: Text
 css = mconcat

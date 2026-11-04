@@ -125,6 +125,7 @@ executable usta
     Usta.UI.Components.CommentCard
     Usta.UI.Components.DiagramView
     Usta.UI.Components.Diff
+    Usta.UI.Components.FileTools
     Usta.UI.Components.Forge
     Usta.UI.Components.Icon
     Usta.UI.Components.Markdown

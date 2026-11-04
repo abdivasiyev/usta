@@ -23,6 +23,7 @@ import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.List (nub, sortOn)
+import Data.Maybe (listToMaybe, mapMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Ord (Down (..))
@@ -35,11 +36,11 @@ import Servant.Client (BaseUrl, ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import Usta.Types.Diff (parseDiff)
-import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..))
+import Usta.Types.Discussion (Discussion (..), NewIssue (..), NewPull (..), Verdict (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
@@ -50,6 +51,7 @@ import Usta.Types.Number (Number)
 import Usta.Types.Parse (parseM, unparse)
 import qualified Usta.Types.PullRequest as P
 import Usta.Types.Ref (Ref (..))
+import qualified Usta.Types.Thread as Th
 import Usta.Types.RepoName (RepoName, owner, shortName)
 import qualified Usta.Types.Repository as R
 import Usta.Types.Servant.NamedQueryParam (Named (..))
@@ -62,6 +64,14 @@ forgejo manager base host token = do
   let client = connect manager base (authorization token)
   details <- newIORef Map.empty
   running <- newIORef Map.empty
+  -- Who the token signs in as, asked once, to find the user's reviews.
+  me <- newIORef Nothing
+  let myLogin = readIORef me >>= \case
+        Just l -> pure l
+        Nothing -> do
+          l <- (.login) <$> run client Api.api.me
+          writeIORef me (Just l)
+          pure l
   pure Forge
     { notifications = \known -> Fetched Nothing <$> notificationsOf client host known.since
     , pullRequests = \known -> Fetched Nothing <$> pullRequestsOf client details running host known.since
@@ -89,8 +99,9 @@ forgejo manager base host token = do
         () <$ run client (Api.api.editIssue (owner repo) (shortName repo) n (Api.IssueEdit closed))
     , merge = \repo n how delete ->
         () <$ run client (Api.api.merge (owner repo) (shortName repo) n Api.MergeOption {how = how, deleteBranch = delete})
-    , review = \repo n verdict text ->
-        () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview {verdict = verdict, body = text})
+    , review = \repo n verdict text notes ->
+        () <$ run client (Api.api.review (owner repo) (shortName repo) n Api.NewReview
+          {verdict = verdict, body = text, lines = [Api.LineComment {path = x.path, line = x.line, body = x.body} | x <- notes]})
     , createIssue = \repo new -> do
         ids <- labelIds client repo new.labels
         created <- run client $ Api.api.createIssue (owner repo) (shortName repo) Api.CreateIssue
@@ -130,6 +141,15 @@ forgejo manager base host token = do
         either (throwIO . Refused) pure (parseDiff text)
     , pullCommits = \repo n -> map (.commit) <$> run client
         (everyPage (\page limit -> Api.api.pullCommits (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
+    , threads = \repo n -> do
+        login <- myLogin
+        given <- run client (everyPage (\page limit -> Api.api.reviews (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
+        said <- concat <$> traverse (\r -> run client (Api.api.reviewComments (owner repo) (shortName repo) n r.id)) [r | r <- given, r.comments > 0]
+        let mine = [t | r <- given, Just u <- [r.user], u.login == login, Just t <- [r.submittedAt]]
+        pure Th.Threads {threads = threadsOf said, lastReviewed = if null mine then Nothing else Just (maximum mine)}
+    -- Forgejo has no reply to a thread; a comment on the same line joins it.
+    , reply = \repo n t text -> () <$ run client (Api.api.review (owner repo) (shortName repo) n
+        Api.NewReview {verdict = CommentOnly, body = "", lines = [Api.LineComment {path = t.path, line = t.line, body = text}]})
     , recentCommits = \repo branch -> map (.commit) <$> run client
         (Api.api.commits (owner repo) (shortName repo)
           Api.CommitsQuery {sha = branch, limit = 10, stat = False, verification = False, files = False})
@@ -292,6 +312,26 @@ pullRequestsOf client cache running host since = do
         , involvement = involvement
         , createdAt = i.createdAt
         , updatedAt = i.updatedAt
+        }
+
+-- | Line comments as conversations: Forgejo keeps the comments on one
+-- line of a file together, so they are grouped the same way.
+threadsOf :: [Api.ReviewComment] -> [Th.Thread]
+threadsOf said = mapMaybe thread (Map.elems grouped)
+  where
+    grouped = Map.fromListWith (flip (<>)) [((c.path, lineOf c), [c]) | c <- sortOn (.createdAt) said]
+    lineOf c = if c.position > 0 then c.position else c.originalPosition
+    thread cs = case cs of
+      [] -> Nothing
+      first : _ -> Just Th.Thread
+        { path = first.path
+        , line = lineOf first
+        -- The hunk ends at the commented line; a few lines show the code.
+        , code = reverse (take 4 (reverse (drop 1 (T.lines first.diffHunk))))
+        , commit = T.take 7 first.commitId
+        , resolvedBy = listToMaybe [u.login | c <- cs, Just u <- [c.resolver]]
+        , notes = [Th.Note {author = u.login, body = c.body, createdAt = c.createdAt} | c <- cs, Just u <- [c.user]]
+        , url = first.htmlUrl
         }
 
 stateOf :: Api.PullRequest -> P.State

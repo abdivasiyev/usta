@@ -36,6 +36,7 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import qualified Usta.UI.Components.Thread as Thread
 import qualified Usta.UI.Components.SyncStatus as SyncStatus
 import Usta.UI.Page (Page (..))
 import qualified Usta.UI.Pages.AddAccount as AddAccount
@@ -66,7 +67,9 @@ import qualified Usta.UI.Sidebar as Sidebar
 import Usta.UI.Source (Connected (..), Source (..))
 import qualified Usta.UI.Source as Source
 import Usta.Details (From (..))
+import qualified Usta.Types.Diff as Changes
 import qualified Usta.Types.Discussion as D
+import Usta.Types.Thread (Threads (..))
 import Usta.Preferences (Preferences (..), Theme (..))
 import Usta.Types.Discussion (Merge (..))
 import Usta.Types.Parse (parse, unparse)
@@ -266,7 +269,38 @@ buildAt start given app = do
             either (Settings.notice anchor (if done then "Not marked done" else "Not moved to the inbox"))
               (const (join (readIORef inboxRef))) result
             pure False
-      inboxActions = Inbox.Actions {open = openNotification, setDone = setDone}
+      -- The preview's description, latest comments and files, from the
+      -- forge; a comment is new when it came after the user's own last one.
+      previewDetails n = do
+        discussed <- source.discussion n.host n.repo n.number
+        changed <- if n.kind == Inbox.Issue then pure (Right []) else fmap (map change . snd) <$> source.pullFiles n.host n.repo n.number
+        me <- maybe "" (.login) . find (\a -> a.host == n.host) <$> source.accounts
+        c <- clock
+        pure $ do
+          d <- discussed
+          let everyone = d.opening : d.comments
+              mineAt = [x.createdAt | x <- everyone, unparse x.author == me]
+              fresh x = n.unread && unparse x.author /= me && all (< x.createdAt) mineAt
+              toSaid x = Inbox.Said {author = unparse x.author, when' = ago c x.createdAt, body = x.body, new = fresh x}
+          pure Inbox.Details
+            { description = (toSaid d.opening) {Inbox.new = False}
+            , latest = map toSaid (reverse (take 2 (reverse d.comments)))
+            , comments = length d.comments
+            , files = either (const []) id changed
+            }
+      change f = Inbox.Change f.path (length [() | Changes.Insertion {} <- f.lines]) (length [() | Changes.Deletion {} <- f.lines])
+      -- All in one go off the main thread; the inbox redraws once.
+      setAllDone ns done = do
+        anchor <- Gtk.toWidget screens
+        void $ forkIO $ do
+          results <- mapM (\n -> source.setDone n done) ns
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            case [problem | Left problem <- results] of
+              problem : _ -> Settings.notice anchor (if done then "Not all were marked done" else "Not all moved back to the inbox") problem
+              [] -> pure ()
+            join (readIORef inboxRef)
+            pure False
+      inboxActions = Inbox.Actions {open = openNotification, setDone = setDone, details = previewDetails, setAllDone = setAllDone}
   initial <- source.inbox
   inboxPages <- forM inboxViews $ \(page, view) -> (,) page <$> Inbox.new view inboxActions initial
   -- Each reload tells the desktop about what is new since the last one,
@@ -377,11 +411,14 @@ buildAt start given app = do
       reload resource = do
         case resource of
           Resource.Notifications -> reloadInbox
-          -- Inbox rows show their pull request's checks and review.
+          -- Inbox rows show their pull request's checks and review, and
+          -- the badges that come from how the user is involved.
           Resource.PullRequests -> do
             reloadInbox
             source.pullRequests >>= pullRequestPage.update
-          Resource.Issues -> source.issues >>= issuePage.update
+          Resource.Issues -> do
+            reloadInbox
+            source.issues >>= issuePage.update
           Resource.Repositories -> source.repositories >>= repositoryPage.update
         drawSidebar
   let drawFooter = do
@@ -512,9 +549,12 @@ tabContent source reopen fetch summary showState tab = case tab of
         (host, repo, n) = at
         load = do
           d <- source.discussion host repo n
-          -- The timeline lists the commits; without them it still loads.
+          -- The timeline lists the commits, and the review threads follow
+          -- the comments; without either it still loads.
           commits <- source.pullCommits host repo n
-          pure (fmap (\x -> (x, either (const []) snd commits)) d)
+          threads <- source.threads host repo n
+          me <- maybe "" (.login) . find (\a -> a.host == host) <$> source.accounts
+          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me)) d)
         actions = Conversation.Actions
           { comment = source.comment host repo n
           , setClosed = source.setClosed host repo n
@@ -525,23 +565,36 @@ tabContent source reopen fetch summary showState tab = case tab of
           Just Success -> Just True
           Just Danger -> Just False
           _ -> Nothing
-    loadInto load $ \(d, commits) -> do
+    loadInto load $ \(d, commits, threads, me) -> do
       c <- clock
       showState $ case (d.merged, d.closed) of
         (True, _) -> PullRequest.MergedState
         (_, True) -> PullRequest.Closed
         _ -> summary.state
+      let shown t = Thread.Shown
+            { thread = t, outdated = False, showCode = True, lastReviewed = threads.lastReviewed
+            , me = me, clock = c, reply = source.reply host repo n t }
       Conversation.new actions (Conversation.fromDiscussion c d commits summary.branches checks)
+        {Conversation.threads = map shown threads.threads}
   PullRequest.Files ->
-    loadInto (source.pullFiles summary.host summary.repo summary.number) $ \(from, changes) ->
+    -- The diff with its review threads; without threads it still shows.
+    let withThreads = do
+          files <- source.pullFiles summary.host summary.repo summary.number
+          threads <- source.threads summary.host summary.repo summary.number
+          me <- maybe "" (.login) . find (\a -> a.host == summary.host) <$> source.accounts
+          c <- clock
+          pure ((\f -> (f, either (const (Threads [] Nothing)) id threads, me, c)) <$> files)
+    in loadInto withThreads $ \((from, changes), threads, me, c) ->
       Files.new Files.Actions
         { review = source.review summary.host summary.repo summary.number
         , merge = source.merge summary.host summary.repo summary.number Squash True
         , version = \old path ->
             fmap snd <$> source.file summary.host summary.repo ((if old then snd else fst) summary.branches) path
         , refresh = reopen
+        , reply = source.reply summary.host summary.repo summary.number
         }
-        (Files.fromFileDiffs (said from "Diff computed locally" "Diff from the forge's API") changes)
+        (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
+          {Files.threads = threads, Files.me = me}
   PullRequest.Commits ->
     loadInto (source.pullCommits summary.host summary.repo summary.number) $ \(from, commits) -> do
       c <- clock
@@ -660,7 +713,7 @@ summaryOf pr = PullRequest.Summary
 -- | The single-key shortcuts, for the footer strip and Settings.
 shortcuts :: [(Text, Text)]
 shortcuts =
-  [("j k", "move"), ("Enter", "open"), ("e", "done"), ("o", "open in browser")]
+  [("j k", "move"), ("Enter", "open"), ("e", "done"), ("Shift E", "all done"), ("o", "open in browser")]
 
 -- | @syncChip@ holds the sync state, which the window keeps current;
 -- @onSync@ runs for the refresh button.
@@ -767,7 +820,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

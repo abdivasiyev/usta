@@ -3,10 +3,12 @@
 
 -- | A unified diff of one file: a header with the path, counts and a
 -- "Viewed" toggle, then numbered lines colored by kind. Any widget (a
--- review thread, say) can be attached below a line.
+-- review thread, say) can be attached below a line, and a line of the
+-- new version can be commented on.
 module Usta.UI.Components.Diff
   ( Line (..)
   , File (..)
+  , Commenting (..)
   , new
   , plain
   , css
@@ -16,6 +18,7 @@ import Control.Monad (forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
+import Data.IORef (IORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -39,17 +42,28 @@ data File = File
   , diffLines :: [Line]
   }
 
+-- | How a diff lets the user start a note on a line of the new version:
+-- a "+" shows by the line under the pointer.
+type Commenting :: Type
+data Commenting = Commenting
+  { start :: Int -> Gtk.Box -> IO ()
+    -- ^ The line's number in the new version and the box under it,
+    -- which the note is written in.
+  , hovered :: IORef (Maybe (IO ()))
+    -- ^ While the pointer is on such a line, what starting there does.
+  }
+
 -- | @attached@ pairs a line's index with a widget shown under it.
 -- A viewed file shows only its header; @onViewed@ hears every toggle.
-new :: File -> [(Int, Gtk.Widget)] -> (Bool -> IO ()) -> IO Gtk.Box
-new file attached onViewed = build file attached (Just onViewed)
+new :: File -> [(Int, Gtk.Widget)] -> Commenting -> (Bool -> IO ()) -> IO Gtk.Box
+new file attached commenting onViewed = build file attached (Just commenting) (Just onViewed)
 
 -- | A diff to read, without the "Viewed" toggle, e.g. for one commit.
 plain :: File -> IO Gtk.Box
-plain file = build file { viewed = False } [] Nothing
+plain file = build file { viewed = False } [] Nothing Nothing
 
-build :: File -> [(Int, Gtk.Widget)] -> Maybe (Bool -> IO ()) -> IO Gtk.Box
-build file attached onViewed = do
+build :: File -> [(Int, Gtk.Widget)] -> Maybe Commenting -> Maybe (Bool -> IO ()) -> IO Gtk.Box
+build file attached commenting onViewed = do
   card <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #cssClasses := ["u-card", "u-diff"]
                          ]
@@ -66,11 +80,28 @@ build file attached onViewed = do
                          ]
   codes <- forM (zip [0 ..] file.diffLines) $ \(index, line) -> do
     (row, code) <- lineRow line
-    #append body row
+    slot <- case (commenting, newSide line) of
+      (Just c, Just number) -> do
+        overlay <- GI.new Gtk.Overlay [#child := row]
+        plus <- GI.new Gtk.Button [ #label := "+", #halign := Gtk.AlignStart, #valign := Gtk.AlignCenter
+                                  , #visible := False, #tooltipText := "Comment on this line (c)"
+                                  , #cssClasses := ["comment-plus"] ]
+        Gtk.overlayAddOverlay overlay plus
+        under <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+        let begin = c.start number under
+        void $ GI.on plus #clicked begin
+        motion <- Gtk.eventControllerMotionNew
+        void $ GI.on motion #enter $ \_ _ -> GI.set plus [#visible := True] >> writeIORef c.hovered (Just begin)
+        void $ GI.on motion #leave $ GI.set plus [#visible := False] >> writeIORef c.hovered Nothing
+        Gtk.widgetAddController overlay motion
+        #append body overlay
+        pure (Just under)
+      _ -> Nothing <$ #append body row
     forM_ [w | (i, w) <- attached, i == index] $ \w -> do
       holder <- GI.new Gtk.Box [#cssClasses := ["diff-attached"]]
       #append holder w
       #append body holder
+    mapM_ (#append body) slot
     pure code
   Highlight.follow card $ \palette ->
     forM_ (zip codes (highlighted palette file)) $ \(code, marked) -> Gtk.labelSetMarkup code marked
@@ -129,6 +160,13 @@ highlighted palette file
       Added _ t -> t
       Removed _ t -> t
 
+-- | A line's number in the new version, for a line that is there.
+newSide :: Line -> Maybe Int
+newSide line = case line of
+  Context _ b _ -> Just b
+  Added b _ -> Just b
+  _ -> Nothing
+
 -- | The row, and the label its code goes in as markup.
 lineRow :: Line -> IO (Gtk.Box, Gtk.Label)
 lineRow line = do
@@ -182,6 +220,9 @@ css = mconcat
   , "box.u-diff box.diff-line.added { background: var(--success-bg); color: var(--success); }"
   , "box.u-diff box.diff-line.removed { background: var(--danger-bg); color: var(--danger); }"
   , "box.u-diff box.diff-attached { padding: 8px 12px 8px 108px; background: var(--surface); }"
+  -- The holder already indents what it holds.
+  , "box.u-diff box.diff-attached > box.u-thread { margin: 0; }"
+  , "box.u-diff button.comment-plus { min-width: 18px; min-height: 18px; margin-left: 14px; padding: 0; border-radius: 4px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 12px; }"
   , "box.u-diff > box:last-child { border-radius: 0 0 8px 8px; }"
   , "box.u-diff.collapsed box.diff-header { border-bottom: none; border-radius: 8px; }"
   ]

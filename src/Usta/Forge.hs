@@ -6,6 +6,7 @@ module Usta.Forge
   , Fetched (..)
   , CloneUrls (..)
   , Failure (..)
+  , LineNote (..)
   ) where
 
 import Control.Exception (Exception)
@@ -25,7 +26,19 @@ import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (PullRequest)
 import Usta.Types.RepoName (RepoName)
 import Usta.Types.Repository (Repository)
+import Usta.Types.Thread (Thread, Threads)
 import Usta.Types.ThreadId (ThreadId)
+
+-- | A note on one line of a pull request's new version, sent with a
+-- review; it starts a thread there.
+type LineNote :: Type
+data LineNote = LineNote
+  { path :: Text
+  , line :: Int
+    -- ^ The line in the file as the pull request leaves it.
+  , body :: Text
+  }
+  deriving stock (Eq, Show)
 
 -- | Each list takes what sync already has of it, and answers
 -- 'NotModified' when that is still current, or what changed since.
@@ -46,6 +59,10 @@ data Forge = Forge
     -- ^ What a pull request changes, for when the repository has no mirror.
   , pullCommits :: RepoName -> Number -> IO [Commit]
     -- ^ Its commits, oldest first.
+  , threads :: RepoName -> Number -> IO Threads
+    -- ^ Its review conversations, and when the user last reviewed it.
+  , reply :: RepoName -> Number -> Thread -> Text -> IO ()
+    -- ^ Adds a note to a thread.
   , recentCommits :: RepoName -> Text -> IO [Commit]
     -- ^ The last commits on a branch, newest first.
   , readme :: RepoName -> Text -> IO (Maybe (Text, Text))
@@ -60,8 +77,8 @@ data Forge = Forge
     -- ^ Closes ('True') or reopens an issue or pull request.
   , merge :: RepoName -> Number -> Merge -> Bool -> IO ()
     -- ^ Merges a pull request; 'True' deletes its branch after.
-  , review :: RepoName -> Number -> Verdict -> Text -> IO ()
-    -- ^ Submits a review with its comment.
+  , review :: RepoName -> Number -> Verdict -> Text -> [LineNote] -> IO ()
+    -- ^ Submits a review with its comment and its notes on lines.
   , createIssue :: RepoName -> NewIssue -> IO Number
   , createPull :: RepoName -> NewPull -> IO Number
   , branches :: RepoName -> IO [Text]

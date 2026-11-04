@@ -10,6 +10,8 @@ module Usta.UI.Pages.Inbox
   , Notification (..)
   , View (..)
   , Actions (..)
+  , Said (..)
+  , Details (..)
   , lists
   , worthTelling
   , webUrl
@@ -20,7 +22,8 @@ module Usta.UI.Pages.Inbox
   , css
   ) where
 
-import Control.Monad (forM_, void, when)
+import Control.Concurrent (forkIO)
+import Control.Monad (forM_, join, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -29,15 +32,18 @@ import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gio as Gio
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Page (Page (..), refill)
@@ -140,6 +146,31 @@ data Actions = Actions
     -- ^ "Open review" or "Open issue".
   , setDone :: Notification -> Bool -> IO ()
     -- ^ "Mark as done" ('True') or "Move to inbox" ('False').
+  , details :: Notification -> IO (Either Text Details)
+    -- ^ What the preview loads from the forge; runs off the main thread.
+  , setAllDone :: [Notification] -> Bool -> IO ()
+    -- ^ "Mark all done" ('True'), and its Undo ('False').
+  }
+
+-- | A comment as the preview shows it.
+type Said :: Type
+data Said = Said
+  { author :: Text
+  , when' :: Text
+  , body :: Text
+    -- ^ Markdown, as written.
+  , new :: Bool
+    -- ^ Since the user last took part.
+  }
+
+-- | What the cache does not hold: the description, the latest comments
+-- and, for a pull request, its changed files.
+type Details :: Type
+data Details = Details
+  { description :: Said
+  , latest :: [Said]
+  , comments :: Int
+  , files :: [Change]
   }
 
 -- | The notification's pull request or issue on the forge's website.
@@ -173,7 +204,10 @@ new view actions notifications = do
 
   previewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
 
+  -- A click only selects: the preview shows it, and Enter or a
+  -- double-click opens it.
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeSingle
+                             , #activateOnSingleClick := False
                              , #cssClasses := ["u-inbox-list"]
                              ]
   empty <- GI.new Gtk.Label [ #label := emptyText
@@ -226,6 +260,8 @@ new view actions notifications = do
   shortcut keys "k" (step (-1))
   shortcut keys "e" (selectedOne >>= mapM_ (\n -> actions.setDone n (not (lists Finished n))))
   shortcut keys "o" (selectedOne >>= mapM_ openInBrowser)
+  markAllRef <- newIORef (pure ())
+  shortcut keys "<Shift>e" (join (readIORef markAllRef))
   Gtk.widgetAddController list keys
   void $ GI.on list #rowActivated $ \_ -> selectedOne >>= mapM_ actions.open
 
@@ -261,18 +297,63 @@ new view actions notifications = do
                               ]
   #append filterBar =<< if view == Finished then Gtk.toWidget doneNote else Gtk.toWidget filters
   #append filterBar countLabel
+  markAll <- Button.new Button.defaults
+    { Button.label = Just "Mark all done", Button.icon = Just "object-select-symbolic", Button.tooltip = Just "Everything in this view (Shift E)" }
+  Gtk.widgetAddCssClass markAll "mark-all"
+  unless (view == Finished) $ #append filterBar markAll
+
+  -- After Mark all done: how many, and Undo, for a few seconds.
+  toastText <- label "" []
+  undo <- GI.new Gtk.Button [#label := "Undo", #cssClasses := ["flat", "undo"]]
+  toastBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["toast"]]
+  GI.set toastText [#hexpand := True]
+  #append toastBox toastText
+  #append toastBox undo
+  toast <- GI.new Gtk.Revealer [ #child := toastBox
+                               , #revealChild := False
+                               , #transitionType := Gtk.RevealerTransitionTypeSlideUp
+                               , #valign := Gtk.AlignEnd
+                               , #halign := Gtk.AlignFill
+                               , #canTarget := True
+                               ]
+  pending <- newIORef (pure ())
+  shownAt <- newIORef (0 :: Int)
+  void $ GI.on undo #clicked $ do
+    GI.set toast [#revealChild := False]
+    join (readIORef pending)
+    writeIORef pending (pure ())
+  let markEverything = do
+        f <- readIORef current
+        these <- filter (keeps f) <$> readIORef items
+        unless (null these) $ do
+          actions.setAllDone these True
+          let n = length these
+          GI.set toastText [#label := T.pack (show n) <> (if n == 1 then " notification" else " notifications") <> " marked done"]
+          writeIORef pending (actions.setAllDone these False)
+          GI.set toast [#revealChild := True]
+          -- Each toast hides itself unless a newer one took its place.
+          shown' <- (+ 1) <$> readIORef shownAt
+          writeIORef shownAt shown'
+          void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 6 $ do
+            latest <- readIORef shownAt
+            when (latest == shown') $ GI.set toast [#revealChild := False] >> writeIORef pending (pure ())
+            pure False
+  writeIORef markAllRef markEverything
+  void $ GI.on markAll #clicked markEverything
 
   listScroll <- GI.new Gtk.ScrolledWindow [ #child := list
                                           , #vexpand := True
                                           , #hscrollbarPolicy := Gtk.PolicyTypeNever
                                           ]
+  listOverlay <- GI.new Gtk.Overlay [#child := listScroll, #vexpand := True]
+  Gtk.overlayAddOverlay listOverlay toast
   listPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                              , #widthRequest := 460
                              , #hexpand := False
                              , #cssClasses := ["u-inbox-pane"]
                              ]
   #append listPane filterBar
-  #append listPane listScroll
+  #append listPane listOverlay
 
   #append page listPane
   #append page previewScroll
@@ -412,24 +493,6 @@ preview actions n = do
     forM_ n.review $ \(tone, text) -> Card.stat tone "Your review" text >>= #append stats
     #append pane stats
 
-  when (not (null n.changes)) $ do
-    files <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
-    Card.sectionTitle "Files" >>= #append files
-    card <- Card.new
-    forM_ n.changes $ \(Change path added removed) -> do
-      fileRow <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                                , #spacing := 6
-                                , #cssClasses := ["file-row"]
-                                ]
-      pathLabel <- label path ["mono"]
-      GI.set pathLabel [#hexpand := True]
-      #append fileRow pathLabel
-      label ("+" <> T.pack (show added)) ["mono", "added"] >>= #append fileRow
-      label ("−" <> T.pack (show removed)) ["mono", "removed"] >>= #append fileRow
-      #append card fileRow
-    #append files card
-    #append pane files
-
   buttons <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   let primary = if n.kind == Issue then "Open issue" else "Open review"
   open <- Button.new Button.defaults { Button.label = Just primary, Button.variant = Button.Primary }
@@ -444,9 +507,56 @@ preview actions n = do
   void $ GI.on browser #clicked (openInBrowser n)
   #append buttons browser
   #append pane buttons
+  hint <- label "Or press Enter, or double-click the row." ["muted", "small", "hint"]
+  #append pane hint
+
+  -- Below the buttons: why it is here, then what the forge has.
+  more <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 20, #cssClasses := ["more"]]
+  forM_ n.reason $ \r -> do
+    why <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["why"]]
+    Badge.dot (fst (reasonBadge r)) >>= #append why
+    label (reasonText r <> " · " <> n.age) [] >>= #append why
+    #append more why
+  loading <- Skeleton.detail
+  #append more loading
+  #append pane more
+  void $ forkIO $ do
+    loaded <- actions.details n
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      Gtk.boxRemove more loading
+      case loaded of
+        Left problem -> label problem ["muted"] >>= #append more
+        Right d -> do
+          section "Description" "" [d.description] >>= #append more
+          unless (null d.latest) $ do
+            let count = T.pack (show d.comments) <> (if d.comments == 1 then " comment" else " comments")
+            section "Latest comments" (count <> " · open the " <> (if n.kind == Issue then "issue" else "conversation")) d.latest >>= #append more
+          let changes = if null d.files then n.changes else d.files
+          unless (null changes) $ filesSection changes >>= #append more
+      pure False
 
   pure pane
   where
+    -- A titled list of comments; @link@ opens the page.
+    section title link said = do
+      box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+      top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+      t <- Card.sectionTitle title
+      GI.set t [#hexpand := True]
+      #append top t
+      unless (T.null link) $ do
+        l <- GI.new Gtk.Button [#label := link, #cssClasses := ["flat", "link"]]
+        void $ GI.on l #clicked (actions.open n)
+        #append top l
+      #append box top
+      forM_ said $ \x -> saidCard x >>= #append box
+      pure box
+    reasonText r = case r of
+      ReviewRequested -> "Your review is requested"
+      ChecksFailed -> "Its checks failed"
+      Mentioned -> "You were mentioned"
+      Assigned -> "It is assigned to you"
+      WasMerged -> "It was merged"
     stateBadge = case n.kind of
       PullRequest -> Badge.new Success "Open"
       MergedPullRequest -> Badge.new Merged "Merged"
@@ -456,6 +566,42 @@ openInBrowser :: Notification -> IO ()
 openInBrowser n = do
   launcher <- Gtk.uriLauncherNew (Just (webUrl n))
   Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+
+-- | A comment: who and when, marked when new, and its Markdown.
+saidCard :: Said -> IO Gtk.Box
+saidCard x = do
+  card <- Card.new
+  when x.new $ Gtk.widgetAddCssClass card "new"
+  top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["said-top"]]
+  Avatar.new 24 (T.toUpper (T.take 2 x.author)) >>= #append top
+  label x.author ["said-author"] >>= #append top
+  label ("· " <> x.when') ["muted"] >>= #append top
+  when x.new $ Badge.new Accent "New" >>= #append top
+  #append card top
+  body <- Markdown.new (if T.null (T.strip x.body) then "*No description.*" else x.body)
+  Gtk.widgetAddCssClass body "said-body"
+  #append card body
+  pure card
+
+-- | The changed files, with the lines each adds and removes.
+filesSection :: [Change] -> IO Gtk.Box
+filesSection changes = do
+  files <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+  Card.sectionTitle "Files" >>= #append files
+  card <- Card.new
+  forM_ changes $ \(Change path added removed) -> do
+    fileRow <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
+                              , #spacing := 6
+                              , #cssClasses := ["file-row"]
+                              ]
+    pathLabel <- label path ["mono"]
+    GI.set pathLabel [#hexpand := True]
+    #append fileRow pathLabel
+    label ("+" <> T.pack (show added)) ["mono", "added"] >>= #append fileRow
+    label ("−" <> T.pack (show removed)) ["mono", "removed"] >>= #append fileRow
+    #append card fileRow
+  #append files card
+  pure files
 
 changesCard :: [Change] -> IO Gtk.Box
 changesCard cs = do
@@ -596,6 +742,17 @@ css = mconcat
   , "box.u-preview label.chip {"
   , "  background: var(--neutral-bg); color: var(--text); padding: 1px 6px; border-radius: 4px;"
   , "}"
+  , "box.u-preview label.hint { margin-top: -12px; }"
+  , "box.u-filter-bar button.mark-all { min-height: 30px; padding: 0 10px; margin-left: 8px; font-size: 13px; }"
+  , "revealer box.toast { margin: 12px; padding: 10px 14px; border-radius: 8px; background: var(--text); color: var(--window); }"
+  , "revealer box.toast button.undo { color: var(--window); font-weight: 700; min-height: 24px; padding: 0 6px; }"
+  , "box.u-preview box.more { padding-top: 20px; border-top: 1px solid var(--border); }"
+  , "box.u-preview box.why { padding: 10px 12px; border-radius: 8px; background: var(--accent-bg); color: var(--accent-soft); }"
+  , "box.u-preview box.u-card.new { box-shadow: inset 3px 0 0 var(--accent); }"
+  , "box.u-preview box.said-top { padding: 10px 12px 0; }"
+  , "box.u-preview label.said-author { font-weight: 600; }"
+  , "box.u-preview .said-body { padding: 6px 12px 12px; }"
+  , "box.u-preview button.link { color: var(--accent); padding: 0 4px; min-height: 24px; font-size: 12px; }"
   , "box.u-preview box.file-row { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }"
   , "box.u-preview box.file-row:last-child { border-bottom: none; }"
   , "label.added { color: var(--success); }"

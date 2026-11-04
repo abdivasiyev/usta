@@ -47,6 +47,7 @@ import Usta.Mirrors (Mirrors (..))
 import Usta.Preferences (Preferences (..))
 import qualified Usta.Preferences as Preferences
 import qualified Usta.Mirrors as Mirrors
+import qualified Usta.Pins as Pins
 import qualified Usta.Git as Git
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
@@ -197,6 +198,11 @@ data Source = Source
   , tagList :: Text -> Text -> IO (Either Text (From, [Tag]))
   , upload :: Text -> Text -> Int -> Text -> ByteString -> IO (Either Text Text)
     -- ^ By host, repository, number, file name and bytes: where it is served.
+  , starred :: Text -> Text -> IO (Either Text Bool)
+  , setStarred :: Text -> Text -> Bool -> IO (Either Text ())
+  , pins :: IO [(Text, Text)]
+    -- ^ The pinned repositories, by host and name, in order.
+  , setPinned :: (Text, Text) -> Bool -> IO ()
   , releases :: Text -> Text -> IO (Either Text [Release])
     -- ^ From the forge, newest first.
   , history :: Text -> Text -> Text -> Int -> IO (Either Text (From, [Commit]))
@@ -337,6 +343,10 @@ fromDatabase pool changes statuses sync = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
+  , starred = \_ _ -> pure (Left unavailable)
+  , setStarred = \_ _ _ -> pure (Left unavailable)
+  , pins = Pins.pins
+  , setPinned = Pins.setPinned
   , upload = \_ _ _ _ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
@@ -427,6 +437,10 @@ samples = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
+  , starred = \_ _ -> pure (Right False)
+  , setStarred = \_ _ _ -> pure (Left unavailable)
+  , pins = pure []
+  , setPinned = \_ _ -> pure ()
   , upload = \_ _ _ _ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
@@ -504,6 +518,8 @@ withAccounts pool accounts source = source
   , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
   , releases = \host repo -> onRepo host repo (\f name -> f.releases name)
+  , starred = \host repo -> onRepo host repo (\f name -> f.starred name)
+  , setStarred = \host repo on -> onRepo host repo (\f name -> f.setStarred name on)
   , upload = \host repo n file bytes -> onForge host repo n (\f name number -> f.upload name number file bytes)
   , discardPending = \host repo n -> onForge host repo n (\f name number -> f.discardPending name number)
   }
@@ -658,6 +674,8 @@ tracking track s = s
   , branchList = \h r b -> track (s.branchList h r b)
   , tagList = \h r -> track (s.tagList h r)
   , releases = \h r -> track (s.releases h r)
+  , starred = \h r -> track (s.starred h r)
+  , setStarred = \h r o -> track (s.setStarred h r o)
   , upload = \h r n f b -> track (s.upload h r n f b)
   , history = \h r b n -> track (s.history h r b n)
   , changes = \h r b t -> track (s.changes h r b t)

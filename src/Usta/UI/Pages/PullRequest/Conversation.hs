@@ -99,6 +99,7 @@ data Actions = Actions
     -- ^ 'True' deletes the branch after.
   , scheduleMerge :: D.Merge -> Bool -> IO (Either Text ())
     -- ^ Merges once the checks pass.
+  , cancelScheduledMerge :: IO (Either Text ())
   , markReady :: IO (Either Text ())
   , updateBranch :: UpdateStyle -> IO (Either Text ())
   , requestReview :: [Who] -> IO (Either Text ())
@@ -246,6 +247,11 @@ mergeBox run actions m s = do
       void $ GI.on update #clicked $ do
         rebase <- maybe (pure False) (\b -> GI.get b #active) (lookup 1 (zip [0 :: Int ..] styleButtons))
         run update box "Updating…" (actions.updateBranch (if rebase then ByRebase else ByMerge))
+    when r.scheduled $ do
+      cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
+      box <- row Success "Merges when the checks pass"
+        "Scheduled: it merges by itself once the checks pass and approvals are in." =<< sequence [Gtk.toWidget cancel]
+      void $ GI.on cancel #clicked (run cancel box "Cancelling…" actions.cancelScheduledMerge)
     when r.conflicts $
       void $ row Danger ("Conflicts with " <> m.target) "Resolve them on your computer, then push; the merge waits until then." []
   when (missing > 0) $
@@ -263,8 +269,9 @@ mergeBox run actions m s = do
   #append buttons how
   delete <- GI.new Gtk.CheckButton [#label := "Delete branch after merge", #active := True]
   #append buttons delete
+  let scheduled = maybe False (.scheduled) s.readiness
   auto <- GI.new Gtk.CheckButton [ #label := "Merge automatically when checks pass and approvals are in"
-                                 , #visible := s.checksRunning ]
+                                 , #visible := s.checksRunning && not scheduled ]
   #append buttons auto
   reason <- label "" ["muted", "small", "reason"]
   GI.set reason [#hexpand := True, #xalign := 1]
@@ -272,7 +279,8 @@ mergeBox run actions m s = do
   mergeButton <- Button.new Button.defaults { Button.label = Just "Merge", Button.variant = Button.Primary }
   #append buttons mergeButton
   let blockers waiting =
-        [ "Mark it ready first" | maybe False (.draft) s.readiness ]
+        [ "Already scheduled" | scheduled ]
+        <> [ "Mark it ready first" | maybe False (.draft) s.readiness ]
         <> [ "Resolve the conflicts first" | maybe False (.conflicts) s.readiness ]
         <> [ "Some checks failed" | s.checksPassed == Just False ]
         <> [ "Needs " <> plural missing "more approval" | missing > 0, not waiting ]

@@ -695,7 +695,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         _ -> summary.state
       let shown t = Thread.Shown
             { thread = t, outdated = False, showCode = True, lastReviewed = threads.lastReviewed
-            , me = me, clock = c, reply = source.reply host repo n t }
+            , me = me, clock = c, reply = source.reply host repo n t, upload = Just (source.upload host repo n) }
           model = Conversation.fromDiscussion c d commits summary.branches checks
           running = fmap fst summary.checks == Just Warning
       Conversation.new (actionsFor d goals me c) model
@@ -731,6 +731,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         , refresh = reopen
         , reply = source.reply summary.host summary.repo summary.number
         , discard = fmap (() <$) (source.discardPending summary.host summary.repo summary.number)
+        , upload = Just (source.upload summary.host summary.repo summary.number)
         }
         panels
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)

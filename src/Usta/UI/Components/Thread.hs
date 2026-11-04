@@ -30,6 +30,7 @@ import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
@@ -55,6 +56,7 @@ data Shown = Shown
   , clock :: Clock
   , reply :: Text -> IO (Either Text ())
     -- ^ Adds a note; runs off the main thread.
+  , upload :: Maybe Attach.Uploader
   }
 
 -- | The drawn thread, and what the Files tab does with it.
@@ -171,7 +173,7 @@ new s = do
 
   -- A reply goes to the forge, then shows here at once; Ctrl Enter sends.
   replyRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6, #cssClasses := ["reply"]]
-  (entry, replyBuffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 56, MarkdownEditor.compact = True}
+  (entry, replyBuffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 56, MarkdownEditor.compact = True, MarkdownEditor.upload = s.upload}
   #append replyRow entry
   send <- Button.new Button.defaults {Button.label = Just (if resolved' then "Reply and reopen" else "Reply")}
   GI.set send [#halign := Gtk.AlignEnd]
@@ -244,6 +246,7 @@ data Writing = Writing
     -- ^ Comment now: the note goes out alone, off the main thread.
   , posted :: Text -> IO ()
     -- ^ Comment now worked.
+  , attach :: Maybe Attach.Uploader
   }
 
 -- | "213–215".
@@ -285,7 +288,7 @@ writer me w = do
   #append frame top
 
   -- The toolbar, emoji, :name: and Preview of every comment box.
-  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.text = w.text, MarkdownEditor.height = 72}
+  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.text = w.text, MarkdownEditor.height = 72, MarkdownEditor.upload = w.attach}
   #append frame editor
   void $ GI.on suggest #clicked $ do
     Gtk.textBufferInsertAtCursor buffer ("```suggestion\n" <> T.unlines w.code <> "```\n") (-1)

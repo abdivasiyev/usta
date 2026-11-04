@@ -37,6 +37,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
@@ -103,6 +104,8 @@ data Actions = Actions
     -- ^ Adds a note to a thread.
   , discard :: IO (Either Text ())
     -- ^ Deletes the user's review left pending on the forge, if any.
+  , upload :: Maybe Attach.Uploader
+    -- ^ Where files attached in the review's boxes go.
   }
 
 -- | One changed file as shown in both columns.
@@ -218,6 +221,7 @@ new actions panels m = do
           , cancel = close
           , add = \t -> close >> addPending path (from, number) code t under
           , now = \t -> actions.review CommentOnly "" [noteOf t]
+          , attach = actions.upload
           , posted = \t -> do
               close
               c <- Thread.pending m.me t (pure ()) (pure ())
@@ -252,7 +256,7 @@ new actions panels m = do
   placedRef <- newIORef []
   entries <- forM m.files $ \f -> do
     placed <- forM [(t, at) | t <- m.threads.threads, t.path == f.path, Just at <- [place f.diffLines t]] $ \(t, (index, outdated)) -> do
-      drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, showCode = False, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock, reply = actions.reply t}
+      drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, showCode = False, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock, reply = actions.reply t, upload = actions.upload}
       pure (index, (t, outdated, drawn))
     modifyIORef' placedRef (<> map snd placed)
     let attached = [(index, drawn.widget) | (index, (_, _, drawn)) <- placed]
@@ -384,7 +388,6 @@ new actions panels m = do
   shortcut keys "<Shift>Down" (onLines (\k -> k.grow 1))
   shortcut keys "<Shift>Up" (onLines (\k -> k.grow (-1)))
   shortcut keys "Escape" (onLines (.clear))
-  Gtk.widgetAddController columns keys
 
   #append columns scroll
   -- Its own width, which its editor's toolbar does not widen; folds to a
@@ -411,6 +414,8 @@ new actions panels m = do
   -- comment box Ctrl B is bold.
   shortcut keys "<Primary>b" filesPanel.toggle
   shortcut keys "<Primary><Shift>b" reviewPanel.toggle
+  -- Added last: once on the widget, the controller is the widget's.
+  Gtk.widgetAddController columns keys
   Gtk.toWidget columns
 
 -- | A file's bytes as text, if they are UTF-8.
@@ -508,7 +513,7 @@ review actions m listed pendingRef pendingChanged = do
     [] -> pure ()
   forM_ radios (#append verdict)
   label "Summary" ["soft", "small"] >>= #append verdict
-  (summary, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 72, MarkdownEditor.compact = True}
+  (summary, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 72, MarkdownEditor.compact = True, MarkdownEditor.upload = actions.upload}
   #append verdict summary
 
   -- The notes on lines that go out with the review.

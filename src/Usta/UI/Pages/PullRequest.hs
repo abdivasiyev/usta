@@ -20,11 +20,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
-import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
+import qualified Usta.UI.Pages.Issue as Issue
 import Usta.UI.Style (Tone (..), toneClass)
 
 type State :: Type
@@ -66,14 +66,14 @@ tabName = T.toLower . T.pack . show
 -- | @backLabel@ names where Back goes, e.g. "Pull requests" or "Inbox";
 -- @tabContent@ builds each tab's screen, given what sets the header's
 -- state badge, for when the forge says otherwise than the list did.
-new :: Text -> IO () -> ((State -> IO ()) -> Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
-new backLabel onBack tabContent summary = do
+new :: Text -> IO () -> (Text -> IO (Either Text ())) -> ((State -> IO ()) -> Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
+new backLabel onBack rename tabContent summary = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
                          , #cssClasses := ["u-pull-request"]
                          ]
-  (bar, showState) <- header summary backLabel onBack
+  (bar, showState) <- header summary backLabel onBack rename
   #append page bar
 
   content <- GI.new Gtk.Stack [ #vexpand := True
@@ -94,8 +94,8 @@ placeholder :: Tab -> IO Gtk.Widget
 placeholder tab =
   GI.new Gtk.Label [#label := T.pack (show tab), #cssClasses := ["muted"]] >>= Gtk.toWidget
 
-header :: Summary -> Text -> IO () -> IO (Gtk.Box, State -> IO ())
-header s backLabel onBack = do
+header :: Summary -> Text -> IO () -> (Text -> IO (Either Text ())) -> IO (Gtk.Box, State -> IO ())
+header s backLabel onBack rename = do
   bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 12
                         , #cssClasses := ["pr-header"]
@@ -126,9 +126,7 @@ header s backLabel onBack = do
   showState s.state
   #append meta badge
   #append titles meta
-  titleLabel <- label s.title ["pr-title"]
-  GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
-  #append titles titleLabel
+  Issue.editableTitle s.title ["pr-title"] rename >>= #append titles
   #append bar titles
 
   Button.new Button.defaults { Button.label = Just "Check out locally" } >>= #append bar

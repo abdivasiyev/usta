@@ -11,7 +11,7 @@ module Usta.UI.Window
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, bracket_, try)
-import Control.Monad (forM, forM_, join, void, when)
+import Control.Monad (forM, forM_, join, void, unless, when)
 import Data.Maybe (fromMaybe)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -95,6 +95,8 @@ import qualified Usta.Types.Commit as C
 import Usta.UI.Format (Clock, ago, clock, short)
 import qualified Usta.Forge as Forge
 import qualified Usta.Types.Search as Search
+import qualified Usta.Waiting as Waiting
+import qualified Usta.UI.Components.WaitingChip as WaitingChip
 import qualified Usta.Sync as Sync
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (find)
@@ -535,7 +537,18 @@ buildAt start given app = do
               | start == FirstSync = SyncStatus.Syncing "github.com"
               | null accounts = SyncStatus.NoAccounts
               | otherwise = headline c [(host, s) | (key, s) <- known, Just host <- [hostOf key]]
-        SyncStatus.new state >>= Gtk.toWidget >>= replaceChild syncChip
+        status <- SyncStatus.new state >>= Gtk.toWidget
+        queued <- source.waiting
+        if null queued
+          then replaceChild syncChip status
+          else do
+            let retry = void $ forkIO $ source.sendWaiting >> void (GLib.idleAdd GLib.PRIORITY_DEFAULT (drawSyncChip >> pure False))
+            chip <- WaitingChip.new (map Waiting.describe queued) (state == SyncStatus.Offline)
+              (\k -> source.dropWaiting k >> drawSyncChip) retry
+            both <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+            #append both chip
+            #append both status
+            Gtk.toWidget both >>= replaceChild syncChip
       reload resource = do
         case resource of
           Resource.Notifications -> reloadInbox
@@ -569,8 +582,14 @@ buildAt start given app = do
     drawSyncChip
     drawSidebar
     drawFooter
-  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $
-    mapM_ reload [minBound .. maxBound] >> drawSyncChip >> pure True
+  -- What waits is sent again each minute, as the forge may answer by then.
+  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $ do
+    mapM_ reload [minBound .. maxBound]
+    drawSyncChip
+    queued <- source.waiting
+    unless (null queued) $ void $ forkIO $
+      source.sendWaiting >> void (GLib.idleAdd GLib.PRIORITY_DEFAULT (drawSyncChip >> pure False))
+    pure True
   drawSyncChip
 
   forM_ [minBound .. maxBound] $ \page -> do
@@ -1089,7 +1108,7 @@ styles =
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
   , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
-  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
+  , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, Skeleton.css, Progress.css
   , windowCss
   ]
 

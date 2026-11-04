@@ -562,6 +562,7 @@ tabContent source reopen fetch summary showState tab = case tab of
           , setClosed = source.setClosed host repo n
           , merge = source.merge host repo n
           , scheduleMerge = source.scheduleMerge host repo n
+          , cancelScheduledMerge = source.cancelScheduledMerge host repo n
           , markReady = source.markReady host repo n
           , updateBranch = source.updateBranch host repo n
           , requestReview = source.requestReview host repo n

@@ -4,6 +4,11 @@
 
 module Main (main) where
 
+import qualified Usta.Handoff as Handoff
+import qualified GI.Gtk as Gtk
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Text (Text)
+import Control.Monad (unless)
 import Control.Exception (SomeException, displayException, handle, throwIO)
 import GHC.Conc (setUncaughtExceptionHandler)
 import qualified Usta.Log as Log
@@ -15,7 +20,7 @@ import Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Usta.Types.Link as Link
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Monad (forever, void, when)
+import Control.Monad (forM_, forever, void, when)
 import Data.GI.Base
 import Data.Time (getCurrentTime)
 import Database.Persist.Sql (ConnectionPool)
@@ -81,6 +86,16 @@ runApp open = do
 -- token. Only Forgejo accounts sync until the other forges get clients.
 cache :: IO ()
 cache = do
+  -- A second usta hands its links to the one running, and stops there.
+  args <- getArgs
+  let links = [T.pack a | a <- args, isJust (Link.parseLink (T.pack a))]
+  handed <- Handoff.send links
+  unless handed (running links)
+
+-- | The first usta: the window, and the links given to it or to a later
+-- usta.
+running :: [Text] -> IO ()
+running links = do
   file <- databaseFile
   manager <- newTlsManager
   withDatabase file $ \pool -> do
@@ -107,16 +122,21 @@ cache = do
           (Source.withMirrors pool accounts mirrors mirrorStatuses
             (Source.withAccounts pool accounts (Source.fromDatabase pool changes statuses sync)))
         start = if null saved then Window.FirstRun else Window.Ready
-    -- @usta <forge link>@ opens it once the window shows.
-    args <- getArgs
-    let link = case [a | a <- args, isJust (Link.parseLink (T.pack a))] of
-          a : _ -> Just (T.pack a)
-          [] -> Nothing
     crashed <- Log.start
     -- An error no one caught goes to the log, from any thread.
     setUncaughtExceptionHandler (\e -> Log.say "error" (T.pack (displayException e)))
     handle (\(e :: SomeException) -> Log.say "error" (T.pack (displayException e)) >> throwIO e) $
-      runApp (void . Window.buildOpening start crashed link source)
+      runApp $ \app -> do
+        built <- newIORef Nothing
+        let window = readIORef built >>= \case
+              Just w -> pure w
+              Nothing -> do
+                w <- Window.buildWith start crashed source app
+                writeIORef built (Just w)
+                pure w
+        (_, openLink) <- window
+        forM_ links (void . openLink)
+        Handoff.listen (void . openLink) (window >>= Gtk.windowPresent . fst)
     Log.stop
 
 -- | Two sample accounts in a fresh cache file, synced each minute. Every

@@ -81,6 +81,7 @@ executable usta
     Usta.Git.Credential
     Usta.Keyring
     Usta.Mermaid
+    Usta.Handoff
     Usta.Log
     Usta.Mirrors
     Usta.OAuth

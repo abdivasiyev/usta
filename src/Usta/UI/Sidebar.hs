@@ -61,7 +61,8 @@ data Model = Model
   , forges :: [(Forge.Kind, Text)]
   , forgeSync :: Text -> Maybe ForgeSync
     -- ^ Per host, while the first sync runs.
-  , pinned :: [Text]
+  , pinned :: [(Text, Text)]
+    -- ^ The pinned repositories, by host and name.
   }
 
 type ForgeSync :: Type
@@ -77,13 +78,14 @@ sample = Model
       _ -> Nothing
   , forges = [(Forge.GitHub, "github.com"), (Forge.Forgejo, "git.azizovich.uz")]
   , forgeSync = const Nothing
-  , pinned = ["abdivasiyev/usta", "abdivasiyev/homelab", "abdivasiyev/nix"]
+  , pinned = [("github.com", "abdivasiyev/usta"), ("git.azizovich.uz", "abdivasiyev/homelab"), ("git.azizovich.uz", "abdivasiyev/nix")]
   }
 
 -- | @onSelect@ runs when a page entry is clicked; that entry becomes the
 -- highlighted one. @onAddForge@ runs for "+ Add forge".
-new :: Model -> Page -> (Page -> IO ()) -> IO () -> IO Gtk.Box
-new model selected onSelect onAddForge = do
+-- | @onPinned@ opens a pinned repository.
+new :: Model -> Page -> (Page -> IO ()) -> IO () -> ((Text, Text) -> IO ()) -> IO Gtk.Box
+new model selected onSelect onAddForge onPinned = do
   sidebar <- vbox 20
   Gtk.widgetAddCssClass sidebar "u-sidebar"
   -- Entries expand to push counts right; don't let that widen the sidebar.
@@ -133,9 +135,11 @@ new model selected onSelect onAddForge = do
   when (not (null model.pinned)) $ do
     pinnedGroup <- vbox 2
     Card.sectionTitle "Pinned repositories" >>= #append pinnedGroup
-    forM_ model.pinned $ \repo ->
-      NavItem.new NavItem.defaults { NavItem.label = repo, NavItem.mono = True }
-        >>= #append pinnedGroup
+    forM_ model.pinned $ \(host, repo) -> do
+      item <- NavItem.new NavItem.defaults { NavItem.label = repo, NavItem.mono = True }
+      GI.set item [#tooltipText := host]
+      void $ GI.on item #clicked (onPinned (host, repo))
+      #append pinnedGroup item
     #append sidebar pinnedGroup
 
   pure sidebar

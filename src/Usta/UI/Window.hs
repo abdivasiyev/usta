@@ -390,7 +390,8 @@ buildAt start given app = do
             { commits = [Repositories.Commit {hash = unparse x.sha, message = x.subject, age = short c x.authoredAt} | x <- cs]
             , readme = file
             }
-  repositoryPage <- source.repositories >>= Repositories.new Repositories.Actions
+  redrawSidebar <- newIORef (pure ())
+  (repositoryPage, showRepository) <- source.repositories >>= Repositories.new Repositories.Actions
     { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))
     , newPullRequest = \r -> openNewPullRequestIn (Just (r.host, r.name))
     , chooseMirror = chooseMirror
@@ -408,6 +409,10 @@ buildAt start given app = do
         }
         RepositoryFiles.Place {forge = r.forge, host = r.host, repo = r.name, branch = r.defaultBranch}
         opening
+    , starred = \r -> source.starred r.host r.name
+    , setStarred = \r on -> source.setStarred r.host r.name on
+    , pinned = \r -> elem (r.host, r.name) <$> source.pins
+    , setPinned = \r on -> source.setPinned (r.host, r.name) on >> join (readIORef redrawSidebar)
     , branches = \r base -> fmap snd <$> source.branchList r.host r.name base
     , tags = \r -> fmap snd <$> source.tagList r.host r.name
     , tabs = \r ->
@@ -492,6 +497,7 @@ buildAt start given app = do
         known <- readIORef states
         accounts <- source.accounts
         notifications <- source.inbox
+        pinned <- source.pins
         let count n = if n > 0 then Just n else Nothing
             syncing host = or [s == Sync.Syncing | a <- accounts, a.host == host, Just s <- [lookup a.accountId known]]
         pure Sidebar.Model
@@ -502,7 +508,7 @@ buildAt start given app = do
                 Nothing -> Nothing
           , Sidebar.forges = [(a.forge, a.host) | a <- accounts]
           , Sidebar.forgeSync = \host -> if syncing host then Just Sidebar.ForgeSyncing else Nothing
-          , Sidebar.pinned = []
+          , Sidebar.pinned = pinned
           }
       sidebarModel
         | start == FirstSync = pure Sidebar.sample
@@ -516,6 +522,7 @@ buildAt start given app = do
         model <- sidebarModel
         page <- readIORef shownPage
         Sidebar.new model page (\p -> writeIORef shownPage p >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName p)) openAddAccount
+          (\at -> writeIORef shownPage Sidebar.Repositories >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName Sidebar.Repositories) >> showRepository at >> join (readIORef redrawSidebar))
           >>= Gtk.toWidget >>= replaceChild sidebarSlot
       drawSyncChip = do
         known <- readIORef states
@@ -579,6 +586,7 @@ buildAt start given app = do
              >>= Gtk.toWidget
     void $ Gtk.stackAddNamed pages content (Just (Sidebar.pageName page))
 
+  writeIORef redrawSidebar drawSidebar
   drawSidebar
 
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #vexpand := True]

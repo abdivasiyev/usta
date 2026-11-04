@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE TupleSections #-}
 
 -- | Repositories across every forge: a filterable list on the left, the
 -- selected repository's overview on the right.
@@ -136,6 +137,12 @@ data Actions = Actions
     -- ^ With how far each is from the default branch given; off the main
     -- thread.
   , tags :: Repository -> IO (Either Text [Tag])
+  , starred :: Repository -> IO (Either Text Bool)
+  , setStarred :: Repository -> Bool -> IO (Either Text ())
+    -- ^ Both off the main thread.
+  , pinned :: Repository -> IO Bool
+  , setPinned :: Repository -> Bool -> IO ()
+    -- ^ Pins it to the sidebar, or takes it off.
   }
 
 -- | A tab after Files, built the first time it is chosen.
@@ -148,7 +155,9 @@ data Tab = Tab
     -- ^ Shows the chosen branch, so the picker shows beside the tabs.
   }
 
-new :: Actions -> [Repository] -> IO (Page Repository)
+-- | The page, and what shows one repository, by host and name, as a pin
+-- in the sidebar asks.
+new :: Actions -> [Repository] -> IO (Page Repository, (Text, Text) -> IO ())
 new actions repositories = do
   items <- newIORef repositories
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
@@ -218,7 +227,11 @@ new actions repositories = do
         row <- Gtk.listBoxGetRowAtIndex list (fromIntegral at)
         Gtk.listBoxSelectRow list row
   select
-  pure Page
+  let show' wanted = do
+        shown <- readIORef items
+        forM_ (lookup wanted (zip (map key shown) [0 :: Int ..])) $ \i ->
+          Gtk.listBoxGetRowAtIndex list (fromIntegral i) >>= Gtk.listBoxSelectRow list
+  pure . (, show') $ Page
     { widget = page
     , update = \shown -> do
         writeIORef items shown
@@ -364,7 +377,28 @@ overview actions r realDefault follow = do
       void $ GI.on b #clicked $ Gtk.toWidget b >>= \anchor -> askMirror anchor r actions.chooseMirror actions.lookUpOrigins
       pure [b]
     else pure []
-  forM_ (mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
+  -- Star asks the forge; Pin is usta's own, for the sidebar.
+  star <- Button.new Button.defaults {Button.label = Just "☆ Star", Button.tooltip = Just "Star it on the forge"}
+  GI.set star [#sensitive := False]
+  void $ forkIO $ do
+    known <- actions.starred r
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      forM_ (either (const Nothing) Just known) $ \on -> GI.set star [#label := if on then "★ Starred" else "☆ Star", #sensitive := True]
+      pure False
+  void $ GI.on star #clicked $ do
+    on <- (== Just "☆ Star") <$> GI.get star #label
+    Button.busy star ([] :: [Gtk.Button]) (if on then "Starring…" else "Unstarring…") (actions.setStarred r on) $ \case
+      Right () -> GI.set star [#label := if on then "★ Starred" else "☆ Star"]
+      Left _ -> pure ()
+  pinnedNow <- actions.pinned r
+  pin <- Button.new Button.defaults {Button.label = Just (if pinnedNow then "📌 Pinned" else "📌 Pin"), Button.tooltip = Just "Pin it to the sidebar"}
+  when pinnedNow $ Gtk.widgetAddCssClass pin "on"
+  void $ GI.on pin #clicked $ do
+    on <- not <$> Gtk.widgetHasCssClass pin "on"
+    actions.setPinned r on
+    GI.set pin [#label := if on then "📌 Pinned" else "📌 Pin"]
+    (if on then Gtk.widgetAddCssClass else Gtk.widgetRemoveCssClass) pin "on"
+  forM_ ([star, pin] <> mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
     GI.set b [#valign := Gtk.AlignStart]
     #append header b
   #append pane header
@@ -685,6 +719,7 @@ css = mconcat
   , "}"
   , "window.u-mirror button.decline { padding: 2px 4px; }"
   , "window.u-mirror button.decline label.name { font-weight: 500; }"
+  , "button.u-button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }"
   , "box.u-repo-pane { background: var(--surface); border-right: 1px solid var(--border); }"
   , "box.u-repo-pane box.search-bar { padding: 12px; }"
   , "list.u-repo-list { background: var(--surface); }"

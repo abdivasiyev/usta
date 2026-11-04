@@ -10,17 +10,23 @@ module Usta.UI.Pages.Issues
   , fromIssue
   , sample
   , new
+  , forRepository
   , css
   ) where
 
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
 import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import Data.List (nub, sortOn)
 import Data.Maybe (isJust)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 import Numeric (readHex)
@@ -203,6 +209,133 @@ issueRow issue = do
   column issue.updated 72
   pure row
 
+-- | Which issues the repository tab's first control shows.
+type Showing :: Type
+data Showing = ShowOpen | ShowClosed | ShowAll
+  deriving (Eq, Enum, Bounded)
+
+shows' :: Showing -> Issue -> Bool
+shows' s i = case s of
+  ShowOpen -> not i.closed
+  ShowClosed -> i.closed
+  ShowAll -> True
+
+showingLabel :: Showing -> Text
+showingLabel s = case s of
+  ShowOpen -> "Open"
+  ShowClosed -> "Closed"
+  ShowAll -> "All"
+
+-- | A repository's own issues, for its tab: @synced@ at once, those that
+-- involve the user, then the repository's latest from @load@, or a note
+-- when the forge cannot be reached. The state and label filters, the
+-- filter box and the sort stay as the user left them.
+forRepository :: [Issue] -> IO (Either Text [Issue]) -> (Issue -> IO ()) -> IO Gtk.Box
+forRepository synced load onOpen = do
+  items <- newIORef synced
+  page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
+                         , #spacing := 10
+                         , #hexpand := True
+                         , #cssClasses := ["u-issues", "in-repo"]
+                         ]
+  let count s shown = case length (filter (shows' s) shown) of
+        n | n > 0, s == ShowOpen -> showingLabel s <> "  " <> T.pack (show n)
+        _ -> showingLabel s
+  (states, stateButtons) <- Segmented.new (map (`count` synced) [minBound ..]) 0
+  Gtk.widgetAddCssClass states "tabs"
+  labelChoice <- Gtk.dropDownNewFromStrings ["Any label"]
+  filterBox <- GI.new Gtk.SearchEntry [#placeholderText := "Filter issues", #hexpand := True, #halign := Gtk.AlignEnd, #widthRequest := 230]
+  sorts <- Gtk.dropDownNewFromStrings ["Newest", "Oldest"]
+  toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  mapM_ (#append toolbar) =<< sequence [Gtk.toWidget states, Gtk.toWidget labelChoice, Gtk.toWidget filterBox, Gtk.toWidget sorts]
+  #append page toolbar
+
+  list <- GI.new Gtk.ListBox [#selectionMode := Gtk.SelectionModeNone, #cssClasses := ["u-issue-list"]]
+  empty <- GI.new Gtk.Label [#label := "No issues here", #cssClasses := ["muted", "empty"]]
+  Gtk.listBoxSetPlaceholder list (Just empty)
+  card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "list-card"]]
+  #append card list
+  scroll <- GI.new Gtk.ScrolledWindow [ #child := card, #vexpand := True, #hscrollbarPolicy := Gtk.PolicyTypeNever
+                                      , #propagateNaturalHeight := True, #valign := Gtk.AlignStart ]
+  #append page scroll
+  note <- GI.new Gtk.Label [#label := "Loading the repository's issues…", #xalign := 0, #cssClasses := ["meta", "note"]]
+  #append page note
+
+  showing <- newIORef ShowOpen
+  shownRows <- newIORef []
+  let draw = do
+        everything <- readIORef items
+        s <- readIORef showing
+        wantedLabel <- selectedText labelChoice
+        query <- T.toLower <$> Gtk.editableGetText filterBox
+        order <- Gtk.dropDownGetSelected sorts
+        let wanted i = shows' s i
+              && maybe True (\l -> l `elem` [name | Label _ name <- i.labels]) wantedLabel
+              && (T.null query || query `T.isInfixOf` T.toLower i.title || query `T.isInfixOf` T.pack (show i.number))
+            sorted = if order == 1 then sortOn (.number) everything else sortOn (Down . (.number)) everything
+            rows = filter wanted sorted
+        writeIORef shownRows rows
+        refill list repositoryRow rows
+        forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> GI.set b [#label := count st everything]
+      fill shown = do
+        writeIORef items shown
+        let names = "Any label" : nub [name | i <- shown, Label _ name <- i.labels]
+        model <- Gtk.stringListNew (Just names)
+        before <- selectedText labelChoice
+        Gtk.dropDownSetModel labelChoice (Just model)
+        Gtk.dropDownSetSelected labelChoice (maybe 0 (\n -> fromIntegral (length (takeWhile (/= n) names))) before)
+        draw
+  fill synced
+  forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> void $ GI.on b #toggled $ do
+    active <- GI.get b #active
+    when active (writeIORef showing st >> draw)
+  forM_ [labelChoice, sorts] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const draw)
+  void $ GI.on filterBox #searchChanged draw
+  void $ GI.on list #rowActivated $ \row -> do
+    index <- Gtk.listBoxRowGetIndex row
+    rows <- readIORef shownRows
+    when (index >= 0 && fromIntegral index < length rows) $ onOpen (rows !! fromIntegral index)
+
+  void $ forkIO $ do
+    result <- try load
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      case result of
+        Right (Right shown) -> fill shown >> GI.set note [#visible := False]
+        Right (Left problem) -> offline problem note
+        Left (e :: SomeException) -> offline (T.pack (show e)) note
+      pure False
+  pure page
+  where
+    offline problem note = GI.set note
+      [#label := "Only the ones that involve you: the forge could not list the rest. " <> problem]
+    selectedText d = do
+      item <- Gtk.dropDownGetSelectedItem d
+      index <- Gtk.dropDownGetSelected d
+      case item of
+        Just o | index > 0 -> do
+          s <- GI.unsafeCastTo Gtk.StringObject o
+          Just <$> Gtk.stringObjectGetString s
+        _ -> pure Nothing
+
+-- | A row in a repository's tab: no repository, but who opened it.
+repositoryRow :: Issue -> IO Gtk.Box
+repositoryRow issue = do
+  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12]
+  Icon.toned 16 (if issue.closed then Merged else Success) Icon.Issue >>= #append row
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 3, #hexpand := True]
+  titleLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  titleLabel <- label issue.title ["title"]
+  GI.set titleLabel [#ellipsize := Pango.EllipsizeModeEnd]
+  #append titleLine titleLabel
+  forM_ issue.labels $ \(Label tone name) -> Badge.new tone name >>= #append titleLine
+  #append body titleLine
+  label ("#" <> T.pack (show issue.number) <> " · opened by " <> issue.author <> " " <> issue.opened) ["meta"] >>= #append body
+  #append row body
+  comments <- label (if issue.comments > 0 then "💬 " <> T.pack (show issue.comments) else "") ["meta", "number"]
+  GI.set comments [#widthRequest := 40, #xalign := 1]
+  #append row comments
+  pure row
+
 -- | The list row for a synced issue.
 fromIssue :: Clock -> Forge.Kind -> I.Issue -> Issue
 fromIssue c forge issue = Issue
@@ -296,4 +429,6 @@ css = mconcat
   , "list.u-issue-list label.meta { font-size: 12px; color: var(--text-muted); }"
   , "list.u-issue-list label.number { font-size: 12px; }"
   , "list.u-issue-list label.empty { padding: 32px; }"
+  , "box.u-issues.in-repo { padding: 14px 20px; }"
+  , "box.u-issues.in-repo label.note { font-size: 12px; color: var(--text-muted); padding: 2px 4px; }"
   ]

@@ -355,14 +355,33 @@ Dark screens use the same layouts with the dark token values.
 
     ![Releases and tags](design/repository-releases.png)
 
-25. **Actions.** The repository's workflow runs, filtered by workflow,
+25. **Pull requests and Issues.** The repository's tabs run Overview,
+    Files, Commits, Pull requests, Issues, Actions, Insights and Releases;
+    Pull requests and Issues carry their counts of open ones. Each lists
+    only this repository: what sync keeps shows at once, then the
+    repository's latest from the forge, whoever they involve. Offline, a
+    note says only the ones that involve you are listed. Above the rows
+    sit the state (Open, Draft, Merged, Closed, All for pull requests;
+    Open, Closed, All for issues), the author and review or label
+    filters, a filter box and a sort; each repository keeps its own.
+    Rows are the sidebar lists' rows without the repository: state icon,
+    title with its labels, number, branches or who opened it, checks,
+    review and comments. Every tab but Overview takes the repository
+    list's room.
+
+    ![Pull requests](design/repository-pull-requests.png)
+
+    ![Issues](design/repository-issues.png)
+
+26. **Actions.** The repository's workflow runs, filtered by workflow,
     branch and status; a run shows its jobs, and its logs open in the same
-    viewer as a pull request's Checks. Re-run and Cancel show only when
-    the forge allows them.
+    viewer as a pull request's Checks. On Forgejo the runs come from its
+    latest jobs, gathered by run. Re-run and Cancel show only when the
+    forge allows them.
 
     ![Actions](design/repository-actions.png)
 
-26. **Search on the forge and the offline queue.** `Ctrl K` searches the
+27. **Search on the forge and the offline queue.** `Ctrl K` searches the
     synced cache first, then the forges themselves (issues, pull requests,
     code and repositories, closed ones too), filtered with chips. Without
     a connection, comments and actions wait in order and go out once the

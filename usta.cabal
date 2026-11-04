@@ -152,6 +152,7 @@ executable usta
     Usta.UI.Gallery
     Usta.UI.Page
     Usta.UI.Pages.AddAccount
+    Usta.UI.Pages.CheckOut
     Usta.UI.Pages.Inbox
     Usta.UI.Pages.Issue
     Usta.UI.Pages.Issues

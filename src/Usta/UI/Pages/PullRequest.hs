@@ -66,14 +66,15 @@ tabName = T.toLower . T.pack . show
 -- | @backLabel@ names where Back goes, e.g. "Pull requests" or "Inbox";
 -- @tabContent@ builds each tab's screen, given what sets the header's
 -- state badge, for when the forge says otherwise than the list did.
-new :: Text -> IO () -> (Text -> IO (Either Text ())) -> Issue.Watch -> ((State -> IO ()) -> Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
-new backLabel onBack rename watch tabContent summary = do
+-- | @checkOut@ opens Check out locally beside the button it is given.
+new :: Text -> IO () -> (Text -> IO (Either Text ())) -> Issue.Watch -> (Gtk.Widget -> IO ()) -> ((State -> IO ()) -> Tab -> IO Gtk.Widget) -> Summary -> IO Gtk.Box
+new backLabel onBack rename watch checkOut tabContent summary = do
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #hexpand := True
                          , #vexpand := True
                          , #cssClasses := ["u-pull-request"]
                          ]
-  (bar, showState) <- header summary backLabel onBack rename watch
+  (bar, showState) <- header summary backLabel onBack rename watch checkOut
   #append page bar
 
   content <- GI.new Gtk.Stack [ #vexpand := True
@@ -94,8 +95,8 @@ placeholder :: Tab -> IO Gtk.Widget
 placeholder tab =
   GI.new Gtk.Label [#label := T.pack (show tab), #cssClasses := ["muted"]] >>= Gtk.toWidget
 
-header :: Summary -> Text -> IO () -> (Text -> IO (Either Text ())) -> Issue.Watch -> IO (Gtk.Box, State -> IO ())
-header s backLabel onBack rename watch = do
+header :: Summary -> Text -> IO () -> (Text -> IO (Either Text ())) -> Issue.Watch -> (Gtk.Widget -> IO ()) -> IO (Gtk.Box, State -> IO ())
+header s backLabel onBack rename watch checkOut = do
   bar <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 12
                         , #cssClasses := ["pr-header"]
@@ -130,7 +131,9 @@ header s backLabel onBack rename watch = do
   #append bar titles
 
   Issue.watchButton watch >>= #append bar
-  Button.new Button.defaults { Button.label = Just "Check out locally" } >>= #append bar
+  checkOutButton <- Button.new Button.defaults { Button.label = Just "Check out locally" }
+  void $ GI.on checkOutButton #clicked (Gtk.toWidget checkOutButton >>= checkOut)
+  #append bar checkOutButton
   browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
   void $ GI.on browser #clicked $ do
     launcher <- Gtk.uriLauncherNew (Just url)

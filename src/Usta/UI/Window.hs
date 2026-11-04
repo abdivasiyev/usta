@@ -52,6 +52,7 @@ import qualified Usta.UI.Pages.Issues as Issues
 import qualified Usta.UI.Pages.NewIssue as NewIssue
 import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
+import qualified Usta.UI.Pages.CheckOut as CheckOut
 import qualified Usta.UI.Pages.RepositoryActions as RepositoryActions
 import qualified Usta.UI.Pages.RepositoryCommits as RepositoryCommits
 import qualified Usta.UI.Pages.RepositoryInsights as RepositoryInsights
@@ -172,9 +173,22 @@ buildAt start given app = do
       openPullRequestWith fetch backLabel summary =
         PullRequest.new backLabel backToMain (source.editTitle summary.host summary.repo summary.number)
           (Issue.Watch (source.watching summary.host summary.repo summary.number) (source.setWatching summary.host summary.repo summary.number))
+          (checkOutFor summary)
           (tabContent source panels (openPullRequestWith fetch backLabel summary) fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
+      -- A worktree when the repository is mirrored, a clone otherwise.
+      checkOutFor summary anchor = do
+        repos <- source.repositories
+        let mirrored = or [fst r.mirror == Success | r <- repos, r.host == summary.host, r.name == summary.repo]
+            (headBranch, _) = summary.branches
+        CheckOut.open anchor CheckOut.Request
+          { repo = summary.repo, number = summary.number, branch = headBranch, mirrored = mirrored
+          , worktree = \dir local -> source.checkOut summary.host summary.repo summary.number dir local headBranch
+          , clone = \dir local -> source.mirrorOrigins summary.host summary.repo >>= \case
+              Left why -> pure (Left why)
+              Right o -> either (pure . Left) (\url -> source.cloneTo url dir headBranch local) o.https
+          }
       -- In @at@ (host and repository) when given, else the first one.
       openNewPullRequestIn at = do
         repos <- source.repositories

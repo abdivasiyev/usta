@@ -3,10 +3,12 @@ module Usta.Types.Check
   ( Check (..)
   , State (..)
   , Job (..)
+  , Run (..)
   ) where
 
 import Data.Kind (Type)
 import Data.Text (Text)
+import Data.Time (UTCTime)
 
 type State :: Type
 data State = Waiting | Running | Passed | Failed | Skipped
@@ -29,5 +31,28 @@ data Check = Check
     -- ^ Its page, absolute.
   , job :: Maybe Job
     -- ^ 'Nothing' for a status another service posted.
+  }
+  deriving stock (Eq, Show)
+
+-- | A run of the forge's own CI: one workflow on one commit, with its
+-- jobs as checks.
+type Run :: Type
+data Run = Run
+  { number :: Int
+    -- ^ As the forge's pages number it.
+  , workflow :: Text
+    -- ^ Its file, e.g. "ci.yml".
+  , title :: Text
+    -- ^ The commit's or pull request's title.
+  , branch :: Text
+  , event :: Text
+    -- ^ What started it, e.g. "push" or "pull_request".
+  , sha :: Text
+  , state :: State
+  , started :: UTCTime
+  , updated :: UTCTime
+    -- ^ When its last job changed; how long it took, once it is done.
+  , url :: Text
+  , jobs :: [Check]
   }
   deriving stock (Eq, Show)

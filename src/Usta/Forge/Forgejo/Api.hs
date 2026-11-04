@@ -73,6 +73,8 @@ module Usta.Forge.Forgejo.Api
   , LineComment (..)
   , CombinedStatus (..)
   , CommitStatus (..)
+  , Tasks (..)
+  , Task (..)
   ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, decodeStrict, object, withObject, (.!=), (.:), (.:?), (.=))
@@ -135,6 +137,9 @@ data Routes mode = Routes
   , status
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits" :> Capture "ref" Text
            :> "status" :> Get '[JSON] CombinedStatus
+  , tasks
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "tasks"
+           :> RecordQueryParam ListQuery :> Get '[JSON] Tasks
   , pullDiff
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" DiffOf
            :> Get '[RawText] Text
@@ -1131,6 +1136,46 @@ instance FromJSON CombinedStatus where
     <$> o .:? "state" .!= ""
     <*> o .:? "total_count" .!= 0
     <*> o .:? "statuses" .!= []
+
+-- | A page of a repository's Actions jobs, newest first.
+type Tasks :: Type
+newtype Tasks = Tasks [Task]
+
+instance FromJSON Tasks where
+  parseJSON = withObject "Tasks" $ \o -> Tasks <$> o .:? "workflow_runs" .!= []
+
+-- | One job of an Actions run. @url@ is the run's page,
+-- ".../actions/runs/{run}"; @status@ is "success", "failure", "running",
+-- "waiting", "blocked", "cancelled" or "skipped". A pull request's jobs
+-- name its branch "#{number}".
+type Task :: Type
+data Task = Task
+  { id :: Int
+  , name :: Text
+  , headBranch :: Text
+  , headSha :: Text
+  , event :: Text
+  , displayTitle :: Text
+  , status :: Text
+  , workflowId :: Text
+  , url :: Text
+  , startedAt :: UTCTime
+  , updatedAt :: UTCTime
+  }
+
+instance FromJSON Task where
+  parseJSON = withObject "Task" $ \o -> Task
+    <$> o .: "id"
+    <*> o .: "name"
+    <*> o .:? "head_branch" .!= ""
+    <*> o .:? "head_sha" .!= ""
+    <*> o .:? "event" .!= ""
+    <*> o .:? "display_title" .!= ""
+    <*> o .:? "status" .!= ""
+    <*> o .:? "workflow_id" .!= ""
+    <*> o .: "url"
+    <*> o .: "run_started_at"
+    <*> o .: "updated_at"
 
 -- | One check's latest status. Forgejo Actions names it
 -- "workflow / job (event)" and links it to the job's page, e.g.

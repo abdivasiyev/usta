@@ -38,11 +38,10 @@ import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Thread as Thread
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Icon as Icon
-import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Format (Clock (..), ago)
-import Usta.UI.Pages.Issue (Comment (..))
+import Usta.UI.Pages.Issue (Comment (..), Talk (..), commentWidget)
 import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Types.Commit as C
@@ -109,6 +108,7 @@ data Actions = Actions
   , unrequestReview :: Who -> IO (Either Text ())
   , labels :: [Text] -> LabelPicker.Picker
     -- ^ The labels picker, from the labels it has.
+  , talk :: Talk
   , assigning :: AssignPickers.Assignees
   , milestoning :: AssignPickers.Milestones
   , milestoneNow :: Maybe Milestone
@@ -141,6 +141,7 @@ fromDiscussion c d commits (from, into) checks = Model
       , initials = T.toUpper (T.take 2 (unparse x.author))
       , when' = verb <> ago c x.createdAt
       , body = x.body
+      , forge = Just (T.strip verb, x)
       }
 
 new :: Actions -> Model -> IO Gtk.Widget
@@ -152,23 +153,24 @@ new actions m = do
   main <- vbox 16
   GI.set main [#hexpand := True, #cssClasses := ["main"]]
 
-  commentCard m.opening >>= #append main
-  forM_ m.comments $ \x -> commentCard x >>= #append main
-  timeline <- vbox 10
-  Gtk.widgetAddCssClass timeline "timeline"
-  forM_ m.events $ \e -> eventRow e >>= #append timeline
-  #append main timeline
-  forM_ m.threads $ \t -> Thread.new t >>= #append main . (.widget)
   problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
   -- Buttons wait for the forge, so a second click sends nothing twice.
   let run button row doing act = do
         GI.set problem [#visible := False]
         Button.busy button [row] doing act $
           either (\text -> GI.set problem [#label := text, #visible := True]) (const actions.refresh)
+  -- The reply box is made first, so Quote reply has somewhere to go.
+  (reply, buffer) <- commentBox run actions m
+  forM_ (m.opening : m.comments) $ \x -> commentWidget actions.talk buffer m.opening.author x >>= #append main
+  timeline <- vbox 10
+  Gtk.widgetAddCssClass timeline "timeline"
+  forM_ m.events $ \e -> eventRow e >>= #append timeline
+  #append main timeline
+  forM_ m.threads $ \t -> Thread.new t >>= #append main . (.widget)
   forM_ m.merge $ \s -> do
     Card.sectionTitle "Merge" >>= #append main
     mergeBox run actions m s >>= #append main
-  commentBox run actions m >>= #append main
+  #append main reply
   #append main problem
 
   -- Keep the reading column a comfortable width on wide windows.
@@ -182,24 +184,6 @@ new actions m = do
   #append columns scroll
   details run actions m >>= #append columns
   Gtk.toWidget columns
-
-commentCard :: Comment -> IO Gtk.Box
-commentCard x = do
-  card <- Card.new
-  top <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                        , #spacing := 10
-                        , #cssClasses := ["card-header"]
-                        ]
-  Avatar.new 24 x.initials >>= #append top
-  label x.author ["strong"] >>= #append top
-  label x.when' ["muted"] >>= #append top
-  #append card top
-  text <- if T.null (T.strip x.body)
-    then label "No description." ["card-body", "muted"] >>= Gtk.toWidget
-    else Markdown.new x.body
-  Gtk.widgetAddCssClass text "card-body"
-  #append card text
-  pure card
 
 eventRow :: Event -> IO Gtk.Box
 eventRow e = do
@@ -317,7 +301,7 @@ mergeBox run actions m s = do
   where
     plural n word = T.pack (show n) <> " " <> word <> (if n == 1 then "" else "s")
 
-commentBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box
+commentBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO (Gtk.Box, Gtk.TextBuffer)
 commentBox run actions m = do
   box <- vbox 8
   label "Add a comment" ["strong"] >>= #append box
@@ -347,7 +331,8 @@ commentBox run actions m = do
     unless (T.null (T.strip text)) $ run send buttons "Commenting…" (actions.comment text)
   #append buttons send
   #append box buttons
-  pure box
+  buffer <- Gtk.textViewGetBuffer editor
+  pure (box, buffer)
 
 details :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box
 details run actions m = do
@@ -664,7 +649,7 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 sample :: Model
 sample = Model
   { opening = Comment "abdivasiyev" "AA" "opened this 5 min ago"
-      "Adds the GTK4 bindings so the next PR can open the main window.\n\n• gi-gtk4 in usta.cabal\n• Same dependency in the flake derivation"
+      "Adds the GTK4 bindings so the next PR can open the main window.\n\n• gi-gtk4 in usta.cabal\n• Same dependency in the flake derivation" Nothing
   , comments = []
   , events =
       [ Committed "e1c90fa" "feat: add gi-gtk4 dependency"

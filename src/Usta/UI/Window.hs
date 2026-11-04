@@ -194,6 +194,7 @@ buildAt start given app = do
               { comment = source.comment h r n
               , setClosed = source.setClosed h r n
               , labels = labelPicker source h r n refresh
+              , talk = talkFor source h r n refresh me c
               , assigning = assignPicker source h r n refresh me d.assignees
               , milestoning = milestonePicker source h r n refresh c d.milestone
               , milestoneNow = find (\g -> Just g.title == d.milestone) goals
@@ -586,6 +587,7 @@ tabContent source reopen fetch summary showState tab = case tab of
           , unrequestReview = source.unrequestReview host repo n
           , candidates = source.reviewCandidates host repo n
           , labels = labelPicker source host repo n reopen
+          , talk = talkFor source host repo n reopen me c
           , assigning = assignPicker source host repo n reopen me d.assignees
           , milestoning = milestonePicker source host repo n reopen c d.milestone
           , milestoneNow = find (\g -> Just g.title == d.milestone) goals
@@ -659,6 +661,17 @@ labelPicker source host repo n refresh current = LabelPicker.Picker
       launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/labels"))
       Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
   , saved = refresh
+  }
+
+-- | What comments on an issue or pull request can do.
+talkFor :: Source -> Text -> Text -> Int -> IO () -> Text -> Clock -> Issue.Talk
+talkFor source host repo n refresh me c = Issue.Talk
+  { me = me
+  , clock = c
+  , editComment = source.editComment host repo n
+  , deleteComment = source.deleteComment host repo
+  , react = source.react host repo n
+  , refresh = refresh
   }
 
 -- | The assignees picker of an issue or pull request, for @me@ (a login

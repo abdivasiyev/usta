@@ -5,6 +5,8 @@
 -- labels, milestone and linked pull requests on the side.
 module Usta.UI.Pages.Issue
   ( Comment (..)
+  , Talk (..)
+  , commentWidget
   , Event (..)
   , Model (..)
   , Actions (..)
@@ -17,7 +19,9 @@ module Usta.UI.Pages.Issue
 import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Int (Int64)
 import Data.Kind (Type)
+import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gio as Gio
@@ -29,6 +33,7 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.AssignPickers as AssignPickers
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.CommentCard as CommentCard
 import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
@@ -38,6 +43,7 @@ import Usta.UI.Components.CommandPalette (shortcut)
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
+import Usta.Types.Discussion (Feeling)
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
 import Usta.Types.Milestone (Milestone)
@@ -50,7 +56,44 @@ data Comment = Comment
   , when' :: Text
     -- ^ E.g. "opened 1 day ago" or "commented 1 hour ago".
   , body :: Text
+  , forge :: Maybe (Text, D.Comment)
+    -- ^ The comment as the forge has it, with its verb ("commented"), to
+    -- edit, delete and react to; 'Nothing' for a sample.
   }
+
+-- | What comments can do on a page: the user, to tell their own, and the
+-- forge's edits, deletes and reactions by the comment's id ('Nothing'
+-- for the description).
+type Talk :: Type
+data Talk = Talk
+  { me :: Text
+  , clock :: Clock
+  , editComment :: Maybe Int64 -> Text -> IO (Either Text ())
+  , deleteComment :: Int64 -> IO (Either Text ())
+  , react :: Maybe Int64 -> Feeling -> Bool -> IO (Either Text ())
+  , refresh :: IO ()
+  }
+
+-- | A comment as a card that edits, deletes and reacts when the forge's
+-- comment is known; Quote reply puts the quote into @reply@. @opener@ is
+-- who opened the issue or pull request, marked Author on their comments.
+commentWidget :: Talk -> Gtk.TextBuffer -> Text -> Comment -> IO Gtk.Widget
+commentWidget t reply opener c = case c.forge of
+  Nothing -> commentCard c >>= Gtk.toWidget
+  Just (verb, x) -> CommentCard.new CommentCard.Card
+    { comment = x
+    , clock = t.clock
+    , verb = verb
+    , mine = unparse x.author == t.me
+    , badge = if unparse x.author == opener && x.id /= Nothing then Just "Author" else Nothing
+    , edit = t.editComment x.id
+    , delete = t.deleteComment <$> x.id
+    , quote = \q -> do
+        end <- Gtk.textBufferGetEndIter reply
+        Gtk.textBufferInsert reply end (q <> "\n") (-1)
+    , react = t.react x.id
+    , changed = t.refresh
+    } >>= Gtk.toWidget
 
 -- | Something that happened on the issue besides comments.
 type Event :: Type
@@ -84,6 +127,7 @@ data Actions = Actions
   , setClosed :: Bool -> IO (Either Text ())
   , labels :: [Text] -> LabelPicker.Picker
     -- ^ The labels picker, from the labels it has.
+  , talk :: Talk
   , assigning :: AssignPickers.Assignees
   , milestoning :: AssignPickers.Milestones
   , milestoneNow :: Maybe Milestone
@@ -109,6 +153,7 @@ fromDiscussion c d m = m
       , initials = initials (unparse x.author)
       , when' = verb <> ago c x.createdAt
       , body = x.body
+      , forge = Just (T.strip verb, x)
       }
     initials = T.toUpper . T.take 2
 
@@ -139,14 +184,17 @@ thread actions m = do
                          , #spacing := 16
                          , #cssClasses := ["main"]
                          ]
-  forM_ m.comments $ \c -> commentCard c >>= #append main
+  -- The reply box comes first, so Quote reply has somewhere to go.
+  (reply, buffer) <- replyBox actions m
+  let opener = maybe "" (.author) (listToMaybe m.comments)
+  forM_ m.comments $ \c -> commentWidget actions.talk buffer opener c >>= #append main
   timeline <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                              , #spacing := 10
                              , #cssClasses := ["timeline"]
                              ]
   forM_ m.events $ \e -> eventRow e >>= #append timeline
   #append main timeline
-  replyBox actions m >>= #append main
+  #append main reply
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
                                       , #hexpand := True
                                       , #hscrollbarPolicy := Gtk.PolicyTypeNever
@@ -232,7 +280,7 @@ eventRow e = do
       label pr ["link"] >>= #append row
   pure row
 
-replyBox :: Actions -> Model -> IO Gtk.Box
+replyBox :: Actions -> Model -> IO (Gtk.Box, Gtk.TextBuffer)
 replyBox actions m = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
   (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults
@@ -259,7 +307,7 @@ replyBox actions m = do
   void $ GI.on close #clicked $ run close (if m.closed then "Reopening…" else "Closing…") (actions.setClosed (not m.closed))
   #append box problem
   #append box buttons
-  pure box
+  pure (box, buffer)
 
 details :: Actions -> Model -> IO Gtk.Box
 details actions m = do

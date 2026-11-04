@@ -26,6 +26,7 @@ import Usta.Types.Notification (Notification)
 import Usta.Types.Number (Number)
 import Usta.Types.PullRequest (PullRequest)
 import Usta.Types.RepoName (RepoName)
+import Usta.Types.Readiness (Readiness, UpdateStyle)
 import Usta.Types.Repository (Repository)
 import Usta.Types.Reviewer (Candidate, Reviewer, Who)
 import Usta.Types.Thread (Thread, Threads)
@@ -70,6 +71,15 @@ data Forge = Forge
     -- ^ Who reviewed a pull request or is asked to, and where each stands.
   , requestReview :: RepoName -> Number -> [Who] -> IO ()
   , unrequestReview :: RepoName -> Number -> Who -> IO ()
+  , readiness :: RepoName -> Number -> IO Readiness
+    -- ^ What stands between a pull request and its merge, besides checks.
+  , markReady :: RepoName -> Number -> IO ()
+    -- ^ A draft becomes ready for review.
+  , updateBranch :: RepoName -> Number -> UpdateStyle -> IO ()
+    -- ^ Brings in the base branch's newer commits.
+  , scheduleMerge :: RepoName -> Number -> Merge -> Bool -> IO ()
+    -- ^ Merges once the checks pass; 'True' deletes the branch after.
+  , cancelScheduledMerge :: RepoName -> Number -> IO ()
   , reviewCandidates :: RepoName -> Maybe Number -> IO [Candidate]
     -- ^ Who can be asked to review: with a pull request, first those who
     -- changed its files before, then collaborators, then teams.

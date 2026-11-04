@@ -41,6 +41,7 @@
           gi-gdk4
           gi-gio
           gi-glib
+          gi-gobject
           gi-graphene
           gi-gtk4
           gi-pango
@@ -58,6 +59,8 @@
           servant
           servant-client
           servant-client-core
+          servant-multipart-api
+          servant-multipart-client
           skylighting
           stm
           text

@@ -53,6 +53,7 @@ import qualified Usta.UI.Pages.NewIssue as NewIssue
 import qualified Usta.UI.Pages.NewPullRequest as NewPullRequest
 import qualified Usta.UI.Pages.PullRequest as PullRequest
 import qualified Usta.UI.Pages.RepositoryActions as RepositoryActions
+import qualified Usta.UI.Components.SidePanel as SidePanel
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import qualified Usta.UI.Pages.PullRequest.Commits as Commits
 import qualified Usta.UI.Pages.PullRequest.Conversation as Conversation
@@ -113,6 +114,9 @@ build = buildAt Ready
 -- reload all of them each minute so "5 min ago" stays true.
 buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
 buildAt start given app = do
+  -- The Files tab's side panels, kept as left from one pull request to
+  -- the next.
+  panels <- Files.newPanels
   -- A thin moving bar under the header while a forge or mirror call takes
   -- longer than 300 ms (its size is not known, so it does not count).
   activity <- Progress.bar Progress.Unknown
@@ -163,7 +167,7 @@ buildAt start given app = do
       openPullRequestWith fetch backLabel summary =
         PullRequest.new backLabel backToMain (source.editTitle summary.host summary.repo summary.number)
           (Issue.Watch (source.watching summary.host summary.repo summary.number) (source.setWatching summary.host summary.repo summary.number))
-          (tabContent source (openPullRequestWith fetch backLabel summary) fetch summary) summary
+          (tabContent source panels (openPullRequestWith fetch backLabel summary) fetch summary) summary
           >>= Gtk.toWidget >>= showDetail
       openPullRequest = openPullRequestWith Nothing
       -- In @at@ (host and repository) when given, else the first one.
@@ -592,8 +596,8 @@ buildAt start given app = do
 -- @fetch@ is how far the local mirror is with the branch, while it is
 -- still fetching; the Files tab waits for it.
 -- | @reopen@ loads the pull request again, after a change on the forge.
-tabContent :: Source -> IO () -> Maybe Double -> PullRequest.Summary -> (PullRequest.State -> IO ()) -> PullRequest.Tab -> IO Gtk.Widget
-tabContent source reopen fetch summary showState tab = case tab of
+tabContent :: Source -> Files.Panels -> IO () -> Maybe Double -> PullRequest.Summary -> (PullRequest.State -> IO ()) -> PullRequest.Tab -> IO Gtk.Widget
+tabContent source panels reopen fetch summary showState tab = case tab of
   PullRequest.Files | Just p <- fetch -> Files.fetching (pure ()) (Files.fetchingSample p)
   PullRequest.Conversation -> do
     let at = (summary.host, summary.repo, summary.number)
@@ -676,6 +680,7 @@ tabContent source reopen fetch summary showState tab = case tab of
         , refresh = reopen
         , reply = source.reply summary.host summary.repo summary.number
         }
+        panels
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
           {Files.threads = threads, Files.me = me, Files.links = links}
   PullRequest.Commits ->
@@ -982,7 +987,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

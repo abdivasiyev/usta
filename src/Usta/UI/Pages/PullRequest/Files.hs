@@ -10,6 +10,8 @@ module Usta.UI.Pages.PullRequest.Files
   , fromFileDiffs
   , lineLinks
   , sample
+  , Panels
+  , newPanels
   , new
   , Fetching (..)
   , fetchingSample
@@ -45,6 +47,8 @@ import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.ImageView as ImageView
 import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Segmented as Segmented
+import Usta.UI.Components.SidePanel (Edge (..))
+import qualified Usta.UI.Components.SidePanel as SidePanel
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Components.Thread as Thread
 import Usta.UI.Format (Clock (..))
@@ -112,20 +116,43 @@ padding, gap :: Double
 padding = 16
 gap = 16
 
-new :: Actions -> Model -> IO Gtk.Widget
-new actions m = do
+-- | The file list and review panel as the user left them, shared by
+-- every pull request's Files tab.
+type Panels :: Type
+data Panels = Panels
+  { files :: IORef SidePanel.Side
+  , review :: IORef SidePanel.Side
+  }
+
+newPanels :: IO Panels
+newPanels = Panels <$> SidePanel.newSide 260 <*> SidePanel.newSide 300
+
+new :: Actions -> Panels -> Model -> IO Gtk.Widget
+new actions panels m = do
   columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #cssClasses := ["u-files"]
                             ]
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 6
-                         , #widthRequest := 240
-                         , #hexpand := False
+                         , #vexpand := True
                          , #cssClasses := ["file-list"]
                          ]
+  sideTop <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  label "Files" ["strong"] >>= #append sideTop
+  filesTitleCount <- label (T.pack (show (length m.files))) ["muted", "small"]
+  GI.set filesTitleCount [#hexpand := True]
+  #append sideTop filesTitleCount
+  #append side sideTop
   filterEntry <- GI.new Gtk.SearchEntry [#placeholderText := "Filter files"]
   #append side filterEntry
-  #append columns side
+  -- Folds to a rail with the files viewed; small windows start it folded.
+  filesPanel <- Gtk.toWidget side >>= SidePanel.new SidePanel.Config
+    {edge = OnLeft, side = panels.files, defaultWidth = 260, least = 200, foldsUnder = 960, title = "file list"}
+  #append sideTop filesPanel.fold
+  label (T.pack (show (length m.files))) ["count", "strong"] >>= #append filesPanel.rail
+  viewedRail <- label "" ["count"]
+  #append filesPanel.rail viewedRail
+  #append columns filesPanel.widget
 
   main <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := round gap
@@ -156,6 +183,7 @@ new actions m = do
         seen <- length . filter id <$> mapM (\e -> Gtk.widgetHasCssClass e.mark "done") entries
         GI.set progress [ #label := T.pack (show seen) <> " of " <> T.pack (show (length entries))
                                     <> " files viewed" ]
+        GI.set viewedRail [#label := T.pack (show seen) <> "/" <> T.pack (show (length entries)), #tooltipText := "Files viewed"]
 
   -- Notes on lines: the boxes open, and the notes waiting for the review.
   keysRef <- newIORef Nothing
@@ -330,12 +358,30 @@ new actions m = do
   Gtk.widgetAddController columns keys
 
   #append columns scroll
-  -- A fixed width: its editor's toolbar wraps rather than widening it,
-  -- and a tall panel scrolls.
+  -- Its own width, which its editor's toolbar does not widen; folds to a
+  -- rail with the pending notes and threads.
   panel <- review actions m (zip placed (map jump placed)) pendingRef pendingChanged
-  panelScroll <- GI.new Gtk.ScrolledWindow [ #child := panel, #hscrollbarPolicy := Gtk.PolicyTypeNever
-                                           , #widthRequest := 300, #propagateNaturalWidth := False, #hexpand := False ]
-  #append columns panelScroll
+  -- Its fold button sits in the corner, beside "Your review".
+  panelOverlay <- GI.new Gtk.Overlay [#child := panel]
+  reviewPanel <- Gtk.toWidget panelOverlay >>= SidePanel.new SidePanel.Config
+    {edge = OnRight, side = panels.review, defaultWidth = 300, least = 260, foldsUnder = 1200, title = "review panel"}
+  GI.set reviewPanel.fold [#halign := Gtk.AlignEnd, #valign := Gtk.AlignStart, #marginTop := 14, #marginEnd := 14]
+  Gtk.overlayAddOverlay panelOverlay reviewPanel.fold
+  pendingRail <- label "" ["count", "pending"]
+  #append reviewPanel.rail pendingRail
+  unless (null placed) $ label (T.pack (show (length placed)) <> " ◷") ["count"] >>= \l ->
+    GI.set l [#tooltipText := "Threads"] >> #append reviewPanel.rail l
+  showPendingWas <- readIORef pendingChanged
+  writeIORef pendingChanged $ do
+    showPendingWas
+    n <- length <$> readIORef pendingRef
+    GI.set pendingRail [#label := if n > 0 then T.pack (show n) <> " pending" else "", #visible := n > 0]
+  readIORef pendingChanged >>= id
+  #append columns reviewPanel.widget
+  -- Ctrl B folds the file list, Ctrl Shift B the review panel; in a
+  -- comment box Ctrl B is bold.
+  shortcut keys "<Primary>b" filesPanel.toggle
+  shortcut keys "<Primary><Shift>b" reviewPanel.toggle
   Gtk.toWidget columns
 
 -- | The last part of a path, as the Threads list names files.
@@ -382,7 +428,14 @@ fileRow f markBox threads' = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   #append content markBox
   names <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #hexpand := True]
-  label f.path ["mono", "small"] >>= #append names
+  -- A long path keeps its file name and shortens its folders.
+  let (folder, name) = T.breakOnEnd "/" f.path
+  pathLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #tooltipText := f.path]
+  folderLabel <- label folder ["mono", "small", "muted"]
+  GI.set folderLabel [#ellipsize := Pango.EllipsizeModeMiddle]
+  nameLabel <- label name ["mono", "small", "strong"]
+  mapM_ (#append pathLine) [folderLabel, nameLabel]
+  #append names pathLine
   let opened = length [() | (o, d) <- threads', not o, not d.resolved]
       parts = [T.pack (show opened) <> " open" | opened > 0]
         <> [T.pack (show n) <> " resolved" | let n = length [() | (o, d) <- threads', not o, d.resolved], n > 0]

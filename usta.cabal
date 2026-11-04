@@ -133,6 +133,7 @@ executable usta
     Usta.UI.Components.SearchField
     Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcodes
+    Usta.UI.Components.SidePanel
     Usta.UI.Components.Shortcut
     Usta.UI.Components.Skeleton
     Usta.UI.Components.Thread

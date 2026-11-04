@@ -26,6 +26,8 @@ import Data.Text (Text)
 import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Components.Button as Button
+
 -- | Which side of the main column the panel is on.
 type Edge :: Type
 data Edge = OnLeft | OnRight
@@ -85,8 +87,10 @@ new c content = do
 
   railBox <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical, #spacing := 10, #widthRequest := 44
                             , #cssClasses := ["rail", if c.edge == OnLeft then "left" else "right"] ]
-  unfold <- GI.new Gtk.Button [ #label := if c.edge == OnLeft then "»" else "«", #halign := Gtk.AlignCenter
-                              , #tooltipText := "Open the " <> c.title, #cssClasses := ["fold"] ]
+  unfold <- Button.new Button.defaults
+    {Button.label = Just (if c.edge == OnLeft then "»" else "«"), Button.small = True, Button.tooltip = Just ("Open the " <> c.title)}
+  GI.set unfold [#halign := Gtk.AlignCenter]
+  Gtk.widgetAddCssClass unfold "fold"
   #append railBox unfold
   counts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10, #halign := Gtk.AlignCenter]
   #append railBox counts
@@ -113,8 +117,10 @@ new c content = do
       width' <- maybe (pure 0) (\r -> GI.castTo Gtk.Widget r >>= maybe (pure 0) Gtk.widgetGetWidth) root
       show' (width' > 0 && width' < c.foldsUnder)
   void $ GI.on unfold #clicked (setFolded False)
-  foldButton <- GI.new Gtk.Button [ #label := if c.edge == OnLeft then "«" else "»", #valign := Gtk.AlignCenter
-                                  , #tooltipText := "Fold the " <> c.title, #cssClasses := ["u-fold"] ]
+  foldButton <- Button.new Button.defaults
+    {Button.label = Just (if c.edge == OnLeft then "«" else "»"), Button.small = True, Button.tooltip = Just ("Fold the " <> c.title)}
+  GI.set foldButton [#valign := Gtk.AlignCenter]
+  Gtk.widgetAddCssClass foldButton "u-fold"
   void $ GI.on foldButton #clicked (setFolded True)
   void $ GI.on railClick #released $ \_ _ _ -> setFolded False
   Gtk.widgetAddController railBox railClick
@@ -171,7 +177,6 @@ css = mconcat
   , "box.u-side-panel box.rail { padding: 10px 0; background: var(--surface); }"
   , "box.u-side-panel box.rail.left { border-right: 1px solid var(--border); }"
   , "box.u-side-panel box.rail.right { border-left: 1px solid var(--border); }"
-  , "box.u-side-panel box.rail button.fold { min-width: 26px; min-height: 26px; padding: 0; border-radius: 6px; }"
-  , "button.u-fold { min-width: 26px; min-height: 26px; padding: 0; border-radius: 6px; }"
+  , "button.u-button.small.fold, button.u-button.small.u-fold { min-width: 28px; padding: 0; }"
   , "box.u-side-panel box.rail label.count { font-size: 12px; color: var(--text-muted); }"
   ]

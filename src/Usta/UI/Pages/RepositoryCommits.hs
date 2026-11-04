@@ -29,6 +29,7 @@ import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Avatar as Avatar
+import qualified Usta.UI.Components.Button as Button
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Diff as Diff
 import Usta.UI.Format (Clock (..), ago, date)
@@ -57,7 +58,8 @@ new c a = do
   #append page' top
   groups <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
   #append page' groups
-  more <- GI.new Gtk.Button [#label := "Load more", #halign := Gtk.AlignCenter, #visible := False, #cssClasses := ["more"]]
+  more <- Button.new Button.defaults {Button.label = Just "Load more", Button.variant = Button.Secondary, Button.small = True}
+  GI.set more [#halign := Gtk.AlignCenter, #visible := False]
   #append page' more
   listScroll <- GI.new Gtk.ScrolledWindow [#child := page', #hscrollbarPolicy := Gtk.PolicyTypeNever, #vexpand := True]
   void $ Gtk.stackAddNamed stack listScroll (Just "list")
@@ -112,7 +114,8 @@ new c a = do
         label problem ["muted"] >>= #append groups
       open x = do
         clear detail
-        back <- GI.new Gtk.Button [#label := "← Commits", #halign := Gtk.AlignStart, #cssClasses := ["flat", "back"]]
+        back <- Button.new Button.defaults {Button.label = Just "← Commits", Button.variant = Button.Flat, Button.small = True}
+        GI.set back [#halign := Gtk.AlignStart]
         void $ GI.on back #clicked (Gtk.stackSetVisibleChildName stack "list")
         #append detail back
         head' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #cssClasses := ["u-card", "commit-head"]]

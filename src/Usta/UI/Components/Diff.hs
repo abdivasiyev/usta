@@ -32,6 +32,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Highlight as Highlight
 
 type Line :: Type
@@ -179,11 +180,12 @@ choosing path body overlay rows c = do
                         , #halign := Gtk.AlignEnd, #valign := Gtk.AlignStart, #marginEnd := 12
                         , #cssClasses := ["range-bar"] ]
   which <- label "" ["muted", "small", "which"]
-  commentButton <- GI.new Gtk.Button [#label := "+ Comment", #tooltipText := "Comment on these lines (c)", #cssClasses := ["comment"]]
-  copyButton <- GI.new Gtk.Button [#label := "Copy link", #tooltipText := "Copy the link to these lines (y)", #cssClasses := ["flat"]]
+  commentButton <- Button.new Button.defaults {Button.label = Just "+ Comment", Button.variant = Button.Primary, Button.small = True, Button.tooltip = Just "Comment on these lines (c)"}
+  copyButton <- Button.new Button.defaults {Button.label = Just "Copy link", Button.variant = Button.Flat, Button.small = True, Button.tooltip = Just "Copy the link to these lines (y)"}
   menuItems <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["menu"]]
   menu <- GI.new Gtk.Popover [#child := menuItems, #hasArrow := False, #cssClasses := ["u-range-links"]]
-  more <- GI.new Gtk.MenuButton [#popover := menu, #iconName := "pan-down-symbolic", #tooltipText := "More links", #cssClasses := ["flat"]]
+  more <- Button.menu Button.defaults
+    {Button.icon = Just "pan-down-symbolic", Button.variant = Button.Flat, Button.small = True, Button.tooltip = Just "More links"} menu
   mapM_ (#append bar) =<< sequence [Gtk.toWidget which, Gtk.toWidget commentButton, Gtk.toWidget copyButton, Gtk.toWidget more]
   Gtk.overlayAddOverlay overlay bar
 
@@ -409,8 +411,6 @@ css = mconcat
   , "box.u-diff box.diff-line.picked { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }"
   , "box.u-diff box.range-bar { padding: 3px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface); box-shadow: 0 6px 18px rgba(27,29,33,0.14); }"
   , "box.u-diff box.range-bar label.which { padding: 0 8px; }"
-  , "box.u-diff box.range-bar button { min-height: 28px; padding: 0 10px; font-size: 13px; }"
-  , "box.u-diff box.range-bar button.comment { background: var(--accent); color: var(--on-accent); font-weight: 600; border: none; }"
   , "popover.u-range-links > contents { padding: 4px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
   , "popover.u-range-links button.item { padding: 6px 10px; border: none; box-shadow: none; background: transparent; background-image: none; }"
   , "popover.u-range-links button.item:hover { background: var(--border-subtle); }"

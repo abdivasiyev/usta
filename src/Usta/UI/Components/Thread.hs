@@ -280,7 +280,7 @@ writer me w = do
   pathLabel <- label w.path ["mono", "muted", "small"]
   GI.set pathLabel [#hexpand := True, #ellipsize := Pango.EllipsizeModeStart]
   #append top pathLabel
-  suggest <- GI.new Gtk.Button [#label := "± Suggest a change", #tooltipText := "Puts the code into a suggestion to edit", #cssClasses := ["flat", "suggest"]]
+  suggest <- Button.new Button.defaults {Button.label = Just "± Suggest a change", Button.variant = Button.Flat, Button.small = True, Button.tooltip = Just "Puts the code into a suggestion to edit"}
   #append top suggest
   #append frame top
 

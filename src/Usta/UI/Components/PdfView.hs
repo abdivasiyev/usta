@@ -23,6 +23,8 @@ import GI.Cairo.Render.Connector (renderWithContext)
 import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
+
+import qualified Usta.UI.Components.Button as Button
 import qualified GI.Poppler as Poppler
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
 import System.FilePath ((</>))
@@ -53,8 +55,8 @@ viewer name bytes document = do
   zoomOut <- small "−"
   zoomLabel <- label "" ["zoom"]
   zoomIn <- small "+"
-  fitWidth <- GI.new Gtk.Button [#label := "Fit width"]
-  openWith <- GI.new Gtk.Button [#label := "Open with…"]
+  fitWidth <- Button.new Button.defaults {Button.label = Just "Fit width", Button.variant = Button.Secondary, Button.small = True}
+  openWith <- Button.new Button.defaults {Button.label = Just "Open with…", Button.variant = Button.Secondary, Button.small = True}
   forM_ [Gtk.toWidget previous, Gtk.toWidget pageLabel, Gtk.toWidget next, Gtk.toWidget zoomOut, Gtk.toWidget zoomLabel, Gtk.toWidget zoomIn, Gtk.toWidget fitWidth, Gtk.toWidget openWith]
     (>>= #append toolbar)
   #append box toolbar

@@ -23,6 +23,8 @@ import qualified GI.Gdk as Gdk
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Components.Segmented as Segmented
+
 -- | The image in @bytes@, in any format GDK reads (PNG, JPEG, GIF, WebP,
 -- SVG and more through its loaders); 'Nothing' when it reads none.
 texture :: ByteString -> IO (Maybe Gdk.Texture)
@@ -55,16 +57,11 @@ new image = do
                                       ]
   -- Fit shrinks a large image into the space; 100% shows it as it is and
   -- scrolls.
-  buttons <- mapM (\(text, fit) -> do
-      b <- GI.new Gtk.ToggleButton [#label := text, #active := fit]
-      void $ GI.on b #toggled $ do
-        active <- GI.get b #active
-        when active $ GI.set picture [#canShrink := fit]
-      #append bar b
-      pure b) [("Fit", True), ("100%", False)]
-  case buttons of
-    first : rest -> forM_ rest $ \b -> GI.set b [#group := first]
-    [] -> pure ()
+  (choices, buttons) <- Segmented.new ["Fit", "100%"] 0
+  #append bar choices
+  forM_ (zip [True, False] buttons) $ \(fit, b) -> void $ GI.on b #toggled $ do
+    active <- GI.get b #active
+    when active $ GI.set picture [#canShrink := fit]
   #append box bar
   #append box holder
   Gtk.toWidget box

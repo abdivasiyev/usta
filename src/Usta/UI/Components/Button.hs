@@ -9,6 +9,7 @@ module Usta.UI.Components.Button
   , Config (..)
   , defaults
   , new
+  , menu
   , busy
   , css
   ) where
@@ -37,6 +38,8 @@ data Config = Config
     -- ^ A symbolic icon name from the icon theme.
   , variant :: Variant
   , tooltip :: Maybe Text
+  , small :: Bool
+    -- ^ 30 px high, for bars, panels and popovers.
   }
 
 defaults :: Config
@@ -45,11 +48,12 @@ defaults = Config
   , icon = Nothing
   , variant = Secondary
   , tooltip = Nothing
+  , small = False
   }
 
 new :: Config -> IO Gtk.Button
 new cfg = do
-  button <- GI.new Gtk.Button [#cssClasses := ["u-button", variantClass cfg.variant]]
+  button <- GI.new Gtk.Button [#cssClasses := ["u-button", variantClass cfg.variant] <> ["small" | cfg.small]]
   case (cfg.icon, cfg.label) of
     (Just name, Nothing) -> do
       set button [#iconName := name]
@@ -62,6 +66,18 @@ new cfg = do
       #append box image
       #append box caption
       set button [#child := box]
+    (Nothing, Nothing) -> pure ()
+  forM_ cfg.tooltip $ \t -> set button [#tooltipText := t]
+  pure button
+
+-- | A button that opens @popover@, styled as 'new' styles its config; an
+-- icon-only one shows the icon, otherwise the label and a ▾.
+menu :: Config -> Gtk.Popover -> IO Gtk.MenuButton
+menu cfg popover = do
+  button <- GI.new Gtk.MenuButton [#popover := popover, #cssClasses := ["u-button", variantClass cfg.variant] <> ["small" | cfg.small]]
+  case (cfg.icon, cfg.label) of
+    (Just name, Nothing) -> set button [#iconName := name] >> Gtk.widgetAddCssClass button "icon-only"
+    (_, Just text) -> set button [#label := text]
     (Nothing, Nothing) -> pure ()
   forM_ cfg.tooltip $ \t -> set button [#tooltipText := t]
   pure button
@@ -107,14 +123,20 @@ css = mconcat
   , "  font-weight: 500; box-shadow: none; background-image: none;"
   , "}"
   , "button.u-button.icon-only { min-width: 36px; min-height: 36px; padding: 0; }"
-  , "button.u-primary { background: var(--accent); color: var(--on-accent); border: none; font-weight: 600; }"
-  , "button.u-primary:hover { opacity: 0.92; }"
-  , "button.u-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--input-border); }"
-  , "button.u-secondary:hover { background: var(--border-subtle); }"
-  , "button.u-flat { background: transparent; color: var(--text-soft); border: none; }"
-  , "button.u-flat:hover { background: var(--border-subtle); }"
-  , "button.u-danger { background: var(--surface); color: var(--danger); border: 1px solid var(--danger-border); }"
-  , "button.u-danger:hover { background: var(--danger-bg); }"
+  , "button.u-button.small { min-height: 30px; padding: 0 12px; border-radius: 6px; font-size: 13px; }"
+  , "button.u-button.small.icon-only { min-width: 28px; min-height: 28px; padding: 0; }"
+  -- A menu button's own button takes the look of its variant.
+  , "menubutton.u-button > button { min-height: 40px; padding: 0 12px; border-radius: 8px; font-weight: 500; box-shadow: none; background-image: none; }"
+  , "menubutton.u-button.small > button { min-height: 30px; padding: 0 10px; border-radius: 6px; font-size: 13px; }"
+  , "menubutton.u-button.small.icon-only > button { min-width: 28px; min-height: 28px; padding: 0; }"
+  , "button.u-primary, menubutton.u-primary > button { background: var(--accent); color: var(--on-accent); border: none; font-weight: 600; }"
+  , "button.u-primary:hover, menubutton.u-primary > button:hover { opacity: 0.92; }"
+  , "button.u-secondary, menubutton.u-secondary > button { background: var(--surface); color: var(--text); border: 1px solid var(--input-border); }"
+  , "button.u-secondary:hover, menubutton.u-secondary > button:hover { background: var(--border-subtle); }"
+  , "button.u-flat, menubutton.u-flat > button { background: transparent; color: var(--text-soft); border: none; }"
+  , "button.u-flat:hover, menubutton.u-flat > button:hover { background: var(--border-subtle); }"
+  , "button.u-danger, menubutton.u-danger > button { background: var(--surface); color: var(--danger); border: 1px solid var(--danger-border); }"
+  , "button.u-danger:hover, menubutton.u-danger > button:hover { background: var(--danger-bg); }"
   -- A small on / off switch in a bar, such as Show source.
   , "button.u-toggle {"
   , "  min-height: 26px; padding: 0 10px; border-radius: 6px; font-size: 12px;"

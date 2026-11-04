@@ -495,12 +495,14 @@ review actions m listed pendingRef pendingChanged = do
   GI.set question [#wrap := True]
   #append confirm question
   answers <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd]
-  keep <- Button.new Button.defaults {Button.label = Just "Keep it", Button.variant = Button.Flat}
-  gone <- Button.new Button.defaults {Button.label = Just "Discard", Button.variant = Button.Danger}
+  keep <- Button.new Button.defaults {Button.label = Just "Keep it", Button.variant = Button.Flat, Button.small = True}
+  gone <- Button.new Button.defaults {Button.label = Just "Discard", Button.variant = Button.Danger, Button.small = True}
   mapM_ (#append answers) [keep, gone]
   #append confirm answers
   #append verdict confirm
-  discardButton <- GI.new Gtk.Button [#label := "Discard review", #halign := Gtk.AlignCenter, #visible := False, #cssClasses := ["flat", "discard"]]
+  discardButton <- Button.new Button.defaults {Button.label = Just "Discard review", Button.variant = Button.Flat, Button.small = True}
+  GI.set discardButton [#halign := Gtk.AlignCenter, #visible := False]
+  Gtk.widgetAddCssClass discardButton "discard"
   #append verdict discardButton
   said <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["small"]]
   #append verdict said
@@ -863,7 +865,7 @@ sample = Model
 css :: Text
 css = mconcat
   [ "box.u-files box.discard-confirm { padding: 10px; border-radius: 8px; background: var(--danger-bg); }"
-  , "box.u-files button.discard { color: var(--danger); }"
+  , "box.u-files button.u-button.discard { color: var(--danger); }"
   ] <> mconcat
   [ "box.u-files label.small { font-size: 12px; }"
   , "box.u-files label.strong { font-weight: 600; }"

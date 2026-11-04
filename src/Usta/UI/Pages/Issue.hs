@@ -28,10 +28,12 @@ import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
+import Usta.UI.Components.CommandPalette (shortcut)
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
@@ -78,6 +80,8 @@ type Actions :: Type
 data Actions = Actions
   { comment :: Text -> IO (Either Text ())
   , setClosed :: Bool -> IO (Either Text ())
+  , labels :: [Text] -> LabelPicker.Picker
+    -- ^ The labels picker, from the labels it has.
   , refresh :: IO ()
     -- ^ Loads the page again, with the change.
   }
@@ -142,7 +146,7 @@ thread actions m = do
                                       , #hscrollbarPolicy := Gtk.PolicyTypeNever
                                       ]
   #append columns scroll
-  details m >>= #append columns
+  details actions m >>= #append columns
   Gtk.toWidget columns
 
 header :: Model -> Text -> IO () -> IO (Gtk.Box, Bool -> IO ())
@@ -251,8 +255,8 @@ replyBox actions m = do
   #append box buttons
   pure box
 
-details :: Model -> IO Gtk.Box
-details m = do
+details :: Actions -> Model -> IO Gtk.Box
+details actions m = do
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #widthRequest := 260
@@ -266,11 +270,24 @@ details m = do
       Avatar.new 22 short >>= #append row
       label name [] >>= #append row
       #append box row
-  section side "Labels" $ \box -> do
-    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-    forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
-    when (null m.labels) $ label "None" ["muted"] >>= #append row
-    #append box row
+  labelsBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
+  labelsHead <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+  labelsTitle <- Card.sectionTitle "Labels"
+  GI.set labelsTitle [#hexpand := True]
+  #append labelsHead labelsTitle
+  editLabels <- GI.new Gtk.Button [#label := "Edit", #tooltipText := "Edit labels (l)", #cssClasses := ["link-button"]]
+  #append labelsHead editLabels
+  #append labelsBox labelsHead
+  labelRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+  forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append labelRow
+  when (null m.labels) $ label "None" ["muted"] >>= #append labelRow
+  #append labelsBox labelRow
+  #append side labelsBox
+  openLabels <- LabelPicker.attach (actions.labels (map snd m.labels)) editLabels
+  void $ GI.on editLabels #clicked openLabels
+  labelKeys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
+  shortcut labelKeys "l" openLabels
+  Gtk.widgetAddController side labelKeys
   section side "Milestone" $ \box ->
     label (maybe "None" id m.milestone) [] >>= #append box
   unless (null m.linkedPullRequests) $
@@ -290,7 +307,8 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 css :: Text
 css = mconcat
-  [ "box.u-issue box.issue-header {"
+  [ "box.u-issue button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
+  , "box.u-issue box.issue-header {"
   , "  padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);"
   , "}"
   , "box.u-issue label.meta { font-size: 12px; color: var(--text-muted); }"

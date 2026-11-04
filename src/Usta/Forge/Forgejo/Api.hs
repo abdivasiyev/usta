@@ -47,6 +47,7 @@ module Usta.Forge.Forgejo.Api
   , BranchName (..)
   , ApiTag (..)
   , ApiRelease (..)
+  , Attachment (..)
   , ApiAsset (..)
   , RepoLabel (..)
   , Reviewers (..)
@@ -97,6 +98,8 @@ import Data.Time (UTCTime, diffUTCTime)
 import GHC.Generics (Generic)
 import Servant.API
 import Servant.Client (AsClientT, ClientM, client)
+import Servant.Multipart.API (Mem, MultipartData, MultipartForm)
+import Servant.Multipart.Client ()
 
 import Usta.Types.Commit (Commit (..), Sha)
 import Usta.Types.Discussion (Comment (..), Feeling (..), Merge (..), Verdict (..), Watching (..))
@@ -273,6 +276,9 @@ data Routes mode = Routes
   , tags
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "tags"
            :> RecordQueryParam ListQuery :> Get '[JSON] [ApiTag]
+  , upload
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "index" Number
+           :> "assets" :> QueryParam "name" Text :> MultipartForm Mem (MultipartData Mem) :> PostCreated '[JSON] Attachment
   , releases
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "releases"
            :> RecordQueryParam ListQuery :> Get '[JSON] [ApiRelease]
@@ -889,6 +895,13 @@ instance FromJSON BranchName where
   parseJSON = withObject "Branch" $ \o -> do
     commit <- o .:? "commit"
     BranchName <$> o .: "name" <*> maybe (pure Nothing) (.:? "timestamp") commit
+
+-- | A file attached to an issue or pull request, and where it is served.
+type Attachment :: Type
+data Attachment = Attachment {name :: Text, browserDownloadUrl :: Text}
+
+instance FromJSON Attachment where
+  parseJSON = withObject "Attachment" $ \o -> Attachment <$> o .: "name" <*> o .: "browser_download_url"
 
 -- | A release and the files it offers.
 type ApiRelease :: Type

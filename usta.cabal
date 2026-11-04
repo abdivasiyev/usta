@@ -209,6 +209,8 @@ executable usta
     servant,
     servant-client,
     servant-client-core,
+    servant-multipart-api,
+    servant-multipart-client,
     skylighting,
     stm,
     text,

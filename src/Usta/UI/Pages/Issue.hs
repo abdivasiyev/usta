@@ -41,6 +41,7 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.AssignPickers as AssignPickers
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.CommentCard as CommentCard
 import qualified Usta.UI.Components.TimelineRow as TimelineRow
 import qualified Usta.UI.Components.LabelPicker as LabelPicker
@@ -82,6 +83,8 @@ data Talk = Talk
   , deleteComment :: Int64 -> IO (Either Text ())
   , react :: Maybe Int64 -> Feeling -> Bool -> IO (Either Text ())
   , refresh :: IO ()
+  , upload :: Maybe Attach.Uploader
+    -- ^ Where files attached to its comments go.
   }
 
 -- | A comment as a card that edits, deletes and reacts when the forge's
@@ -96,6 +99,7 @@ commentWidget t reply opener c = case c.forge of
     , verb = verb
     , mine = unparse x.author == t.me
     , badge = if unparse x.author == opener && x.id /= Nothing then Just "Author" else Nothing
+    , upload = t.upload
     , edit = t.editComment x.id
     , delete = t.deleteComment <$> x.id
     , quote = \q -> do
@@ -415,7 +419,7 @@ replyBox :: Actions -> Model -> IO (Gtk.Box, Gtk.TextBuffer)
 replyBox actions m = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
   (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults
-    { MarkdownEditor.hint = Just "Leave a comment. Markdown supported." }
+    { MarkdownEditor.hint = Just "Leave a comment. Markdown supported; paste or drop files to attach them.", MarkdownEditor.upload = actions.talk.upload }
   #append box editor
   problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
   buttons <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal

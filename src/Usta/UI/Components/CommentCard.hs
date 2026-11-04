@@ -23,6 +23,7 @@ import qualified GI.Gdk as Gdk
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Markdown as Markdown
@@ -48,6 +49,8 @@ data Card = Card
     -- ^ Puts the quoted text into the reply box.
   , react :: Feeling -> Bool -> IO (Either Text ())
     -- ^ 'True' adds the reaction, 'False' takes it back.
+  , upload :: Maybe Attach.Uploader
+    -- ^ Where files attached while editing go.
   , changed :: IO ()
     -- ^ After an edit or delete, e.g. to reload the page.
   }
@@ -92,7 +95,7 @@ new c = do
         clear slot
         GI.set problem [#visible := False]
         GI.set confirm [#visible := False]
-        (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.text = c.comment.body}
+        (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.text = c.comment.body, MarkdownEditor.upload = c.upload}
         #append slot editor
         buttons <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd]
         cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}

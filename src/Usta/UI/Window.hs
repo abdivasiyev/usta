@@ -781,6 +781,7 @@ talkFor source host repo n refresh me c = Issue.Talk
   , deleteComment = source.deleteComment host repo
   , react = source.react host repo n
   , refresh = refresh
+  , upload = Just (source.upload host repo n)
   }
 
 -- | The assignees picker of an issue or pull request, for @me@ (a login

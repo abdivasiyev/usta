@@ -32,6 +32,7 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
+import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import qualified Usta.UI.Components.AssignPickers as AssignPickers
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.LabelPicker as LabelPicker
@@ -309,14 +310,8 @@ commentBox :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) ->
 commentBox run actions m = do
   box <- vbox 8
   label "Add a comment" ["strong"] >>= #append box
-  editor <- GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
-                                , #topMargin := 10
-                                , #bottomMargin := 10
-                                , #leftMargin := 12
-                                , #rightMargin := 12
-                                , #heightRequest := 96
-                                , #cssClasses := ["editor"]
-                                ]
+  -- The Markdown editor of every comment box, with attachments.
+  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 96, MarkdownEditor.upload = actions.talk.upload}
   #append box editor
   buttons <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #spacing := 8
@@ -330,12 +325,10 @@ commentBox run actions m = do
     #append buttons close
   send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
   void $ GI.on send #clicked $ do
-    buffer <- Gtk.textViewGetBuffer editor
     text <- maybe "" id <$> GI.get buffer #text
     unless (T.null (T.strip text)) $ run send buttons "Commenting…" (actions.comment text)
   #append buttons send
   #append box buttons
-  buffer <- Gtk.textViewGetBuffer editor
   pure (box, buffer)
 
 details :: (Gtk.Button -> Gtk.Box -> Text -> IO (Either Text ()) -> IO ()) -> Actions -> Model -> IO Gtk.Box

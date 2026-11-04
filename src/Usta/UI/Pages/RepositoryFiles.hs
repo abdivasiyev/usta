@@ -280,7 +280,7 @@ fileView follow place e bytes = do
       void $ Gtk.stackAddNamed stack rendered (Just "rendered")
       source <- CodeView.new e.path text
       void $ Gtk.stackAddNamed stack source (Just "source")
-      toggle <- GI.new Gtk.ToggleButton [#label := "Source"]
+      toggle <- GI.new Gtk.ToggleButton [#label := "Source", #valign := Gtk.AlignCenter, #cssClasses := ["u-toggle"]]
       void $ GI.on toggle #toggled $ do
         on <- GI.get toggle #active
         Gtk.stackSetVisibleChildName stack (if on then "source" else "rendered")

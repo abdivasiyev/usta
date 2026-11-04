@@ -22,6 +22,7 @@ import Usta.Forge (Failure, Fetched (..), Known (..))
 import qualified Usta.Forge as F
 import Usta.Types.Account (Account (..))
 import Usta.Types.Host (Host)
+import Usta.Types.Thread (Threads (..))
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Issue as I
@@ -79,6 +80,7 @@ new now account = do
         -- The sample has no code: its pull requests change nothing.
         , F.pullDiff = \_ _ -> pure []
         , F.pullCommits = \_ _ -> pure []
+        , F.threads = \_ _ -> pure (Threads [] Nothing)
         , F.recentCommits = \_ _ -> pure []
         , F.readme = \_ _ -> pure Nothing
         , F.commitDiff = \_ _ -> pure []

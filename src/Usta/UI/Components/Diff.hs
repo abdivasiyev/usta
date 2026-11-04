@@ -37,6 +37,7 @@ import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Highlight as Highlight
+import Text.Read (readMaybe)
 
 type Line :: Type
 data Line
@@ -68,6 +69,9 @@ data Commenting = Commenting
   , keys :: IORef (Maybe Keys)
     -- ^ What the keys do on the diff the pointer is in, or whose lines
     -- are chosen.
+  , fullText :: IO (Either Text Text)
+    -- ^ The file as the pull request leaves it, to show more unchanged
+    -- lines around a change; off the main thread.
   }
 
 -- | The keys' work on one diff.
@@ -152,8 +156,10 @@ build opts original attached commenting onViewed = do
       #append body holder
     forM_ slot $ \(_, _, under) -> #append body under
     pure Row {index, line, hunk, widget = row, code, slot, twin = Nothing}
-  -- Choosing a range of lines works on the unified diff.
-  unless opts.split $ forM_ commenting (choosing file.path body bodyOverlay rows)
+  -- Choosing a range of lines, and more context, work on the unified diff.
+  unless opts.split $ forM_ commenting $ \c -> do
+    choosing file.path body bodyOverlay rows c
+    expanding c body rows
   let wordMarks = if opts.changedWords then changedParts file.diffLines hidden else []
   Highlight.follow card $ \palette -> do
     let marked = highlighted palette file
@@ -323,6 +329,50 @@ splitRows file attached commenting body = go (zip3 [0 :: Int ..] file.diffLines 
       Just (Added _ _) -> "added"
       Nothing -> if isOld then "empty" else "empty"
       _ -> "context"
+
+-- | Each hunk's header row gets "Expand 20 lines above": the unchanged
+-- lines of the new version before the hunk, back to the one above, from
+-- the whole file, read the first time.
+expanding :: Commenting -> Gtk.Box -> [Row] -> IO ()
+expanding c body rows = do
+  whole <- newIORef Nothing
+  let starts = [(r, new', old - new') | r <- rows, Hunk header <- [r.line], Just (old, new') <- [startsOf header]]
+      before r = last (0 : [n | x <- rows, x.index < r.index, Just n <- [newSide x.line]])
+  forM_ starts $ \(r, first, shift) -> do
+    shown <- newIORef first
+    button <- Button.new Button.defaults {Button.label = Just "↕ Expand 20 lines above", Button.variant = Button.Flat, Button.small = True}
+    GI.set button [#halign := Gtk.AlignStart, #visible := first - 1 > before r]
+    Gtk.widgetAddCssClass button "expand"
+    above <- Gtk.widgetGetPrevSibling r.widget
+    Gtk.boxInsertChildAfter body button above
+    void $ GI.on button #clicked $ do
+      top <- readIORef shown
+      let from = max (before r + 1) (top - 20)
+      Button.busy button ([] :: [Gtk.Button]) "Loading…" (cached whole) $ \case
+        Left _ -> GI.set button [#visible := False]
+        Right ls -> do
+          -- Newest first, so each goes in right above the hunk.
+          forM_ (reverse [from .. top - 1]) $ \n -> forM_ (lookup n (zip [1 ..] ls)) $ \t -> do
+            (row, code) <- lineRow (Context (n + shift) n t)
+            Gtk.labelSetText code t
+            Gtk.boxInsertChildAfter body row (Just button)
+          writeIORef shown from
+          GI.set button [#visible := from > before r + 1]
+  where
+    cached ref = readIORef ref >>= \case
+      Just ls -> pure (Right ls)
+      Nothing -> c.fullText >>= \case
+        Left e -> pure (Left e)
+        Right t -> let ls = T.lines t in writeIORef ref (Just ls) >> pure (Right ls)
+
+-- | Where a hunk starts in the old and new version, from its header,
+-- "@@ -12,6 +12,8 @@".
+startsOf :: Text -> Maybe (Int, Int)
+startsOf header = case T.words header of
+  "@@" : old : new' : _ -> (,) <$> number old <*> number new'
+  _ -> Nothing
+  where
+    number w = readMaybe (T.unpack (T.takeWhile (/= ',') (T.drop 1 w)))
 
 -- | Each line's hunk, counting from 0.
 hunks :: [Line] -> [Int]
@@ -576,6 +626,7 @@ css = mconcat
   , "popover.u-range-links > contents { padding: 4px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
   , "popover.u-range-links button.item { padding: 6px 10px; border: none; box-shadow: none; background: transparent; background-image: none; }"
   , "popover.u-range-links button.item:hover { background: var(--border-subtle); }"
+  , "box.u-diff button.expand { margin: 2px 0 2px 100px; font-size: 12px; color: var(--accent); }"
   , "box.u-diff button.comment-plus { min-width: 18px; min-height: 18px; margin-left: 14px; padding: 0; border-radius: 4px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 12px; }"
   , "box.u-diff > box:last-child { border-radius: 0 0 8px 8px; }"
   , "box.u-diff.collapsed box.diff-header { border-bottom: none; border-radius: 8px; }"

@@ -30,6 +30,7 @@ import Data.Kind (Type)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Time (UTCTime (..), fromGregorian, utc)
 import qualified GI.GLib as GLib
 import qualified GI.Graphene as Graphene
@@ -245,6 +246,7 @@ new actions panels m = do
             unless open $ writeOn path (from, number) code "" under
         , links = m.links path
         , keys = keysRef
+        , fullText = either Left (maybe (Left "The file is not text.") Right . textOf) <$> actions.version False path
         }
 
   placedRef <- newIORef []
@@ -410,6 +412,10 @@ new actions panels m = do
   shortcut keys "<Primary>b" filesPanel.toggle
   shortcut keys "<Primary><Shift>b" reviewPanel.toggle
   Gtk.toWidget columns
+
+-- | A file's bytes as text, if they are UTF-8.
+textOf :: ByteString -> Maybe Text
+textOf = either (const Nothing) Just . TE.decodeUtf8'
 
 -- | The last part of a path, as the Threads list names files.
 fileName :: Text -> Text

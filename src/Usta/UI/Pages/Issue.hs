@@ -7,6 +7,7 @@ module Usta.UI.Pages.Issue
   ( Comment (..)
   , Talk (..)
   , commentWidget
+  , conversation
   , editableTitle
   , Event (..)
   , Model (..)
@@ -22,6 +23,7 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int64)
 import Data.Kind (Type)
+import Data.List (sortOn)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -35,6 +37,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.AssignPickers as AssignPickers
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.CommentCard as CommentCard
+import qualified Usta.UI.Components.TimelineRow as TimelineRow
 import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
@@ -45,6 +48,7 @@ import Usta.UI.Format (Clock, ago)
 import Usta.UI.Pages.Issues (labelTone)
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Discussion (Feeling)
+import qualified Usta.Types.Timeline as Tl
 import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
 import Usta.Types.Milestone (Milestone)
@@ -133,6 +137,19 @@ editableTitle start classes rename = do
   Gtk.widgetAddController entry keys
   pure box
 
+-- | The description, then the comments and the timeline's events by
+-- time, appended to @into@. Comments without a time (samples) keep their
+-- place before the events.
+conversation :: Talk -> Gtk.TextBuffer -> Text -> [Comment] -> [Tl.Event] -> Gtk.Box -> IO ()
+conversation t reply opener comments events into = do
+  let (first, rest) = splitAt 1 comments
+      timed = [(maybe Nothing (Just . (.createdAt) . snd) c.forge, Left c) | c <- rest]
+        <> [(Just e.at, Right e) | e <- events]
+  forM_ first $ \c -> commentWidget t reply opener c >>= #append into
+  forM_ (sortOn fst timed) $ \(_, item) -> case item of
+    Left c -> commentWidget t reply opener c >>= #append into
+    Right e -> TimelineRow.new t.clock e >>= #append into
+
 -- | Something that happened on the issue besides comments.
 type Event :: Type
 data Event
@@ -150,6 +167,8 @@ data Model = Model
   , closed :: Bool
   , comments :: [Comment]
   , events :: [Event]
+  , timeline :: [Tl.Event]
+    -- ^ What happened besides comments, set between them by time.
   , assignees :: [(Text, Text)]
     -- ^ Initials and name.
   , labels :: [(Tone, Text)]
@@ -184,6 +203,7 @@ fromDiscussion c d m = m
   , labels = [(labelTone l.color, l.name) | l <- d.labels]
   , milestone = d.milestone
   , linkedPullRequests = []
+  , timeline = m.timeline
   }
   where
     said verb x = Comment
@@ -225,7 +245,7 @@ thread actions m = do
   -- The reply box comes first, so Quote reply has somewhere to go.
   (reply, buffer) <- replyBox actions m
   let opener = maybe "" (.author) (listToMaybe m.comments)
-  forM_ m.comments $ \c -> commentWidget actions.talk buffer opener c >>= #append main
+  conversation actions.talk buffer opener m.comments m.timeline main
   timeline <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                              , #spacing := 10
                              , #cssClasses := ["timeline"]

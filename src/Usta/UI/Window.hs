@@ -78,6 +78,7 @@ import Usta.Preferences (Preferences (..), Theme (..))
 import Usta.Types.Discussion (Merge (..))
 import Usta.Types.Login (Login)
 import Usta.Types.Milestone (Milestone (..))
+import qualified Usta.Types.Timeline as Tl
 import Usta.Types.Parse (parse, unparse)
 -- For the commits' fields.
 import qualified Usta.Types.Commit as C
@@ -204,13 +205,14 @@ buildAt start given app = do
             load = do
               d <- source.discussion h r n
               goals <- either (const []) id <$> source.milestones h r
+              events <- either (const []) id <$> source.timeline h r n
               me <- maybe "" (.login) . find (\a -> a.host == h) <$> source.accounts
-              pure (fmap (\x -> (x, goals, me)) d)
+              pure (fmap (\x -> (x, goals, me, events)) d)
         Issue.new backLabel backToMain (source.editTitle h r n) model (\showClosed ->
-          loadInto load $ \(d, goals, me) -> do
+          loadInto load $ \(d, goals, me, events) -> do
             c <- clock
             showClosed d.closed
-            Issue.thread (actionsFor d goals me c) (Issue.fromDiscussion c d model))
+            Issue.thread (actionsFor d goals me c) (Issue.fromDiscussion c d model {Issue.timeline = events}))
           >>= showDetail
       -- In @at@ (host and repository) when given, else the first one.
       openNewIssueIn at = do
@@ -224,7 +226,7 @@ buildAt start given app = do
             chosen = length (takeWhile (\p -> Just (p.host, p.repo) /= at) places)
             opened p number title = openIssue "Issues" Issue.Model
               { Issue.forge = p.forge, Issue.host = p.host, Issue.repo = p.repo, Issue.number = number
-              , Issue.title = title, Issue.closed = False, Issue.comments = [], Issue.events = []
+              , Issue.title = title, Issue.closed = False, Issue.comments = [], Issue.events = [], Issue.timeline = []
               , Issue.assignees = [], Issue.labels = [], Issue.milestone = Nothing, Issue.linkedPullRequests = []
               }
         NewIssue.open anchor (\p -> source.createIssue p.host p.repo) opened
@@ -574,8 +576,9 @@ tabContent source reopen fetch summary showState tab = case tab of
           reviewers <- either (const []) id <$> source.reviewers host repo n
           ready <- either (const Nothing) Just <$> source.readiness host repo n
           goals <- either (const []) id <$> source.milestones host repo
+          events <- either (const []) id <$> source.timeline host repo n
           me <- maybe "" (.login) . find (\a -> a.host == host) <$> source.accounts
-          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, (reviewers, ready, goals))) d)
+          pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, (reviewers, ready, goals, events))) d)
         actionsFor d goals me c = Conversation.Actions
           { comment = source.comment host repo n
           , setClosed = source.setClosed host repo n
@@ -598,7 +601,7 @@ tabContent source reopen fetch summary showState tab = case tab of
           Just Success -> Just True
           Just Danger -> Just False
           _ -> Nothing
-    loadInto load $ \(d, commits, threads, me, (reviewers, ready, goals)) -> do
+    loadInto load $ \(d, commits, threads, me, (reviewers, ready, goals, events)) -> do
       c <- clock
       showState $ case (d.merged, d.closed) of
         (True, _) -> PullRequest.MergedState
@@ -611,6 +614,7 @@ tabContent source reopen fetch summary showState tab = case tab of
           running = fmap fst summary.checks == Just Warning
       Conversation.new (actionsFor d goals me c) model
         { Conversation.threads = map shown threads.threads
+        , Conversation.timeline = [e | e <- events, not (pushed e)]
         , Conversation.reviewers = reviewers
         , Conversation.merge = (\st -> st {Conversation.readiness = ready, Conversation.checksRunning = running}) <$> model.merge
         }
@@ -663,6 +667,12 @@ labelPicker source host repo n refresh current = LabelPicker.Picker
       Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
   , saved = refresh
   }
+
+-- | A push, which the Conversation tab shows as its commits instead.
+pushed :: Tl.Event -> Bool
+pushed e = case e.what of
+  Tl.Pushed _ -> True
+  _ -> False
 
 -- | What comments on an issue or pull request can do.
 talkFor :: Source -> Text -> Text -> Int -> IO () -> Text -> Clock -> Issue.Talk
@@ -744,6 +754,7 @@ notificationIssue n = Issue.Model
   , Issue.closed = False
   , Issue.comments = []
   , Issue.events = []
+  , Issue.timeline = []
   , Issue.assignees = []
   , Issue.labels = []
   , Issue.milestone = Nothing
@@ -761,6 +772,7 @@ issueDetail i = Issue.Model
   , Issue.closed = i.closed
   , Issue.comments = []
   , Issue.events = []
+  , Issue.timeline = []
   , Issue.assignees = []
   , Issue.labels = [(tone, name) | Issues.Label tone name <- i.labels]
   , Issue.milestone = Nothing

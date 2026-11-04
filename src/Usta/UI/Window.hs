@@ -36,6 +36,7 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import qualified Usta.UI.Components.Thread as Thread
 import qualified Usta.UI.Components.SyncStatus as SyncStatus
 import Usta.UI.Page (Page (..))
 import qualified Usta.UI.Pages.AddAccount as AddAccount
@@ -68,6 +69,7 @@ import qualified Usta.UI.Source as Source
 import Usta.Details (From (..))
 import qualified Usta.Types.Diff as Changes
 import qualified Usta.Types.Discussion as D
+import Usta.Types.Thread (Threads (..))
 import Usta.Preferences (Preferences (..), Theme (..))
 import Usta.Types.Discussion (Merge (..))
 import Usta.Types.Parse (parse, unparse)
@@ -568,7 +570,14 @@ tabContent source reopen fetch summary showState tab = case tab of
         _ -> summary.state
       Conversation.new actions (Conversation.fromDiscussion c d commits summary.branches checks)
   PullRequest.Files ->
-    loadInto (source.pullFiles summary.host summary.repo summary.number) $ \(from, changes) ->
+    -- The diff with its review threads; without threads it still shows.
+    let withThreads = do
+          files <- source.pullFiles summary.host summary.repo summary.number
+          threads <- source.threads summary.host summary.repo summary.number
+          me <- maybe "" (.login) . find (\a -> a.host == summary.host) <$> source.accounts
+          c <- clock
+          pure ((\f -> (f, either (const (Threads [] Nothing)) id threads, me, c)) <$> files)
+    in loadInto withThreads $ \((from, changes), threads, me, c) ->
       Files.new Files.Actions
         { review = source.review summary.host summary.repo summary.number
         , merge = source.merge summary.host summary.repo summary.number Squash True
@@ -576,7 +585,8 @@ tabContent source reopen fetch summary showState tab = case tab of
             fmap snd <$> source.file summary.host summary.repo ((if old then snd else fst) summary.branches) path
         , refresh = reopen
         }
-        (Files.fromFileDiffs (said from "Diff computed locally" "Diff from the forge's API") changes)
+        (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
+          {Files.threads = threads, Files.me = me}
   PullRequest.Commits ->
     loadInto (source.pullCommits summary.host summary.repo summary.number) $ \(from, commits) -> do
       c <- clock
@@ -802,7 +812,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

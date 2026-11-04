@@ -4,8 +4,7 @@
 -- | The Files tab of a pull request: changed files on the left, their
 -- diffs with review threads in the middle, and your review on the right.
 module Usta.UI.Pages.PullRequest.Files
-  ( Comment (..)
-  , Model (..)
+  ( Model (..)
   , Actions (..)
   , fromFileDiff
   , fromFileDiffs
@@ -22,17 +21,18 @@ import Control.Monad (filterM, forM, forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Int (Int32)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
 import Data.Kind (Type)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (UTCTime (..), fromGregorian, utc)
 import qualified GI.GLib as GLib
+import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
-import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
@@ -42,24 +42,24 @@ import Usta.UI.Components.Diff (Line (..))
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.ImageView as ImageView
 import qualified Usta.UI.Components.Progress as Progress
+import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import qualified Usta.UI.Components.Thread as Thread
+import Usta.UI.Format (Clock (..))
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Types.Diff as D
+import Usta.Types.Thread (Threads (..))
+import qualified Usta.Types.Thread as Th
 import Usta.Types.Discussion (Verdict (..))
-
--- | A review comment attached to a line of a file's diff.
-type Comment :: Type
-data Comment = Comment
-  { onLine :: Int
-    -- ^ Index into the file's diff lines.
-  , author :: Text
-  , pending :: Bool
-  , body :: Text
-  }
 
 type Model :: Type
 data Model = Model
-  { files :: [(Diff.File, [Comment])]
+  { files :: [Diff.File]
+  , threads :: Threads
+    -- ^ The review conversations, placed under their lines.
+  , me :: Text
+    -- ^ The user's login, whose own notes are never new.
+  , clock :: Clock
   , source :: Text
     -- ^ Where the diff came from, e.g. "Diff computed locally".
   , range :: Text
@@ -125,6 +125,12 @@ new actions m = do
   label m.source ["muted", "small"] >>= #append toolbar
   when (not (T.null m.range)) $ label m.range ["muted", "small", "mono"] >>= #append toolbar
   #append main toolbar
+  threadBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #visible := False, #cssClasses := ["thread-bar"]]
+  (threadFilter, filterButtons) <- Segmented.new ["All threads", "Open only", "Hidden"] 0
+  #append threadBar threadFilter
+  threadSummary <- label "" ["small", "soft"]
+  #append threadBar threadSummary
+  #append main threadBar
   scroll <- GI.new Gtk.ScrolledWindow [ #child := main
                                       , #hexpand := True
                                       , #vexpand := True
@@ -141,10 +147,13 @@ new actions m = do
         GI.set progress [ #label := T.pack (show seen) <> " of " <> T.pack (show (length entries))
                                     <> " files viewed" ]
 
-  entries <- forM m.files $ \(f, comments) -> do
-    attached <- forM comments $ \c -> do
-      w <- thread c >>= Gtk.toWidget
-      pure (c.onLine, w)
+  placedRef <- newIORef []
+  entries <- forM m.files $ \f -> do
+    placed <- forM [(t, at) | t <- m.threads.threads, t.path == f.path, Just at <- [place f.diffLines t]] $ \(t, (index, outdated)) -> do
+      drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock}
+      pure (index, (t, outdated, drawn))
+    modifyIORef' placedRef (<> map snd placed)
+    let attached = [(index, drawn.widget) | (index, (_, _, drawn)) <- placed]
     -- An image shows before and after under its "Binary file" line.
     pictures <- forM (lookup f.path m.images) $ \(before, after) -> do
       slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
@@ -167,7 +176,7 @@ new actions m = do
       setViewed markBox isViewed
       updateProgress
     #append main diff
-    button <- fileRow f markBox
+    button <- fileRow f markBox [(outdated, drawn) | (_, (_, outdated, drawn)) <- placed]
     #append side button
     pure (Entry f button markBox diff)
   writeIORef entriesRef entries
@@ -210,9 +219,70 @@ new actions m = do
       GI.set e.card [#visible := keep]
 
   forM_ (take 1 entries) setCurrent
+
+  -- Threads: the filter, the summary, jumping to one, and the keys.
+  placed <- readIORef placedRef
+  let open' = [d | (_, o, d) <- placed, not o, not d.resolved]
+      counted n word = T.pack (show n) <> " " <> word
+      newOnes = length [() | (_, _, d) <- placed, d.isNew]
+  unless (null placed) $ do
+    GI.set threadBar [#visible := True]
+    GI.set threadSummary [#label := T.intercalate " · " (
+      [counted (length open') "open"]
+        <> [counted n "resolved" | let n = length [() | (_, o, d) <- placed, not o, d.resolved], n > 0]
+        <> [counted (length [() | (_, o, _) <- placed, o]) "outdated" | any (\(_, o, _) -> o) placed]
+        <> [counted newOnes (if newOnes == 1 then "new reply" else "new replies") <> " since your last review" | newOnes > 0])]
+  forM_ (zip [0 :: Int ..] filterButtons) $ \(which, button) ->
+    void $ GI.on button #toggled $ do
+      active <- GI.get button #active
+      when active $ forM_ placed $ \(_, _, d) ->
+        GI.set d.widget [#visible := case which of
+          0 -> True
+          1 -> not d.resolved
+          _ -> False]
+  let jump (_, _, d) = do
+        d.setOpen True
+        GI.set d.widget [#visible := True]
+        origin <- Graphene.newZeroPoint
+        (found, at) <- Gtk.widgetComputePoint d.widget main origin
+        when found $ Graphene.getPointY at >>= \y -> Gtk.adjustmentSetValue adjustment (realToFrac y - padding)
+  currentThread <- newIORef (-1 :: Int)
+  let step by = unless (null placed) $ do
+        i <- readIORef currentThread
+        let next = (i + by) `mod` length placed
+        writeIORef currentThread next
+        jump (placed !! next)
+  keys <- GI.new Gtk.ShortcutController []
+  shortcut keys "bracketright" (step 1)
+  shortcut keys "bracketleft" (step (-1))
+  Gtk.widgetAddController columns keys
+
   #append columns scroll
-  review actions m >>= #append columns
+  review actions m (zip placed (map jump placed)) >>= #append columns
   Gtk.toWidget columns
+
+-- | The last part of a path, as the Threads list names files.
+fileName :: Text -> Text
+fileName = T.takeWhileEnd (/= '/')
+
+-- | Where a thread goes in its file's diff: under its line when that line
+-- is still as it was, otherwise, outdated, under the nearest line left.
+-- 'Nothing' when the diff has no new-side lines at all.
+place :: [Line] -> Th.Thread -> Maybe (Int, Bool)
+place lines' t = case [i | (i, n, text) <- numbered, n == t.line, Just text == commented] of
+  i : _ -> Just (i, False)
+  [] | null numbered -> Nothing
+     | otherwise -> Just (snd (minimum [(abs (n - t.line), i) | (i, n, _) <- numbered]), True)
+  where
+    numbered = [(i, n, text) | (i, l) <- zip [0 ..] lines', Just (n, text) <- [newSide l]]
+    newSide l = case l of
+      Context _ n text -> Just (n, text)
+      Added n text -> Just (n, text)
+      _ -> Nothing
+    -- The hunk's last line is the commented one, after its "+" or " ".
+    commented = case reverse t.code of
+      l : _ | Just (c, rest) <- T.uncons l, c /= '-' -> Just rest
+      _ -> Nothing
 
 -- | The square in the file list: empty, or checked once viewed.
 viewedMark :: Bool -> IO Gtk.Box
@@ -229,13 +299,19 @@ setViewed box isViewed = do
   child <- Gtk.widgetGetFirstChild box
   forM_ child $ \c -> GI.set c [#visible := isViewed]
 
-fileRow :: Diff.File -> Gtk.Box -> IO Gtk.Button
-fileRow f markBox = do
+-- | A file in the list, with its thread counts under the name.
+fileRow :: Diff.File -> Gtk.Box -> [(Bool, Thread.Thread)] -> IO Gtk.Button
+fileRow f markBox threads' = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   #append content markBox
-  name <- label f.path ["mono", "small"]
-  GI.set name [#hexpand := True]
-  #append content name
+  names <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #hexpand := True]
+  label f.path ["mono", "small"] >>= #append names
+  let opened = length [() | (o, d) <- threads', not o, not d.resolved]
+      parts = [T.pack (show opened) <> " open" | opened > 0]
+        <> [T.pack (show n) <> " resolved" | let n = length [() | (o, d) <- threads', not o, d.resolved], n > 0]
+        <> [T.pack (show n) <> " outdated" | let n = length [() | (o, _) <- threads', o], n > 0]
+  unless (null parts) $ label (T.intercalate " · " parts) ["muted", "tiny"] >>= #append names
+  #append content names
   label ("+" <> count isAdded) ["mono", "small", "added"] >>= #append content
   label ("−" <> count isRemoved) ["mono", "small", "removed"] >>= #append content
   GI.new Gtk.Button [#child := content, #hasFrame := False, #cssClasses := ["file-row"]]
@@ -246,40 +322,10 @@ fileRow f markBox = do
     isRemoved (Removed _ _) = True
     isRemoved _ = False
 
-thread :: Comment -> IO Gtk.Box
-thread c = do
-  card <- Card.new
-  Gtk.widgetAddCssClass card "thread"
-  top <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                        , #spacing := 10
-                        , #cssClasses := ["thread-body"]
-                        ]
-  avatar <- Avatar.new 28 "AA"
-  GI.set avatar [#valign := Gtk.AlignStart]
-  #append top avatar
-  text <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
-  who <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-  label c.author ["strong"] >>= #append who
-  if c.pending then label "· pending" ["muted"] >>= #append who else pure ()
-  #append text who
-  bodyLabel <- label c.body []
-  GI.set bodyLabel [#wrap := True]
-  #append text bodyLabel
-  #append top text
-  #append card top
-
-  reply <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                          , #spacing := 8
-                          , #cssClasses := ["thread-reply"]
-                          ]
-  entry <- GI.new Gtk.Entry [#placeholderText := "Reply…", #hexpand := True]
-  #append reply entry
-  Button.new Button.defaults { Button.label = Just "Resolve" } >>= #append reply
-  #append card reply
-  pure card
-
-review :: Actions -> Model -> IO Gtk.Box
-review actions m = do
+-- | The review panel; @listed@ are the threads, each with how to jump to
+-- it.
+review :: Actions -> Model -> [((Th.Thread, Bool, Thread.Thread), IO ())] -> IO Gtk.Box
+review actions m listed = do
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #widthRequest := 280
@@ -306,15 +352,29 @@ review actions m = do
                                  , #cssClasses := ["editor"]
                                  ]
   #append verdict summary
-  let pendingCount = length [() | (_, cs) <- m.files, c <- cs, c.pending]
-  unless (pendingCount == 0) $
-    label (T.pack (show pendingCount) <> " pending comment" <> (if pendingCount == 1 then "" else "s"))
-      ["muted", "small"] >>= #append verdict
   submit <- Button.new Button.defaults { Button.label = Just "Submit review", Button.variant = Button.Primary }
   #append verdict submit
   said <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["small"]]
   #append verdict said
   #append side verdict
+
+  -- Every thread, to jump to.
+  unless (null listed) $ do
+    box <- section "Threads"
+    forM_ listed $ \((t, outdated, d), go) -> do
+      row' <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+      label (if outdated then "◷" else if d.resolved then "✓" else "●") [if outdated then "muted" else if d.resolved then "added" else "waiting"] >>= #append row'
+      let first = case t.notes of
+            n : _ -> " · " <> T.takeWhile (/= '\n') n.body
+            [] -> ""
+      text <- label (fileName t.path <> ":" <> T.pack (show t.line) <> (if outdated then " · outdated" else "") <> first) ["small"]
+      GI.set text [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd]
+      #append row' text
+      when d.isNew $ Badge.new Accent "new" >>= #append row'
+      button <- GI.new Gtk.Button [#child := row', #hasFrame := False, #cssClasses := ["thread-row"]]
+      void $ GI.on button #clicked go
+      #append box button
+    #append side box
 
   -- Buttons wait for the forge, so a second click sends nothing twice.
   let run button doing act done = do
@@ -533,9 +593,12 @@ fromFileDiff f = Diff.File
 
 -- | The Files tab for a pull request's changes; @source@ says where they
 -- came from. Review threads, checks and reviewers come with the review.
-fromFileDiffs :: Text -> [D.FileDiff] -> Model
-fromFileDiffs source changes = Model
-  { files = [(fromFileDiff f, []) | f <- changes]
+fromFileDiffs :: Clock -> Text -> [D.FileDiff] -> Model
+fromFileDiffs c source changes = Model
+  { files = map fromFileDiff changes
+  , threads = Threads [] Nothing
+  , me = ""
+  , clock = c
   , source = source
   , range = ""
   , checks = []
@@ -562,7 +625,7 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 sample :: Model
 sample = Model
   { files =
-      [ ( Diff.File "usta.cabal" True
+      [ Diff.File "usta.cabal" True
             [ Hunk "@@ -12,6 +12,8 @@ executable usta"
             , Context 13 13 "  main-is: Main.hs"
             , Context 14 14 "  hs-source-dirs: app"
@@ -573,8 +636,7 @@ sample = Model
             , Context 16 18 ""
             , Context 17 19 "  default-language: GHC2021"
             ]
-        , [] )
-      , ( Diff.File "flake.nix" False
+      , Diff.File "flake.nix" False
             [ Hunk "@@ -20,7 +20,7 @@ ustaFor = pkgs:"
             , Context 21 21 "          isLibrary = false;"
             , Context 22 22 "          isExecutable = true;"
@@ -582,10 +644,10 @@ sample = Model
             , Added 23 "          executableHaskellDepends = with hsPkgs; [ base gi-gtk4 ];"
             , Context 24 24 "          license = pkgs.lib.licenses.asl20;"
             ]
-        , [ Comment 4 "abdivasiyev" True
-              "Add wrapGAppsHook4 here once Main opens a window, otherwise the app can't find the GSettings schemas."
-          ] )
       ]
+  , threads = Threads [] Nothing
+  , me = "abdivasiyev"
+  , clock = Clock {now = UTCTime (fromGregorian 2026 11 1) 0, zone = utc}
   , source = "Diff computed locally"
   , range = "8427b36..e1c90fa"
   , checks = [(True, "nix build", "3m 24s")]

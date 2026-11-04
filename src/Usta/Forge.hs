@@ -15,6 +15,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 
+import Usta.Types.Check (Check, Job)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
@@ -60,6 +61,10 @@ data Forge = Forge
   , pullCommits :: RepoName -> Number -> IO [Commit]
     -- ^ Its commits, oldest first.
   , threads :: RepoName -> Number -> IO Threads
+  , checks :: RepoName -> Number -> IO [Check]
+    -- ^ The checks on a pull request's latest commit.
+  , checkLog :: RepoName -> Job -> IO Text
+    -- ^ A CI job's log, as it printed it.
     -- ^ Its review conversations, and when the user last reviewed it.
   , reply :: RepoName -> Number -> Thread -> Text -> IO ()
     -- ^ Adds a note to a thread.

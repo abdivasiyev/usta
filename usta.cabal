@@ -136,6 +136,7 @@ executable usta
     Usta.UI.Components.Shortcut
     Usta.UI.Components.Skeleton
     Usta.UI.Components.Thread
+    Usta.UI.Components.TimelineRow
     Usta.UI.Components.SyncStatus
     Usta.UI.Format
     Usta.UI.Highlight

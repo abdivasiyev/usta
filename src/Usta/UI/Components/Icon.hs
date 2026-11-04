@@ -45,6 +45,17 @@ data Icon
   | Smile
   | Fit
   | Fullscreen
+  | Tag
+  | Person
+  | Chain
+  | Pencil
+  | Commit
+  | Flag
+  | Closed
+  | Reopened
+  | Merge
+  | Clock
+  | Trash
   deriving (Eq, Show, Enum, Bounded)
 
 -- | An icon at the given size in pixels, in the surrounding text color.
@@ -125,6 +136,43 @@ source icon = case icon of
     , stroke "path" "d='M8 12h8'"
     ]
   Fullscreen -> line [ stroke "path" "d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'" ]
+  Tag -> line
+    [ stroke "path" "d='M3 12V4h8l10 10-8 8z'"
+    , stroke "circle" "cx='7.5' cy='8.5' r='1.5'"
+    ]
+  Person -> line
+    [ stroke "circle" "cx='12' cy='8' r='4'"
+    , stroke "path" "d='M4 21c0-4 4-6 8-6s8 2 8 6'"
+    ]
+  Chain -> line
+    [ stroke "path" "d='M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1'"
+    , stroke "path" "d='M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'"
+    ]
+  Pencil -> line [ stroke "path" "d='M4 20h4L20 8l-4-4L4 16z'" ]
+  Commit -> line
+    [ stroke "circle" "cx='12' cy='12' r='3.5'"
+    , stroke "path" "d='M3 12h5.5M15.5 12H21'"
+    ]
+  Flag -> line [ stroke "path" "d='M5 21V4M5 4h11l-2 4 2 4H5'" ]
+  Closed -> line
+    [ stroke "circle" "cx='12' cy='12' r='8.5'"
+    , stroke "path" "d='M9 9l6 6M15 9l-6 6'"
+    ]
+  Reopened -> line
+    [ stroke "circle" "cx='12' cy='12' r='8.5'"
+    , stroke "circle" "cx='12' cy='12' r='2.5'"
+    ]
+  Merge -> line
+    [ stroke "circle" "cx='6' cy='6' r='2.5'"
+    , stroke "circle" "cx='6' cy='18' r='2.5'"
+    , stroke "circle" "cx='18' cy='12' r='2.5'"
+    , stroke "path" "d='M6 8.5v7M8 7c4 0 7 2 7.5 5'"
+    ]
+  Clock -> line
+    [ stroke "circle" "cx='12' cy='12' r='8.5'"
+    , stroke "path" "d='M12 7v5l3 2'"
+    ]
+  Trash -> line [ stroke "path" "d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'" ]
   where
     svg64 parts = mconcat
       ([ "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'>" ]

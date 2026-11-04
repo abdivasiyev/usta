@@ -94,6 +94,7 @@ executable usta
     Usta.Types.Host
     Usta.Types.Involvement
     Usta.Types.Insights
+    Usta.Types.Link
     Usta.Types.Issue
     Usta.Types.Label
     Usta.Types.Login

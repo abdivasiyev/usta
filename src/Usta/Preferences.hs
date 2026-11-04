@@ -58,6 +58,9 @@ data Preferences = Preferences
     -- failed checks.
   , onlyInBackground :: Bool
     -- ^ Only while the window is not the active one.
+  , openLinks :: Bool
+    -- ^ Forge links in comments, the palette or the command line open in
+    -- usta; off, they open in the browser.
   }
   deriving stock (Eq, Show)
 
@@ -67,6 +70,7 @@ defaults = Preferences
   , theme = System
   , notify = True
   , onlyInBackground = False
+  , openLinks = True
   }
 
 -- | Each choice is stored by a name, so reordering constructors changes
@@ -85,6 +89,7 @@ instance ToJSON Preferences where
     , "theme" .= show p.theme
     , "notify" .= p.notify
     , "onlyInBackground" .= p.onlyInBackground
+    , "openLinks" .= p.openLinks
     ]
 
 instance FromJSON Preferences where
@@ -93,7 +98,8 @@ instance FromJSON Preferences where
     theme <- o .:? "theme" >>= named defaults.theme
     notify <- o .:? "notify" .!= defaults.notify
     onlyInBackground <- o .:? "onlyInBackground" .!= defaults.onlyInBackground
-    pure Preferences {interval = interval, theme = theme, notify = notify, onlyInBackground = onlyInBackground}
+    openLinks <- o .:? "openLinks" .!= defaults.openLinks
+    pure Preferences {interval = interval, theme = theme, notify = notify, onlyInBackground = onlyInBackground, openLinks = openLinks}
 
 -- | @preferences.json@ in the folder that has the database.
 file :: IO FilePath

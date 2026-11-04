@@ -35,6 +35,7 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Markdown as Markdown
+import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Parse (unparse)
@@ -168,27 +169,30 @@ new s = do
   forM_ (zip notes bodies) $ \(n, b) -> addNote (unparse n.author) (ago s.clock n.createdAt) (fresh n) b
   #append whole noteBox
 
-  -- A reply goes to the forge, then shows here at once.
-  replyRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["reply"]]
-  entry <- GI.new Gtk.Entry [#placeholderText := if resolved' then "Reply to reopen the discussion…" else "Reply…", #hexpand := True]
+  -- A reply goes to the forge, then shows here at once; Ctrl Enter sends.
+  replyRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6, #cssClasses := ["reply"]]
+  (entry, replyBuffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 56, MarkdownEditor.compact = True}
   #append replyRow entry
-  send <- Button.new Button.defaults {Button.label = Just "Reply"}
+  send <- Button.new Button.defaults {Button.label = Just (if resolved' then "Reply and reopen" else "Reply")}
+  GI.set send [#halign := Gtk.AlignEnd]
   #append replyRow send
   #append whole replyRow
   problem <- label "" ["problem"]
   GI.set problem [#visible := False, #wrap := True]
   #append whole problem
   let sendReply = do
-        text <- T.strip <$> Gtk.editableGetText entry
+        text <- T.strip . maybe "" id <$> GI.get replyBuffer #text
         unless (T.null text) $ do
           GI.set problem [#visible := False]
-          Button.busy send [entry] "Replying…" (s.reply text) $ \case
+          Button.busy send ([] :: [Gtk.Button]) "Replying…" (s.reply text) $ \case
             Left why -> GI.set problem [#label := why, #visible := True]
             Right () -> do
               addNote s.me "just now" False text
-              Gtk.editableSetText entry ""
+              Gtk.textBufferSetText replyBuffer "" (-1)
   void $ GI.on send #clicked sendReply
-  void $ GI.on entry #activate sendReply
+  replyKeys <- GI.new Gtk.ShortcutController []
+  shortcut replyKeys "<Primary>Return" sendReply
+  Gtk.widgetAddController entry replyKeys
   #append card whole
 
   -- Only a resolved thread folds to its bar; Hide puts an outdated one
@@ -280,16 +284,8 @@ writer me w = do
   #append top suggest
   #append frame top
 
-  editor <- GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
-                                , #heightRequest := 64
-                                , #topMargin := 10
-                                , #bottomMargin := 10
-                                , #leftMargin := 12
-                                , #rightMargin := 12
-                                , #cssClasses := ["editor"]
-                                ]
-  buffer <- Gtk.textViewGetBuffer editor
-  Gtk.textBufferSetText buffer w.text (-1)
+  -- The toolbar, emoji, :name: and Preview of every comment box.
+  (editor, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.text = w.text, MarkdownEditor.height = 72}
   #append frame editor
   void $ GI.on suggest #clicked $ do
     Gtk.textBufferInsertAtCursor buffer ("```suggestion\n" <> T.unlines w.code <> "```\n") (-1)

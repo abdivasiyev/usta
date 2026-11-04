@@ -36,10 +36,13 @@ data Config = Config
   , hint :: Maybe Text
     -- ^ Shown under the editor, e.g. "Markdown supported".
   , height :: Int32
+  , compact :: Bool
+    -- ^ For a narrow box, such as the review panel: the toolbar on its own
+    -- row under the tabs, with the less used tools under ⋯.
   }
 
 defaults :: Config
-defaults = Config { text = "", hint = Nothing, height = 120 }
+defaults = Config { text = "", hint = Nothing, height = 120, compact = False }
 
 -- | The editor and its buffer, to read what was written.
 new :: Config -> IO (Gtk.Box, Gtk.TextBuffer)
@@ -75,14 +78,27 @@ new cfg = do
   #append box stack
 
   tools <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 2, #cssClasses := ["tools"]]
+  more <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 2, #cssClasses := ["tools"]]
+  morePopover <- GI.new Gtk.Popover [#child := more, #hasArrow := False, #cssClasses := ["u-more-tools"]]
   forM_ (zip [0 :: Int ..] toolGroups) $ \(i, group) -> do
-    unless (i == 0) $
-      GI.new Gtk.Separator [#orientation := Gtk.OrientationVertical] >>= #append tools
-    forM_ group $ \tool -> toolButton view buffer tool >>= #append tools
+    let hidden = cfg.compact && i > 0
+        into = if hidden then more else tools
+    unless (i == 0 || (cfg.compact && i == 1)) $
+      GI.new Gtk.Separator [#orientation := Gtk.OrientationVertical] >>= #append into
+    forM_ group $ \tool -> do
+      b <- toolButton view buffer tool
+      when hidden $ void $ GI.on b #clicked (Gtk.popoverPopdown morePopover)
+      #append into b
   GI.new Gtk.Separator [#orientation := Gtk.OrientationVertical] >>= #append tools
   emojiButton view >>= #append tools
-  #append header tools
+  when cfg.compact $ do
+    moreLabel <- GI.new Gtk.Label [#label := "⋯"]
+    moreButton <- GI.new Gtk.MenuButton [#child := moreLabel, #popover := morePopover, #tooltipText := "More tools", #cssClasses := ["tool"]]
+    #append tools moreButton
   GI.new Gtk.Label [#label := "Markdown", #hexpand := True, #xalign := 1, #cssClasses := ["muted"]] >>= #append header
+  if cfg.compact
+    then GI.set header [#marginBottom := 0] >> Gtk.boxInsertChildAfter box tools (Just header)
+    else Gtk.boxInsertChildAfter header tools (Just tabs)
 
   keys <- GI.new Gtk.ShortcutController [#propagationPhase := Gtk.PropagationPhaseCapture]
   forM_ (concat toolGroups) $ \tool ->
@@ -321,6 +337,8 @@ css = Shortcodes.css <> mconcat
   , "}"
   , "box.u-markdown-editor box.tools button.tool:hover { background: var(--border-subtle); color: var(--text); }"
   , "box.u-markdown-editor box.tools separator { margin: 6px 4px; }"
+  , "popover.u-more-tools > contents { padding: 4px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
+  , "popover.u-more-tools button.tool, box.u-markdown-editor menubutton.tool > button { min-height: 28px; min-width: 28px; padding: 0; border: none; box-shadow: none; background: transparent; background-image: none; }"
   , "box.u-markdown-editor box.header label.muted { font-size: 12px; color: var(--text-muted); }"
   , "box.u-markdown-editor label.hint { font-size: 12px; color: var(--text-muted); }"
   ]

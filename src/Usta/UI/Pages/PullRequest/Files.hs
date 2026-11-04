@@ -39,6 +39,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Diff as Diff
+import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import Usta.UI.Components.Diff (Line (..))
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.ImageView as ImageView
@@ -329,7 +330,12 @@ new actions m = do
   Gtk.widgetAddController columns keys
 
   #append columns scroll
-  review actions m (zip placed (map jump placed)) pendingRef pendingChanged >>= #append columns
+  -- A fixed width: its editor's toolbar wraps rather than widening it,
+  -- and a tall panel scrolls.
+  panel <- review actions m (zip placed (map jump placed)) pendingRef pendingChanged
+  panelScroll <- GI.new Gtk.ScrolledWindow [ #child := panel, #hscrollbarPolicy := Gtk.PolicyTypeNever
+                                           , #widthRequest := 300, #propagateNaturalWidth := False, #hexpand := False ]
+  #append columns panelScroll
   Gtk.toWidget columns
 
 -- | The last part of a path, as the Threads list names files.
@@ -416,14 +422,7 @@ review actions m listed pendingRef pendingChanged = do
     [] -> pure ()
   forM_ radios (#append verdict)
   label "Summary" ["soft", "small"] >>= #append verdict
-  summary <- GI.new Gtk.TextView [ #wrapMode := Gtk.WrapModeWordChar
-                                 , #heightRequest := 72
-                                 , #topMargin := 8
-                                 , #bottomMargin := 8
-                                 , #leftMargin := 10
-                                 , #rightMargin := 10
-                                 , #cssClasses := ["editor"]
-                                 ]
+  (summary, buffer) <- MarkdownEditor.new MarkdownEditor.defaults {MarkdownEditor.height = 72, MarkdownEditor.compact = True}
   #append verdict summary
 
   -- The notes on lines that go out with the review.
@@ -480,7 +479,6 @@ review actions m listed pendingRef pendingChanged = do
       send = do
         chosen <- filterM (`GI.get` #active) radios
         let pick = [v | (v, r) <- zip verdicts radios, r `elem` chosen]
-        buffer <- Gtk.textViewGetBuffer summary
         text <- maybe "" id <$> GI.get buffer #text
         waiting <- readIORef pendingRef
         -- A comment-only review needs words or notes; the forge refuses

@@ -116,7 +116,9 @@ forgejo manager base host token = do
     , repoPullRequests = \repo -> do
         latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
           Api.RepoIssuesQuery {kind = Named Api.Pulls, state = Api.AnyState, page = Just 1, limit = Just 30})
-        traverse (\i -> pullRequestOf client details host (i, [])) latest
+        -- The forge lists them newest first; the tab wants recently
+        -- updated first.
+        sortOn (Down . (.updatedAt)) <$> traverse (\i -> pullRequestOf client details host (i, [])) latest
     , repoIssues = \repo -> do
         latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
           Api.RepoIssuesQuery {kind = Named Api.Issues, state = Api.AnyState, page = Just 1, limit = Just 50})

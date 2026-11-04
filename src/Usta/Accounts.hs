@@ -13,9 +13,12 @@ module Usta.Accounts
   , urlFor
   ) where
 
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, tryPutMVar)
 import Control.Exception (try)
+import Control.Monad (void, when)
 import Data.Foldable (for_)
-import Data.IORef (atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import Data.Kind (Type)
 import Data.Text (Text)
@@ -23,7 +26,7 @@ import qualified Data.Text as T
 import Data.Time (getCurrentTime)
 import Database.Persist.Sql (ConnectionPool)
 import qualified Network.HTTP.Client as HTTP
-import Servant.Client (BaseUrl)
+import Servant.Client (BaseUrl (..), showBaseUrl)
 
 import Usta.Bus (Bus, Change (..), publish)
 import Usta.DB (run)
@@ -31,7 +34,8 @@ import Usta.DB.Account (deleteAccount, listAccounts, saveAccount)
 import Usta.DB.Mirror (choose)
 import Usta.DB.Schema.Account (AccountId)
 import Usta.Forge (CloneUrls (..), Failure (..), Forge (..))
-import Usta.Forge.Forgejo (forgejo, whoAmI)
+import Usta.Forge.Forgejo (forgejo, siteOf, whoAmI)
+import qualified Usta.OAuth as OAuth
 import Usta.Keyring (Keyring (..), KeyringError (..))
 import Usta.Mirrors (Mirrors (..))
 import Usta.Sync (State (..), Status (..), Sync (..))
@@ -72,6 +76,10 @@ data Accounts = Accounts
     -- before the user chooses.
   , forgeOf :: AccountId -> IO (Maybe Forge)
     -- ^ The account's forge while it is connected.
+  , beginBrowser :: Host -> Text -> IO (Either Text OAuth.Waiting)
+    -- ^ Opens a browser sign-in with an OAuth2 client ID; on the main thread.
+  , signInBrowser :: Kind -> Host -> Text -> OAuth.Tokens -> IO (Either Problem AccountId)
+    -- ^ Like 'signIn', for what a browser sign-in gave.
   }
 
 -- | The URL a mirror would use over each transport, or why it cannot.
@@ -128,13 +136,18 @@ connect settings = do
     , mirror = mirror forges
     , origins = origins forges
     , forgeOf = \key -> fmap snd . Map.lookup key <$> readIORef forges
+    , beginBrowser = \host client -> OAuth.begin settings.manager (siteFor host) client
+    , signInBrowser = signInBrowser forges
     }
   where
     resume forges key account = case account.forge of
       Forgejo -> do
         found <- try (settings.keyring.load account.host account.login)
         case found of
-          Right (Just token) -> start forges key account.host account.login token
+          Right (Just token) -> case OAuth.stored token of
+            Just (client, r) -> refreshing account.host account.login client r Nothing
+              >>= start forges key account.host account.login
+            Nothing -> start forges key account.host account.login (pure token)
           Right Nothing -> settings.sync.report Status {accountId = key, state = Failed SignedOut}
           Left (KeyringError message) ->
             settings.sync.report Status {accountId = key, state = Failed (Refused message)}
@@ -144,6 +157,53 @@ connect settings = do
       forge <- forgejo settings.manager (settings.forgejoApi host) host token
       atomicModifyIORef' forges (\m -> (Map.insert key (login, forge) m, ()))
       settings.sync.add key forge
+
+    siteFor host = T.pack (showBaseUrl (settings.forgejoApi host) {baseUrlPath = siteOf (settings.forgejoApi host).baseUrlPath})
+
+    -- A browser sign-in's access token, refreshed a few minutes before it
+    -- runs out; until the first answer, calls wait for it. A new refresh
+    -- token from the forge goes to the keyring.
+    refreshing host login client r0 initial = do
+      current <- newIORef (fmap (.access) initial)
+      first <- newEmptyMVar
+      let wait t = threadDelay (max 60 (t.seconds - 300) * 1000000)
+          loop r = do
+            got <- OAuth.refresh settings.manager (siteFor host) client r
+            case got of
+              Right t -> do
+                writeIORef current (Just t.access)
+                when (unparse t.refreshToken /= unparse r) $
+                  void (try (settings.keyring.save host login (OAuth.storing client t.refreshToken)) :: IO (Either KeyringError ()))
+                void (tryPutMVar first ())
+                wait t
+                loop t.refreshToken
+              Left _ -> do
+                void (tryPutMVar first ())
+                threadDelay 30000000
+                loop r
+      void $ forkIO $ case initial of
+        Just t -> putMVar first () >> wait t >> loop t.refreshToken
+        Nothing -> loop r0
+      pure (readMVar first >> maybe r0 id <$> readIORef current)
+
+    signInBrowser forges kind host client tokens = case kind of
+      Forgejo -> do
+        checked <- try (whoAmI settings.manager (settings.forgejoApi host) tokens.access)
+        case checked of
+          Left SignedOut -> pure (Left TokenRefused)
+          Left Offline -> pure (Left Unreachable)
+          Left (Refused message) -> pure (Left (ForgeSaid message))
+          Right login -> do
+            kept <- try (settings.keyring.save host login (OAuth.storing client tokens.refreshToken))
+            case kept of
+              Left (KeyringError message) -> pure (Left (KeyringSaid message))
+              Right () -> do
+                now <- getCurrentTime
+                key <- run settings.pool $
+                  saveAccount now Account {forge = kind, host = host, login = login, authMethod = BrowserSignIn}
+                refreshing host login client tokens.refreshToken (Just tokens) >>= start forges key host login
+                pure (Right key)
+      other -> pure (Left (NotYet other))
 
     signIn forges kind host token = case kind of
       Forgejo -> do
@@ -160,7 +220,7 @@ connect settings = do
                 now <- getCurrentTime
                 key <- run settings.pool $
                   saveAccount now Account {forge = kind, host = host, login = login, authMethod = AccessToken}
-                start forges key host login token
+                start forges key host login (pure token)
                 pure (Right key)
       other -> pure (Left (NotYet other))
 

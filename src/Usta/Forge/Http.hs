@@ -38,12 +38,14 @@ type Client :: Type
 newtype Client = Client ClientEnv
 
 -- | A client for the API at @base@ that sends @authorization@ (the whole
--- header value, e.g. @token …@) with every request. The value is set on
--- the request only; it is not part of any error.
-connect :: HTTP.Manager -> BaseUrl -> ByteString -> Client
-connect manager base authorization = Client (mkClientEnv manager base)
+-- header value, e.g. @token …@) with every request, read for each one, as
+-- a browser sign-in's token changes. The value is set on the request
+-- only; it is not part of any error.
+connect :: HTTP.Manager -> BaseUrl -> IO ByteString -> Client
+connect manager base current = Client (mkClientEnv manager base)
   { makeClientRequest = \url request -> do
       built <- defaultMakeClientRequest url request
+      authorization <- current
       pure built
         { HTTP.requestHeaders =
             ("Authorization", authorization) : ("User-Agent", "usta") : HTTP.requestHeaders built

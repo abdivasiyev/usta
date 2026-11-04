@@ -14,6 +14,7 @@
 module Usta.Forge.Forgejo
   ( forgejo
   , whoAmI
+  , siteOf
   ) where
 
 import Control.Exception (throwIO, try)
@@ -69,12 +70,12 @@ import Usta.Types.Servant.NamedQueryParam (Named (..))
 import Usta.Types.Token (Token)
 
 -- | The forge of the account @token@ signs in as, on @host@, whose API is at
--- @base@ (normally @https://host/api/v1@).
-forgejo :: HTTP.Manager -> BaseUrl -> Host -> Token -> IO Forge
+-- @base@ (normally @https://host/api/v1@); @token@ is read for each call.
+forgejo :: HTTP.Manager -> BaseUrl -> Host -> IO Token -> IO Forge
 forgejo manager base host token = do
-  let client = connect manager base (authorization token)
+  let client = connect manager base (authorization <$> token)
       -- The site's own pages, for what the API lacks.
-      site = connect manager base {baseUrlPath = siteOf base.baseUrlPath} (authorization token)
+      site = connect manager base {baseUrlPath = siteOf base.baseUrlPath} (authorization <$> token)
   details <- newIORef Map.empty
   running <- newIORef Map.empty
   -- Who the token signs in as, asked once, to find the user's reviews.
@@ -342,7 +343,7 @@ forgejo manager base host token = do
 -- | Who @token@ signs in as; throws 'Usta.Forge.SignedOut' when Forgejo
 -- refuses it.
 whoAmI :: HTTP.Manager -> BaseUrl -> Token -> IO Login
-whoAmI manager base token = (.login) <$> run (connect manager base (authorization token)) Api.api.me
+whoAmI manager base token = (.login) <$> run (connect manager base (pure (authorization token))) Api.api.me
 
 authorization :: Token -> ByteString
 authorization token = "token " <> encodeUtf8 (unparse token)

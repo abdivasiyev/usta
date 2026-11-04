@@ -51,6 +51,9 @@ module Usta.Forge.Forgejo.Api
   , Branch (..)
   , Review (..)
   , Team (..)
+  , Person (..)
+  , Authored (..)
+  , FileCommitsQuery (..)
   , ReviewComment (..)
   , LineComment (..)
   , CombinedStatus (..)
@@ -162,9 +165,13 @@ data Routes mode = Routes
            :> "requested_reviewers" :> ReqBody '[JSON] Reviewers :> Verb 'DELETE 204 '[JSON] NoContent
   , collaborators
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "collaborators"
-           :> RecordQueryParam ListQuery :> Get '[JSON] [User]
+           :> RecordQueryParam ListQuery :> Get '[JSON] [Person]
   , teams
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "teams" :> Get '[JSON] [Team]
+  , teamMembers :: mode :- "teams" :> Capture "id" Int64 :> "members" :> Get '[JSON] [User]
+  , fileCommits
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits"
+           :> RecordQueryParam FileCommitsQuery :> Get '[JSON] [Authored]
   , branches
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "branches"
            :> RecordQueryParam ListQuery :> Get '[JSON] [BranchName]
@@ -272,6 +279,20 @@ data CommitsQuery = CommitsQuery
   deriving stock (Generic)
 
 instance ToQuery CommitsQuery
+
+-- | The latest commits on a branch that changed one file.
+type FileCommitsQuery :: Type
+data FileCommitsQuery = FileCommitsQuery
+  { sha :: Text
+  , path :: Text
+  , limit :: Int
+  , stat :: Bool
+  , verification :: Bool
+  , files :: Bool
+  }
+  deriving stock (Generic)
+
+instance ToQuery FileCommitsQuery
 
 type RefQuery :: Type
 newtype RefQuery = RefQuery {ref :: Text}
@@ -544,10 +565,29 @@ instance ToJSON Reviewers where
 
 -- | A team of the repository's organization, which can be asked to review.
 type Team :: Type
-newtype Team = Team {name :: Text}
+data Team = Team {id :: Int64, name :: Text, description :: Text}
 
 instance FromJSON Team where
-  parseJSON = withObject "Team" $ \o -> Team <$> o .: "name"
+  parseJSON = withObject "Team" $ \o -> Team
+    <$> o .:? "id" .!= 0
+    <*> o .: "name"
+    <*> o .:? "description" .!= ""
+
+-- | Someone with their full name, which may be empty.
+type Person :: Type
+data Person = Person {login :: Login, fullName :: Text}
+
+instance FromJSON Person where
+  parseJSON = withObject "Person" $ \o -> Person <$> o .: "login" <*> o .:? "full_name" .!= ""
+
+-- | Who made a commit, when the forge knows them as a user, and when.
+type Authored :: Type
+data Authored = Authored {author :: Maybe User, date :: UTCTime}
+
+instance FromJSON Authored where
+  parseJSON = withObject "Authored" $ \o -> do
+    details <- o .: "commit"
+    Authored <$> o .:? "author" <*> (details .: "author" >>= (.: "date"))
 
 type BranchName :: Type
 newtype BranchName = BranchName {name :: Text}

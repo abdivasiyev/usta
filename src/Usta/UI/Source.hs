@@ -49,6 +49,7 @@ import qualified Usta.Mirrors as Mirrors
 import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
+import Usta.Types.Check (Check, Job)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
@@ -131,6 +132,10 @@ data Source = Source
     -- number, from the forge.
   , threads :: Text -> Text -> Int -> IO (Either Text Threads)
     -- ^ A pull request's review threads, by host, repository and number.
+  , checks :: Text -> Text -> Int -> IO (Either Text [Check])
+    -- ^ The checks on a pull request's latest commit.
+  , checkLog :: Text -> Text -> Job -> IO (Either Text Text)
+    -- ^ A CI job's log, by host and repository.
   , reply :: Text -> Text -> Int -> Thread -> Text -> IO (Either Text ())
     -- ^ Adds a note to one of them.
   , comment :: Text -> Text -> Int -> Text -> IO (Either Text ())
@@ -228,6 +233,8 @@ fromDatabase pool changes statuses sync = Source
   , file = \_ _ _ _ -> pure (Left unavailable)
   , discussion = \_ _ _ -> pure (Left unavailable)
   , threads = \_ _ _ -> pure (Left unavailable)
+  , checks = \_ _ _ -> pure (Left unavailable)
+  , checkLog = \_ _ _ -> pure (Left unavailable)
   , reply = \_ _ _ _ _ -> pure (Left unavailable)
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
@@ -279,6 +286,8 @@ samples = Source
   , file = \_ _ _ _ -> pure (Left unavailable)
   , discussion = \_ _ _ -> pure (Left unavailable)
   , threads = \_ _ _ -> pure (Left unavailable)
+  , checks = \_ _ _ -> pure (Left unavailable)
+  , checkLog = \_ _ _ -> pure (Left unavailable)
   , reply = \_ _ _ _ _ -> pure (Left unavailable)
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
@@ -320,6 +329,8 @@ withAccounts pool accounts source = source
               pure (Right ())
   , discussion = \host repo n -> onForge host repo n (\f name number -> f.discussion name number)
   , threads = \host repo n -> onForge host repo n (\f name number -> f.threads name number)
+  , checks = \host repo n -> onForge host repo n (\f name number -> f.checks name number)
+  , checkLog = \host repo job -> onRepo host repo (\f name -> f.checkLog name job)
   , reply = \host repo n t text -> onForge host repo n (\f name number -> f.reply name number t text)
   , comment = \host repo n text -> changing (onForge host repo n (\f name number -> () <$ f.comment name number text))
   , setClosed = \host repo n closed -> changing (onForge host repo n (\f name number -> f.setClosed name number closed))
@@ -441,6 +452,8 @@ tracking track s = s
   , file = \h r b p -> track (s.file h r b p)
   , discussion = \h r n -> track (s.discussion h r n)
   , threads = \h r n -> track (s.threads h r n)
+  , checks = \h r n -> track (s.checks h r n)
+  , checkLog = \h r j -> track (s.checkLog h r j)
   , reply = \h r n t text -> track (s.reply h r n t text)
   , comment = \h r n t -> track (s.comment h r n t)
   , setClosed = \h r n c -> track (s.setClosed h r n c)

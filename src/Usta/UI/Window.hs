@@ -187,6 +187,7 @@ buildAt start given app = do
         let actions = Issue.Actions
               { comment = source.comment model.host model.repo model.number
               , setClosed = source.setClosed model.host model.repo model.number
+              , labels = labelPicker source model.host model.repo model.number (openIssue backLabel model)
               , refresh = openIssue backLabel model
               }
         Issue.new backLabel backToMain model (\showClosed ->
@@ -569,6 +570,7 @@ tabContent source reopen fetch summary showState tab = case tab of
           , requestReview = source.requestReview host repo n
           , unrequestReview = source.unrequestReview host repo n
           , candidates = source.reviewCandidates host repo n
+          , labels = labelPicker source host repo n reopen
           , refresh = reopen
           }
         checks = case fmap fst summary.checks of
@@ -625,6 +627,21 @@ tabContent source reopen fetch summary showState tab = case tab of
         , checks = found
         , logOf = source.checkLog summary.host summary.repo
         }
+
+-- | The labels picker of an issue or pull request; @refresh@ reloads the
+-- page after a change.
+labelPicker :: Source -> Text -> Text -> Int -> IO () -> [Text] -> LabelPicker.Picker
+labelPicker source host repo n refresh current = LabelPicker.Picker
+  { repo = repo
+  , current = current
+  , load = source.labels host repo
+  , save = source.setLabels host repo n
+  , create = source.createLabel host repo
+  , manage = do
+      launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/labels"))
+      Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  , saved = refresh
+  }
 
 -- | The sidebar's pages that list notifications.
 inboxViews :: [(Sidebar.Page, Inbox.View)]

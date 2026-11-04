@@ -170,7 +170,7 @@ attach p anchor = do
           #append content check
           GI.new Gtk.Label [#useMarkup := True, #label := "<span foreground='#" <> unparse d.color <> "'>●</span>"] >>= #append content
           texts <- box 0
-          GI.set texts [#hexpand := True]
+          GI.set texts [#hexpand := True, #valign := Gtk.AlignCenter]
           label d.name ["name"] >>= #append texts
           unless (T.null d.description) $ label d.description ["muted", "small"] >>= \l -> GI.set l [#ellipsize := Pango.EllipsizeModeEnd] >> #append texts l
           #append content texts

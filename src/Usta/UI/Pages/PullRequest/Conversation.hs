@@ -33,6 +33,7 @@ import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Thread as Thread
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Icon as Icon
@@ -104,6 +105,8 @@ data Actions = Actions
   , updateBranch :: UpdateStyle -> IO (Either Text ())
   , requestReview :: [Who] -> IO (Either Text ())
   , unrequestReview :: Who -> IO (Either Text ())
+  , labels :: [Text] -> LabelPicker.Picker
+    -- ^ The labels picker, from the labels it has.
   , candidates :: IO (Either Text [Candidate])
     -- ^ Who can be asked to review.
   , refresh :: IO ()
@@ -367,11 +370,24 @@ details run actions m = do
   keys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
   shortcut keys "<Primary><Shift>r" open
   Gtk.widgetAddController side keys
-  section side "Labels" $ \box -> do
-    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
-    forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
-    when (null m.labels) $ label "None" ["muted"] >>= #append row
-    #append box row
+  labelsBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
+  labelsHead <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+  labelsTitle <- Card.sectionTitle "Labels"
+  GI.set labelsTitle [#hexpand := True]
+  #append labelsHead labelsTitle
+  editLabels <- GI.new Gtk.Button [#label := "Edit", #tooltipText := "Edit labels (l)", #cssClasses := ["link-button"]]
+  #append labelsHead editLabels
+  #append labelsBox labelsHead
+  labelRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+  forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append labelRow
+  when (null m.labels) $ label "None" ["muted"] >>= #append labelRow
+  #append labelsBox labelRow
+  #append side labelsBox
+  openLabels <- LabelPicker.attach (actions.labels (map snd m.labels)) editLabels
+  void $ GI.on editLabels #clicked openLabels
+  labelKeys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
+  shortcut labelKeys "l" openLabels
+  Gtk.widgetAddController side labelKeys
   unless (null m.linkedIssues) $ section side "Linked issues" $ \box ->
     forM_ m.linkedIssues $ \issue -> label issue ["link"] >>= #append box
   pure side

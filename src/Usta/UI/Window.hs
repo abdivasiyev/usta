@@ -389,6 +389,15 @@ buildAt start given app = do
                 PullRequests.forRepository synced load (\pr -> openPullRequestWith pr.fetching "Repositories" (summaryOf pr))
                   >>= Gtk.toWidget
             }
+        , Repositories.Tab
+            { title = counted "Issues" r.issues
+            , build = do
+                synced <- filter (\i -> i.host == r.host && i.repo == r.name) <$> source.issues
+                let load = do
+                      c <- clock
+                      fmap (map (Issues.fromIssue c r.forge)) <$> source.repoIssues r.host r.name
+                Issues.forRepository synced load (openIssue "Repositories" . issueDetail) >>= Gtk.toWidget
+            }
         ]
     }
   writeIORef pageRef (source.repositories >>= repositoryPage.update)

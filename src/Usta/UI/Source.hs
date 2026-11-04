@@ -51,6 +51,8 @@ import Usta.Sync (Status, Sync (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Branch (Branch, Tag)
+import qualified Usta.Types.Insights as Insights
+import Data.Time (UTCTime)
 import Usta.Types.Check (Check, Job, Run)
 import Usta.Types.Label (Definition)
 import Usta.Types.Login (Login)
@@ -193,6 +195,8 @@ data Source = Source
   , tagList :: Text -> Text -> IO (Either Text (From, [Tag]))
   , history :: Text -> Text -> Text -> Int -> IO (Either Text (From, [Commit]))
     -- ^ By host, repository, branch and page, from 1.
+  , changes :: Text -> Text -> Text -> Maybe UTCTime -> IO (Either Text [Insights.Change])
+  , graph :: Text -> Text -> [Text] -> Bool -> Int -> IO (Either Text [Insights.Node])
   , discardPending :: Text -> Text -> Int -> IO (Either Text Int)
     -- ^ Deletes the user's review left pending on the forge, by host,
     -- repository and number.
@@ -319,6 +323,8 @@ fromDatabase pool changes statuses sync = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
+  , changes = \_ _ _ _ -> pure (Left unavailable)
+  , graph = \_ _ _ _ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -401,6 +407,8 @@ samples = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
+  , changes = \_ _ _ _ -> pure (Left unavailable)
+  , graph = \_ _ _ _ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -622,6 +630,8 @@ tracking track s = s
   , branchList = \h r b -> track (s.branchList h r b)
   , tagList = \h r -> track (s.tagList h r)
   , history = \h r b n -> track (s.history h r b n)
+  , changes = \h r b t -> track (s.changes h r b t)
+  , graph = \h r b f n -> track (s.graph h r b f n)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors
   }
@@ -640,6 +650,8 @@ withDetails pool details source = source
   , branchList = \host repo base -> repoOf host repo (\key name -> details.branchList key name base)
   , tagList = \host repo -> repoOf host repo (\key name -> details.tagList key name)
   , history = \host repo branch n -> repoOf host repo (\key name -> details.history key name branch n)
+  , changes = \host repo branch since -> repoOf host repo (\key name -> details.changes key name branch since)
+  , graph = \host repo scope firstParent n -> repoOf host repo (\key name -> details.graph key name scope firstParent n)
   }
   where
     pullOf :: Text -> Text -> Int -> (AccountId -> RepoName -> Number -> IO (Either Text a)) -> IO (Either Text a)

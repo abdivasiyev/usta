@@ -27,6 +27,8 @@ import Usta.Forge (Failure (..), Forge (..))
 import qualified Usta.Git as Git
 import Usta.Mirrors (Mirrors (..))
 import Usta.Types.Branch (Branch, Tag)
+import Usta.Types.Insights (Change, Node)
+import Data.Time (UTCTime)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Number (Number)
@@ -70,6 +72,11 @@ data Details = Details
   , tagList :: AccountId -> RepoName -> IO (Either Text (From, [Tag]))
   , history :: AccountId -> RepoName -> Text -> Int -> IO (Either Text (From, [Commit]))
     -- ^ A branch's history, newest first, 50 commits a page from 1.
+  , changes :: AccountId -> RepoName -> Text -> Maybe UTCTime -> IO (Either Text [Change])
+    -- ^ Each commit's size on a branch since a time; the mirror only.
+  , graph :: AccountId -> RepoName -> [Text] -> Bool -> Int -> IO (Either Text [Node])
+    -- ^ The graph's page, from 1, 100 commits each, of the given branches or
+    -- all; the mirror only.
   }
 
 new :: Settings -> Details
@@ -85,6 +92,8 @@ new settings = Details
       either' key repo (\path -> BL.toStrict <$> Git.blob path branch name) (\f -> f.file repo branch name)
   , branchList = \key repo base -> either' key repo (\path -> Git.branches path base) (\f -> f.branchList repo)
   , tagList = \key repo -> either' key repo Git.tags (\f -> f.tags repo)
+  , changes = \key repo branch since -> mirrorOnly key repo (\path -> Git.changes path branch since)
+  , graph = \key repo scope firstParent n -> mirrorOnly key repo (\path -> Git.graph path scope firstParent ((n - 1) * 100) 100)
   , history = \key repo branch n ->
       either' key repo (\path -> Git.page path branch ((n - 1) * 50) 50) (\f -> f.history repo branch n)
   }
@@ -109,6 +118,10 @@ new settings = Details
         [] -> Nothing
 
     -- The mirror when it is there and works, the forge otherwise.
+    mirrorOnly :: AccountId -> RepoName -> (FilePath -> IO a) -> IO (Either Text a)
+    mirrorOnly key repo fromMirror = settings.mirrors.ready key repo >>= \case
+      Nothing -> pure (Left "Insights are drawn from a local mirror. Mirror this repository from its Overview to see them.")
+      Just p -> either (\(e :: IOError) -> Left (T.pack (show e))) Right <$> try (fromMirrorSafe (fromMirror p))
     either' :: AccountId -> RepoName -> (FilePath -> IO a) -> (Forge -> IO a) -> IO (Either Text (From, a))
     either' key repo fromMirror fromForge = do
       path <- settings.mirrors.ready key repo

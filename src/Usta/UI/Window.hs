@@ -7,7 +7,7 @@ module Usta.UI.Window
   ( Start (..)
   , build
   , buildAt
-  , buildOpening
+  , buildWith
   ) where
 
 import Control.Concurrent (forkIO)
@@ -124,14 +124,14 @@ build :: Source -> Gtk.Application -> IO Gtk.ApplicationWindow
 build = buildAt Ready
 
 buildAt :: Start -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildAt start = buildOpening start False Nothing
+buildAt start source app = fst <$> buildWith start False source app
 
 -- | The pages show @source@'s lists, reload the ones that change, and
 -- reload all of them each minute so "5 min ago" stays true.
--- | Opens @link@, a forge link given on the command line, once built;
+-- | The window, and what opens a forge link in it (True when it did);
 -- @crashed@ when the last run did not end on its own.
-buildOpening :: Start -> Bool -> Maybe Text -> Source -> Gtk.Application -> IO Gtk.ApplicationWindow
-buildOpening start crashed link given app = do
+buildWith :: Start -> Bool -> Source -> Gtk.Application -> IO (Gtk.ApplicationWindow, Text -> IO Bool)
+buildWith start crashed given app = do
   -- The Files tab's side panels, kept as left from one pull request to
   -- the next.
   panels <- Files.newPanels
@@ -182,9 +182,10 @@ buildOpening start crashed link given app = do
         void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 400 $ do
           Gtk.stackGetChildByName screens old >>= mapM_ (Gtk.stackRemove screens)
           pure False
-      openPullRequestWith fetch backLabel summary = do
+      openPullRequestWith = openPullRequestOn PullRequest.Conversation
+      openPullRequestOn opening fetch backLabel summary = do
         Log.say "ui" ("open " <> summary.host <> "/" <> summary.repo <> " pull request #" <> T.pack (show summary.number))
-        PullRequest.new backLabel backToMain (source.editTitle summary.host summary.repo summary.number)
+        PullRequest.new opening backLabel backToMain (source.editTitle summary.host summary.repo summary.number)
           (Issue.Watch (source.watching summary.host summary.repo summary.number) (source.setWatching summary.host summary.repo summary.number))
           (checkOutFor summary)
           (tabContent source panels (openPullRequestWith fetch backLabel summary) fetch summary) summary
@@ -284,7 +285,7 @@ buildOpening start crashed link given app = do
               { Settings.forge = a.forge
               , Settings.host = a.host
               , Settings.user = a.login
-              , Settings.auth = Settings.AccessToken
+              , Settings.auth = if a.byBrowser then Settings.BrowserSignIn else Settings.AccessToken
               , Settings.connected = lookup a.accountId known /= Just (Sync.Failed Forge.SignedOut)
               , Settings.onRemove = source.remove a.accountId
                   >>= either (Settings.notice anchor "The account was not removed") (const openSettings)
@@ -536,7 +537,7 @@ buildOpening start crashed link given app = do
         model <- sidebarModel
         page <- readIORef shownPage
         Sidebar.new model page (\p -> writeIORef shownPage p >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName p)) openAddAccount
-          (\at -> writeIORef shownPage Sidebar.Repositories >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName Sidebar.Repositories) >> showRepository at >> join (readIORef redrawSidebar))
+          (\at -> writeIORef shownPage Sidebar.Repositories >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName Sidebar.Repositories) >> showRepository at Nothing >> join (readIORef redrawSidebar))
           >>= Gtk.toWidget >>= replaceChild sidebarSlot
       drawSyncChip = do
         known <- readIORef states
@@ -647,7 +648,11 @@ buildOpening start crashed link given app = do
   -- stops GTK from adding its own.
   noTitlebar <- GI.new Gtk.Box [#visible := False]
 
-  let showPage page = backToMain >> Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
+  let showPage page = do
+        backToMain
+        writeIORef shownPage page
+        Gtk.stackSetVisibleChildName pages (Sidebar.pageName page)
+        join (readIORef redrawSidebar)
       -- A link to a signed-in forge opens its page here, when the setting
       -- says so; True when it did.
       openLink uri = do
@@ -656,9 +661,9 @@ buildOpening start crashed link given app = do
         case Link.parseLink uri of
           Just target | chosen.openLinks, Just a <- find (\a -> a.host == target.host) accounts -> do
             case target of
-              Link.PullAt {repo, number} -> do
+              Link.PullAt {repo, number, files} -> do
                 known <- source.pullRequests
-                openPullRequest "Back" $ case [pr | pr <- known, pr.host == target.host, pr.repo == repo, pr.number == number] of
+                openPullRequestOn (if files then PullRequest.Files else PullRequest.Conversation) Nothing "Back" $ case [pr | pr <- known, pr.host == target.host, pr.repo == repo, pr.number == number] of
                   pr : _ -> summaryOf pr
                   [] -> PullRequest.Summary
                     { PullRequest.forge = a.forge, PullRequest.host = target.host, PullRequest.repo = repo, PullRequest.number = number
@@ -675,8 +680,10 @@ buildOpening start crashed link given app = do
                     , Issue.title = repo <> " #" <> T.pack (show number), Issue.closed = False, Issue.comments = [], Issue.events = []
                     , Issue.timeline = [], Issue.assignees = [], Issue.labels = [], Issue.milestone = Nothing, Issue.linkedPullRequests = []
                     }
-              -- A file opens its repository for now.
-              _ -> showPage Sidebar.Repositories >> showRepository (target.host, target.repo)
+              Link.FileAt {repo, branch, path, line} ->
+                showPage Sidebar.Repositories >> showRepository (target.host, repo)
+                  (Just (branch, path <> maybe "" (("#L" <>) . T.pack . show) line))
+              Link.RepositoryAt {repo} -> showPage Sidebar.Repositories >> showRepository (target.host, repo) Nothing
             pure True
           _ -> pure False
       paletteModel = do
@@ -710,7 +717,7 @@ buildOpening start crashed link given app = do
               Just target | target.host `elem` [a.host | a <- accounts] ->
                 Just (CommandPalette.Item CommandPalette.Command ("Open " <> Link.describe target) target.host (void (openLink t)))
               _ -> Nothing
-          , CommandPalette.search = \words' -> map (foundItem openPullRequest openIssue (\at -> showPage Sidebar.Repositories >> showRepository at)) <$> source.searchForges words'
+          , CommandPalette.search = \words' -> map (foundItem openPullRequest openIssue (\at -> showPage Sidebar.Repositories >> showRepository at Nothing)) <$> source.searchForges words'
           }
   Markdown.openLinksWith openLink
   rootWidget <- Gtk.toWidget root
@@ -737,11 +744,10 @@ buildOpening start crashed link given app = do
                                          ]
   Gtk.toWidget window >>= \w -> Style.install w styles
   #present window
-  forM_ link (void . openLink)
   -- GTK focuses the first entry; start with nothing focused so single-key
   -- shortcuts (j, k, e) work instead of typing into the search field.
   Gtk.windowSetFocus window (Nothing :: Maybe Gtk.Widget)
-  pure window
+  pure (window, openLink)
 
 -- | The detail header from a list row. File and commit counts are sample
 -- values until the detail is loaded from the forge.

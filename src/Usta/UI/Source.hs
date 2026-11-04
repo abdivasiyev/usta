@@ -50,7 +50,7 @@ import qualified Usta.Mirrors as Mirrors
 import qualified Usta.Pins as Pins
 import qualified Usta.Git as Git
 import Usta.Sync (Status, Sync (..))
-import Usta.Types.Account (Account (..))
+import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind)
 import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Release (Release)
@@ -243,6 +243,8 @@ data Connected = Connected
   , forge :: Kind
   , host :: Text
   , login :: Text
+  , byBrowser :: Bool
+    -- ^ Signed in with the browser, not a pasted token.
   }
 
 -- | The lists as the cache has them, with the times formatted against the
@@ -275,7 +277,7 @@ fromDatabase pool changes statuses sync = Source
       pure [Repositories.fromRepository kind r | (key, r) <- rows, Just kind <- [kindOf key]]
   , accounts = do
       rows <- run pool listAccounts
-      pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login} | (key, a) <- rows]
+      pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login, byBrowser = a.authMethod == BrowserSignIn} | (key, a) <- rows]
   , onChange = \act -> subscribe changes (act . (.resource))
   , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
   , syncNow = sync.syncNow
@@ -391,7 +393,7 @@ samples = Source
   , pullRequests = pure PullRequests.sample
   , issues = pure Issues.sample
   , repositories = pure Repositories.sample
-  , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev"} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
+  , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev", byBrowser = False} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
   , onChange = const (pure ())
   , onStatus = const (pure ())
   , syncNow = pure ()

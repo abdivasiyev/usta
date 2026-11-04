@@ -90,6 +90,7 @@ new now account = do
         , F.timeline = \_ _ -> pure []
         , F.repoPullRequests = \_ -> pure []
         , F.repoIssues = \_ -> pure []
+        , F.runs = \_ -> pure []
         , F.react = \_ _ _ _ _ -> refuse
         , F.checkLog = \_ _ -> refuse
         , F.reviewers = \_ _ -> pure []

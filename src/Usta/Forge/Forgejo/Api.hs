@@ -10,6 +10,7 @@ module Usta.Forge.Forgejo.Api
   , web
   , ListQuery (..)
   , CommitsQuery (..)
+  , RepoIssuesQuery (..)
   , RefQuery (..)
   , RawText
   , RawBytes
@@ -119,6 +120,9 @@ data Routes mode = Routes
       :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId :> RecordQueryParam ThreadQuery
            :> Verb 'PATCH 205 '[JSON] NoContent
   , search :: mode :- "repos" :> "issues" :> "search" :> RecordQueryParam SearchQuery :> Get '[JSON] [Issue]
+  , repoIssues
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues"
+           :> RecordQueryParam RepoIssuesQuery :> Get '[JSON] [Issue]
   , pullRequest
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> Get '[JSON] PullRequest
@@ -376,6 +380,19 @@ data CommitsQuery = CommitsQuery
   deriving stock (Generic)
 
 instance ToQuery CommitsQuery
+
+-- | One repository's issues or pull requests, most recently updated
+-- first.
+type RepoIssuesQuery :: Type
+data RepoIssuesQuery = RepoIssuesQuery
+  { kind :: Named "type" IssueType
+  , state :: IssueState
+  , page :: Maybe Int
+  , limit :: Maybe Int
+  }
+  deriving stock (Generic)
+
+instance ToQuery RepoIssuesQuery
 
 -- | The latest commits on a branch that changed one file.
 type FileCommitsQuery :: Type

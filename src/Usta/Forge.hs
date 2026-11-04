@@ -109,6 +109,11 @@ data Forge = Forge
   , setWatching :: RepoName -> Number -> Watching -> IO ()
     -- ^ A forge may refuse one it cannot set, saying why.
   , timeline :: RepoName -> Number -> IO [Event]
+  , repoPullRequests :: RepoName -> IO [PullRequest]
+    -- ^ A repository's latest pull requests in any state, whoever they
+    -- involve.
+  , repoIssues :: RepoName -> IO [Issue]
+    -- ^ A repository's latest issues in any state.
     -- ^ What happened besides comments, oldest first.
   , react :: RepoName -> Number -> Maybe Int64 -> Feeling -> Bool -> IO ()
     -- ^ Adds a reaction ('True') or takes it back, on a comment by its id

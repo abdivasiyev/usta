@@ -3,6 +3,7 @@
 module Usta.Types.Insights
   ( Change (..)
   , Node (..)
+  , Blamed (..)
   ) where
 
 import Data.Kind (Type)
@@ -30,5 +31,16 @@ data Node = Node
   , subject :: Text
   , refs :: [Text]
     -- ^ e.g. "master", "origin/master", "tag: v0.3.0".
+  }
+  deriving stock (Eq, Show)
+
+-- | A line of a file with the commit that last changed it.
+type Blamed :: Type
+data Blamed = Blamed
+  { sha :: Text
+  , author :: Text
+  , at :: UTCTime
+  , summary :: Text
+  , line :: Text
   }
   deriving stock (Eq, Show)

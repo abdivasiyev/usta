@@ -27,7 +27,7 @@ import Usta.Forge (Failure (..), Forge (..))
 import qualified Usta.Git as Git
 import Usta.Mirrors (Mirrors (..))
 import Usta.Types.Branch (Branch, Tag)
-import Usta.Types.Insights (Change, Node)
+import Usta.Types.Insights (Blamed, Change, Node)
 import Data.Time (UTCTime)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
@@ -74,6 +74,10 @@ data Details = Details
     -- ^ A branch's history, newest first, 50 commits a page from 1.
   , changes :: AccountId -> RepoName -> Text -> Maybe UTCTime -> IO (Either Text [Change])
     -- ^ Each commit's size on a branch since a time; the mirror only.
+  , blame :: AccountId -> RepoName -> Text -> Text -> IO (Either Text [Blamed])
+    -- ^ A file on a branch, line by line with the last commit; the mirror only.
+  , fileHistory :: AccountId -> RepoName -> Text -> Text -> IO (Either Text (From, [Commit]))
+    -- ^ The commits on a branch that changed a file.
   , graph :: AccountId -> RepoName -> [Text] -> Bool -> Int -> IO (Either Text [Node])
     -- ^ The graph's page, from 1, 100 commits each, of the given branches or
     -- all; the mirror only.
@@ -93,6 +97,8 @@ new settings = Details
   , branchList = \key repo base -> either' key repo (\path -> Git.branches path base) (\f -> f.branchList repo)
   , tagList = \key repo -> either' key repo Git.tags (\f -> f.tags repo)
   , changes = \key repo branch since -> mirrorOnly key repo (\path -> Git.changes path branch since)
+  , blame = \key repo branch file -> mirrorFor "Blame is read from a local mirror. Mirror this repository from its Overview to see it." key repo (\path -> Git.blame path branch file)
+  , fileHistory = \key repo branch file -> either' key repo (\path -> Git.fileLog path branch file 50) (\f -> f.fileHistory repo branch file)
   , graph = \key repo scope firstParent n -> mirrorOnly key repo (\path -> Git.graph path scope firstParent ((n - 1) * 100) 100)
   , history = \key repo branch n ->
       either' key repo (\path -> Git.page path branch ((n - 1) * 50) 50) (\f -> f.history repo branch n)
@@ -119,8 +125,10 @@ new settings = Details
 
     -- The mirror when it is there and works, the forge otherwise.
     mirrorOnly :: AccountId -> RepoName -> (FilePath -> IO a) -> IO (Either Text a)
-    mirrorOnly key repo fromMirror = settings.mirrors.ready key repo >>= \case
-      Nothing -> pure (Left "Insights are drawn from a local mirror. Mirror this repository from its Overview to see them.")
+    mirrorOnly = mirrorFor "Insights are drawn from a local mirror. Mirror this repository from its Overview to see them."
+    mirrorFor :: Text -> AccountId -> RepoName -> (FilePath -> IO a) -> IO (Either Text a)
+    mirrorFor why key repo fromMirror = settings.mirrors.ready key repo >>= \case
+      Nothing -> pure (Left why)
       Just p -> either (\(e :: IOError) -> Left (T.pack (show e))) Right <$> try (fromMirrorSafe (fromMirror p))
     either' :: AccountId -> RepoName -> (FilePath -> IO a) -> (Forge -> IO a) -> IO (Either Text (From, a))
     either' key repo fromMirror fromForge = do

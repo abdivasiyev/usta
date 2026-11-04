@@ -200,6 +200,9 @@ data Source = Source
     -- ^ By host, repository, branch and page, from 1.
   , changes :: Text -> Text -> Text -> Maybe UTCTime -> IO (Either Text [Insights.Change])
   , graph :: Text -> Text -> [Text] -> Bool -> Int -> IO (Either Text [Insights.Node])
+  , blame :: Text -> Text -> Text -> Text -> IO (Either Text [Insights.Blamed])
+    -- ^ By host, repository, branch and path.
+  , fileHistory :: Text -> Text -> Text -> Text -> IO (Either Text (From, [Commit]))
   , discardPending :: Text -> Text -> Int -> IO (Either Text Int)
     -- ^ Deletes the user's review left pending on the forge, by host,
     -- repository and number.
@@ -329,6 +332,8 @@ fromDatabase pool changes statuses sync = Source
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
+  , blame = \_ _ _ _ -> pure (Left unavailable)
+  , fileHistory = \_ _ _ _ -> pure (Left unavailable)
   }
   where
     kinds = kindsIn pool
@@ -414,6 +419,8 @@ samples = Source
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
+  , blame = \_ _ _ _ -> pure (Left unavailable)
+  , fileHistory = \_ _ _ _ -> pure (Left unavailable)
   }
 
 -- | For the previews and @usta --sample@, which never touch the keyring.
@@ -639,6 +646,8 @@ tracking track s = s
   , history = \h r b n -> track (s.history h r b n)
   , changes = \h r b t -> track (s.changes h r b t)
   , graph = \h r b f n -> track (s.graph h r b f n)
+  , blame = \h r b p -> track (s.blame h r b p)
+  , fileHistory = \h r b p -> track (s.fileHistory h r b p)
   , clearCache = track s.clearCache
   , pruneMirrors = track s.pruneMirrors
   }
@@ -659,6 +668,8 @@ withDetails pool details source = source
   , history = \host repo branch n -> repoOf host repo (\key name -> details.history key name branch n)
   , changes = \host repo branch since -> repoOf host repo (\key name -> details.changes key name branch since)
   , graph = \host repo scope firstParent n -> repoOf host repo (\key name -> details.graph key name scope firstParent n)
+  , blame = \host repo branch file -> repoOf host repo (\key name -> details.blame key name branch file)
+  , fileHistory = \host repo branch file -> repoOf host repo (\key name -> details.fileHistory key name branch file)
   }
   where
     pullOf :: Text -> Text -> Int -> (AccountId -> RepoName -> Number -> IO (Either Text a)) -> IO (Either Text a)

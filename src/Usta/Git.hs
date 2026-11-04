@@ -27,6 +27,8 @@ module Usta.Git
   , branches
   , tags
   , changes
+  , blame
+  , fileLog
   , graph
   , readme
   , tree
@@ -52,7 +54,9 @@ import System.Process.Typed (proc, readProcess, setEnv)
 import Text.Read (readMaybe)
 
 import Usta.Types.Branch (Branch (..), Tag (..))
-import Usta.Types.Insights (Change (..), Node (..))
+import Usta.Types.Insights (Blamed (..), Change (..), Node (..))
+import qualified Data.Map.Strict as Map
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Usta.Types.Commit (Commit (..), Sha)
 import Usta.Types.Diff (FileDiff, parseDiff)
 import Usta.Types.Parse (parseM, unparse)
@@ -204,6 +208,35 @@ graph path scope firstParent skip n = do
           Right t -> [Node { sha = sha, parents = T.words parents, author = author, at = t, subject = subject
                            , refs = [r | d <- map T.strip (T.splitOn "," decorations), let r = maybe d id (T.stripPrefix "HEAD -> " d), not (T.null r), r /= "HEAD"] }]
       _ -> pure []
+
+-- | Each line of a file on a ref with the commit that last changed it.
+blame :: FilePath -> Text -> Text -> IO [Blamed]
+blame path ref file = do
+  out <- git ["-C", path, "blame", "--porcelain", T.unpack ref, "--", T.unpack file]
+  pure (go Map.empty (T.lines out))
+  where
+    -- Porcelain names a commit's author and summary only the first time.
+    go _ [] = []
+    go known (header : rest) = case T.words header of
+      sha : _ : _ | T.length sha == 40 ->
+        let (fields, body) = break ("\t" `T.isPrefixOf`) rest
+            field k = lookup k [(T.takeWhile (/= ' ') f, T.drop 1 (T.dropWhile (/= ' ') f)) | f <- fields]
+            (author, at, summary) = case Map.lookup sha known of
+              Just seen -> seen
+              Nothing -> ( maybe "" id (field "author")
+                         , maybe epoch (posixSecondsToUTCTime . fromIntegral) (field "author-time" >>= readMaybe . T.unpack :: Maybe Int)
+                         , maybe "" id (field "summary") )
+            known' = Map.insert sha (author, at, summary) known
+        in case body of
+          l : more -> Blamed {sha = sha, author = author, at = at, summary = summary, line = T.drop 1 l} : go known' more
+          [] -> []
+      _ -> go known rest
+    epoch = posixSecondsToUTCTime 0
+
+-- | The commits on a ref that changed a file, newest first.
+fileLog :: FilePath -> Text -> Text -> Int -> IO [Commit]
+fileLog path ref file n =
+  git ["-C", path, "log", "-n", show n, format, T.unpack ref, "--", T.unpack file] >>= commits
 
 -- | Every tag, newest first.
 tags :: FilePath -> IO [Tag]

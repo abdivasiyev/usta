@@ -36,6 +36,7 @@ import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Progress as Progress
 import qualified Usta.UI.Components.Shortcut as Shortcut
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import qualified Usta.UI.Components.LabelPicker as LabelPicker
 import qualified Usta.UI.Components.Thread as Thread
 import qualified Usta.UI.Components.SyncStatus as SyncStatus
 import Usta.UI.Page (Page (..))
@@ -838,7 +839,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css
+  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, Skeleton.css, Progress.css
   , windowCss
   ]

@@ -120,6 +120,7 @@ executable usta
     Usta.UI.Components.Icon
     Usta.UI.Components.Markdown
     Usta.UI.Components.ImageView
+    Usta.UI.Components.LabelPicker
     Usta.UI.Components.MarkdownEditor
     Usta.UI.Components.Mermaid
     Usta.UI.Components.NavItem

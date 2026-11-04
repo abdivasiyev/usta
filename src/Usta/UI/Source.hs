@@ -194,6 +194,8 @@ data Source = Source
   , branchList :: Text -> Text -> Text -> IO (Either Text (From, [Branch]))
     -- ^ By host, repository and default branch.
   , tagList :: Text -> Text -> IO (Either Text (From, [Tag]))
+  , upload :: Text -> Text -> Int -> Text -> ByteString -> IO (Either Text Text)
+    -- ^ By host, repository, number, file name and bytes: where it is served.
   , releases :: Text -> Text -> IO (Either Text [Release])
     -- ^ From the forge, newest first.
   , history :: Text -> Text -> Text -> Int -> IO (Either Text (From, [Commit]))
@@ -329,6 +331,7 @@ fromDatabase pool changes statuses sync = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
+  , upload = \_ _ _ _ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
@@ -416,6 +419,7 @@ samples = Source
   , branchList = \_ _ _ -> pure (Left unavailable)
   , tagList = \_ _ -> pure (Left unavailable)
   , releases = \_ _ -> pure (Left unavailable)
+  , upload = \_ _ _ _ _ -> pure (Left unavailable)
   , history = \_ _ _ _ -> pure (Left unavailable)
   , changes = \_ _ _ _ -> pure (Left unavailable)
   , graph = \_ _ _ _ _ -> pure (Left unavailable)
@@ -490,6 +494,7 @@ withAccounts pool accounts source = source
   , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
   , releases = \host repo -> onRepo host repo (\f name -> f.releases name)
+  , upload = \host repo n file bytes -> onForge host repo n (\f name number -> f.upload name number file bytes)
   , discardPending = \host repo n -> onForge host repo n (\f name number -> f.discardPending name number)
   }
   where
@@ -643,6 +648,7 @@ tracking track s = s
   , branchList = \h r b -> track (s.branchList h r b)
   , tagList = \h r -> track (s.tagList h r)
   , releases = \h r -> track (s.releases h r)
+  , upload = \h r n f b -> track (s.upload h r n f b)
   , history = \h r b n -> track (s.history h r b n)
   , changes = \h r b t -> track (s.changes h r b t)
   , graph = \h r b f n -> track (s.graph h r b f n)

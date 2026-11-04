@@ -39,6 +39,9 @@ import Text.Read (readMaybe)
 import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
+import qualified Data.ByteString.Lazy as BL
+import Servant.Multipart.API (FileData (..), MultipartData (..))
+import Servant.Multipart.Client (genBoundary)
 import qualified Usta.Types.Branch as Br
 import qualified Usta.Types.Release as Rel
 import qualified Usta.Types.Check as C
@@ -297,6 +300,10 @@ forgejo manager base host token = do
           Api.CommitsQuery {sha = branch, path = Nothing, page = Just n, limit = 50, stat = False, verification = False, files = False})
     , branchList = \repo -> map (\b -> Br.Branch {name = b.name, pushed = b.pushed, ahead = Nothing, behind = Nothing}) <$> run client
         (everyPage (\page limit -> Api.api.branches (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+    , upload = \repo n name bytes -> do
+        boundary <- genBoundary
+        let form = MultipartData [] [FileData "attachment" name (mimeOf name) (BL.fromStrict bytes)]
+        (.browserDownloadUrl) <$> run client (Api.api.upload (owner repo) (shortName repo) n (Just name) (boundary, form))
     , releases = \repo -> map releaseOf <$> run client
         (everyPage (\page limit -> Api.api.releases (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , tags = \repo -> map (\t -> Br.Tag {name = t.name, at = t.made}) <$> run client
@@ -675,6 +682,21 @@ releaseOf r = Rel.Release
   , url = r.htmlUrl
   , assets = [Rel.Asset {name = x.name, size = x.size, downloads = x.downloadCount, url = x.browserDownloadUrl} | x <- r.assets]
   }
+
+-- | A file's type by its name, for an upload.
+mimeOf :: Text -> Text
+mimeOf name = case T.toLower (T.takeWhileEnd (/= '.') name) of
+  "png" -> "image/png"
+  "jpg" -> "image/jpeg"
+  "jpeg" -> "image/jpeg"
+  "gif" -> "image/gif"
+  "webp" -> "image/webp"
+  "svg" -> "image/svg+xml"
+  "pdf" -> "application/pdf"
+  "txt" -> "text/plain"
+  "md" -> "text/markdown"
+  "zip" -> "application/zip"
+  _ -> "application/octet-stream"
 
 -- | The job a status links, "…/actions/runs/{run}/jobs/{index}".
 jobOf :: Text -> Maybe C.Job

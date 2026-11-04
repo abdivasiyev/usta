@@ -137,6 +137,9 @@ data Forge = Forge
   , branchList :: RepoName -> IO [Branch]
     -- ^ Every branch with when it was last pushed; no counts.
   , tags :: RepoName -> IO [Tag]
+  , upload :: RepoName -> Number -> Text -> ByteString -> IO Text
+    -- ^ Attaches a file, by name, to an issue or pull request, and says
+    -- where it is served, for a comment to link or show it.
   , releases :: RepoName -> IO [Release]
     -- ^ Newest first.
   , fileHistory :: RepoName -> Text -> Text -> IO [Commit]

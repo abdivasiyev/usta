@@ -95,6 +95,7 @@ new now account = do
         , F.branchList = \_ -> pure []
         , F.tags = \_ -> pure []
         , F.releases = \_ -> pure []
+        , F.upload = \_ _ _ _ -> refuse
         , F.history = \_ _ _ -> pure []
         , F.fileHistory = \_ _ _ -> pure []
         , F.react = \_ _ _ _ _ -> refuse

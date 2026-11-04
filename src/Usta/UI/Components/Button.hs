@@ -115,6 +115,14 @@ css = mconcat
   , "button.u-flat:hover { background: var(--border-subtle); }"
   , "button.u-danger { background: var(--surface); color: var(--danger); border: 1px solid var(--danger-border); }"
   , "button.u-danger:hover { background: var(--danger-bg); }"
+  -- A small on / off switch in a bar, such as Show source.
+  , "button.u-toggle {"
+  , "  min-height: 26px; padding: 0 10px; border-radius: 6px; font-size: 12px;"
+  , "  background: var(--surface); color: var(--text); border: 1px solid var(--input-border);"
+  , "  box-shadow: none; background-image: none;"
+  , "}"
+  , "button.u-toggle:hover { background: var(--border-subtle); }"
+  , "button.u-toggle:checked { background: var(--accent-bg); color: var(--accent-soft); border-color: var(--accent); }"
   , "button.u-button:disabled { background: var(--border); color: var(--text-muted); border: none; }"
   -- A busy button keeps its look, so it reads as working, not refused.
   , "button.u-primary.busy:disabled { background: var(--accent); color: var(--on-accent); }"

@@ -23,7 +23,7 @@ new source = do
   figure <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-mermaid"]]
   bar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["bar"]]
   GI.new Gtk.Label [#label := "Diagram · mermaid", #hexpand := True, #xalign := 0] >>= #append bar
-  toggle <- GI.new Gtk.ToggleButton [#label := "Show source", #cssClasses := ["toggle"]]
+  toggle <- GI.new Gtk.ToggleButton [#label := "Show source", #cssClasses := ["u-toggle"]]
   #append bar toggle
   #append figure bar
 
@@ -36,6 +36,7 @@ new source = do
   void $ GI.on toggle #toggled $ do
     on <- GI.get toggle #active
     Gtk.stackSetVisibleChildName stack (if on then "source" else "diagram")
+    GI.set toggle [#label := if on then "Show diagram" else "Show source"]
 
   -- The source, with the reason under it, when there is no drawing.
   let fallBack reason = do
@@ -53,7 +54,6 @@ css :: Text
 css = mconcat
   [ "box.u-mermaid { border: 1px solid var(--border); border-radius: 8px; }"
   , "box.u-mermaid box.bar { padding: 4px 6px 4px 12px; background: var(--window); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }"
-  , "box.u-mermaid button.toggle { min-height: 26px; padding: 0 10px; font-size: 12px; }"
   , "box.u-mermaid box.diagram { padding: 16px; }"
   , "box.u-mermaid label.source { padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }"
   , "box.u-mermaid label.problem { padding: 0 14px 10px; font-size: 12px; color: var(--danger); }"

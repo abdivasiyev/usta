@@ -562,6 +562,7 @@ tabContent source reopen fetch summary showState tab = case tab of
           , merge = source.merge host repo n
           , requestReview = source.requestReview host repo n
           , unrequestReview = source.unrequestReview host repo n
+          , candidates = source.reviewCandidates host repo
           , refresh = reopen
           }
         checks = case fmap fst summary.checks of

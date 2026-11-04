@@ -15,13 +15,16 @@ module Usta.UI.Pages.PullRequest.Conversation
   , css
   ) where
 
+import Control.Concurrent (forkIO)
 import Control.Monad (forM_, unless, void, when)
+import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Components.Avatar as Avatar
@@ -29,6 +32,7 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Thread as Thread
+import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Markdown as Markdown
 import Usta.UI.Format (Clock, ago)
@@ -86,6 +90,8 @@ data Actions = Actions
     -- ^ 'True' deletes the branch after.
   , requestReview :: [Who] -> IO (Either Text ())
   , unrequestReview :: Who -> IO (Either Text ())
+  , candidates :: IO (Either Text [Who])
+    -- ^ Who can be asked to review.
   , refresh :: IO ()
   }
 
@@ -267,9 +273,22 @@ details run actions m = do
     label "→" ["muted"] >>= #append row
     label m.target ["chip", "mono"] >>= #append row
     #append box row
-  section side "Reviewers" $ \box -> do
-    when (null m.reviewers) $ label "Nobody yet" ["muted"] >>= #append box
-    forM_ m.reviewers $ \r -> reviewerRow run actions r >>= #append box
+  reviewers <- vbox 6
+  header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+  title <- Card.sectionTitle "Reviewers"
+  GI.set title [#hexpand := True]
+  #append header title
+  request <- GI.new Gtk.Button [#label := "Request", #tooltipText := "Request a review (Ctrl Shift R)", #cssClasses := ["link-button"]]
+  #append header request
+  #append reviewers header
+  when (null m.reviewers) $ label "Nobody yet" ["muted"] >>= #append reviewers
+  forM_ m.reviewers $ \r -> reviewerRow run actions r >>= #append reviewers
+  #append side reviewers
+  open <- requestPicker actions m request
+  void $ GI.on request #clicked open
+  keys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
+  shortcut keys "<Primary><Shift>r" open
+  Gtk.widgetAddController side keys
   section side "Labels" $ \box -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
     forM_ m.labels $ \(tone, name) -> Badge.new tone name >>= #append row
@@ -285,6 +304,93 @@ details run actions m = do
       Card.sectionTitle title >>= #append box
       fill box
       #append side box
+
+-- | A popover under @anchor@ for asking people and teams to review:
+-- search, then collaborators and teams, those already reviewing checked.
+-- Gives what opens it; the candidates load each time it opens.
+requestPicker :: Actions -> Model -> Gtk.Button -> IO (IO ())
+requestPicker actions m anchor = do
+  box <- vbox 8
+  GI.set box [#widthRequest := 300, #cssClasses := ["u-request-review"]]
+  label "Request a review" ["title"] >>= #append box
+  search <- GI.new Gtk.SearchEntry [#placeholderText := "Search people and teams"]
+  #append box search
+  list <- vbox 2
+  scroll <- GI.new Gtk.ScrolledWindow [#child := list, #maxContentHeight := 320, #propagateNaturalHeight := True, #hscrollbarPolicy := Gtk.PolicyTypeNever]
+  #append box scroll
+  problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
+  #append box problem
+  buttons <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd]
+  cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
+  send <- Button.new Button.defaults {Button.label = Just "Request", Button.variant = Button.Primary}
+  #append buttons cancel >> #append buttons send
+  #append box buttons
+  popover <- GI.new Gtk.Popover [#child := box, #position := Gtk.PositionTypeBottom]
+  Gtk.widgetSetParent popover anchor
+  void $ GI.on anchor #destroy (Gtk.widgetUnparent popover)
+
+  chosen <- newIORef []
+  let already = [r.who | r <- m.reviewers]
+      nameOf w = case w of
+        Person l -> unparse l
+        Team t -> "team: " <> t
+      count = do
+        n <- length <$> readIORef chosen
+        GI.set send [#label := if n == 0 then "Request" else "Request " <> T.pack (show n), #sensitive := n > 0]
+      clear = Gtk.widgetGetFirstChild list >>= mapM_ (\c -> Gtk.boxRemove list c >> clear)
+      fill whos = do
+        clear
+        let people = [w | w@(Person l) <- whos, unparse l /= m.opening.author]
+            teams = [w | w@(Team _) <- whos]
+        forM_ [("Collaborators", people), ("Teams", teams)] $ \(heading, group) ->
+          unless (null group) $ do
+            label heading ["lbl"] >>= #append list
+            forM_ group $ \w -> do
+              check <- GI.new Gtk.CheckButton [#label := nameOf w, #cssClasses := ["candidate"]]
+              when (w `elem` already) $ GI.set check [#active := True, #sensitive := False, #tooltipText := "Already reviewing"]
+              void $ GI.on check #toggled $ do
+                on' <- GI.get check #active
+                modifyIORef chosen (\xs -> if on' then w : xs else filter (/= w) xs)
+                count
+              #append list check
+        when (null people && null teams) $ label "Nobody else can be asked here." ["muted"] >>= #append list
+      filterBy = do
+        typed <- T.toLower <$> GI.get search #text
+        rows <- children list
+        forM_ rows $ \row -> do
+          c <- GI.castTo Gtk.CheckButton row
+          forM_ c $ \check -> do
+            text <- maybe "" T.toLower <$> Gtk.checkButtonGetLabel check
+            Gtk.widgetSetVisible check (typed `T.isInfixOf` text)
+      open = do
+        writeIORef chosen []
+        count
+        GI.set problem [#visible := False]
+        GI.set search [#text := ""]
+        clear
+        label "Loading…" ["muted"] >>= #append list
+        Gtk.popoverPopup popover
+        void (Gtk.widgetGrabFocus search)
+        void $ forkIO $ do
+          got <- actions.candidates
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            case got of
+              Right whos -> fill whos
+              Left text -> clear >> GI.set problem [#label := text, #visible := True]
+            pure False
+  void $ GI.on search #searchChanged filterBy
+  void $ GI.on cancel #clicked (Gtk.popoverPopdown popover)
+  void $ GI.on send #clicked $ do
+    whos <- readIORef chosen
+    Button.busy send [cancel] "Requesting…" (actions.requestReview whos) $ \case
+      Left text -> GI.set problem [#label := text, #visible := True]
+      Right () -> Gtk.popoverPopdown popover >> actions.refresh
+  pure open
+  where
+    children w = Gtk.widgetGetFirstChild w >>= go
+      where
+        go Nothing = pure []
+        go (Just c) = (c :) <$> (Gtk.widgetGetNextSibling c >>= go)
 
 -- | A reviewer: who, where they stand, and a button that asks them again
 -- once they reviewed, or stops asking while they have not.
@@ -350,7 +456,12 @@ sample = Model
 
 css :: Text
 css = mconcat
-  [ "box.u-conversation box.reviewer label.name { font-weight: 500; }"
+  [ "box.u-conversation button.link-button { min-height: 0; padding: 0 2px; border: none; box-shadow: none; background: transparent; color: var(--accent); font-size: 13px; }"
+  , "box.u-request-review { padding: 6px; }"
+  , "box.u-request-review label.title { font-weight: 600; }"
+  , "box.u-request-review label.lbl { margin-top: 6px; font-size: 11px; font-weight: 600; color: var(--text-muted); }"
+  , "box.u-request-review label.problem { color: var(--danger); font-size: 12px; }"
+  , "box.u-conversation box.reviewer label.name { font-weight: 500; }"
   , "box.u-conversation box.reviewer label.small { font-size: 12px; }"
   , "box.u-conversation box.reviewer label.waiting { color: var(--warning); }"
   , "box.u-conversation box.reviewer label.approved { color: var(--success); }"

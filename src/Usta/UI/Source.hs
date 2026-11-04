@@ -52,6 +52,7 @@ import Usta.Types.Forge (Kind)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
+import Usta.Types.Thread (Threads)
 import Usta.Types.Discussion (Discussion, Merge, NewIssue, NewPull, Verdict)
 import Usta.Types.Number (Number)
 import Usta.Types.RepoName (RepoName)
@@ -128,6 +129,8 @@ data Source = Source
   , discussion :: Text -> Text -> Int -> IO (Either Text Discussion)
     -- ^ An issue's or pull request's thread, by host, repository and
     -- number, from the forge.
+  , threads :: Text -> Text -> Int -> IO (Either Text Threads)
+    -- ^ A pull request's review threads, by host, repository and number.
   , comment :: Text -> Text -> Int -> Text -> IO (Either Text ())
   , setClosed :: Text -> Text -> Int -> Bool -> IO (Either Text ())
   , merge :: Text -> Text -> Int -> Merge -> Bool -> IO (Either Text ())
@@ -222,6 +225,7 @@ fromDatabase pool changes statuses sync = Source
   , tree = \_ _ _ -> pure (Left unavailable)
   , file = \_ _ _ _ -> pure (Left unavailable)
   , discussion = \_ _ _ -> pure (Left unavailable)
+  , threads = \_ _ _ -> pure (Left unavailable)
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
   , merge = \_ _ _ _ _ -> pure (Left unavailable)
@@ -271,6 +275,7 @@ samples = Source
   , tree = \_ _ _ -> pure (Left unavailable)
   , file = \_ _ _ _ -> pure (Left unavailable)
   , discussion = \_ _ _ -> pure (Left unavailable)
+  , threads = \_ _ _ -> pure (Left unavailable)
   , comment = \_ _ _ _ -> pure (Left unavailable)
   , setClosed = \_ _ _ _ -> pure (Left unavailable)
   , merge = \_ _ _ _ _ -> pure (Left unavailable)
@@ -310,6 +315,7 @@ withAccounts pool accounts source = source
                 DB.setDone i.accountId thread done
               pure (Right ())
   , discussion = \host repo n -> onForge host repo n (\f name number -> f.discussion name number)
+  , threads = \host repo n -> onForge host repo n (\f name number -> f.threads name number)
   , comment = \host repo n text -> changing (onForge host repo n (\f name number -> () <$ f.comment name number text))
   , setClosed = \host repo n closed -> changing (onForge host repo n (\f name number -> f.setClosed name number closed))
   , merge = \host repo n how delete -> changing (onForge host repo n (\f name number -> f.merge name number how delete))
@@ -429,6 +435,7 @@ tracking track s = s
   , tree = \h r b -> track (s.tree h r b)
   , file = \h r b p -> track (s.file h r b p)
   , discussion = \h r n -> track (s.discussion h r n)
+  , threads = \h r n -> track (s.threads h r n)
   , comment = \h r n t -> track (s.comment h r n t)
   , setClosed = \h r n c -> track (s.setClosed h r n c)
   , merge = \h r n m d -> track (s.merge h r n m d)

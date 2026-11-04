@@ -4,6 +4,10 @@
 
 module Main (main) where
 
+import Network.HTTP.Client (Manager)
+import qualified Usta.OAuth as OAuth
+import Usta.Types.Host (Host)
+import Usta.Types.Token (Token)
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 import qualified Usta.Types.Link as Link
@@ -34,7 +38,7 @@ import qualified Usta.Preferences as Preferences
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind (..))
-import Usta.Types.Parse (parseM)
+import Usta.Types.Parse (parseM, unparse)
 import qualified Usta.UI.Gallery as Gallery
 import qualified Usta.UI.Source as Source
 import Usta.UI.Source (Source)
@@ -48,7 +52,7 @@ main :: IO ()
 main = getArgs >>= choose
   where
     choose args
-      | ["git-credential", action] <- args = Credential.helper Keyring.system action
+      | ["git-credential", action] <- args = newTlsManager >>= \m -> Credential.helper Keyring.system (current m) action
       | has "--gallery" = runApp (void . Gallery.build)
       | has "--welcome" = runApp (void . Window.buildAt Window.FirstRun Source.samples)
       | has "--first-sync" = runApp (void . Window.buildAt Window.FirstSync Source.samples)
@@ -56,6 +60,12 @@ main = getArgs >>= choose
       | otherwise = cache
       where
         has = (`elem` args)
+
+-- | A browser sign-in keeps a refresh token; git gets a fresh access token.
+current :: Manager -> Host -> Token -> IO (Maybe Token)
+current manager host token = case OAuth.stored token of
+  Nothing -> pure (Just token)
+  Just (client, r) -> either (const Nothing) (Just . (.access)) <$> OAuth.refresh manager ("https://" <> unparse host) client r
 
 runApp :: (Application -> IO ()) -> IO ()
 runApp open = do

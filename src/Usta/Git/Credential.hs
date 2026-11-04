@@ -26,6 +26,7 @@ import Usta.Keyring (Keyring (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Login (Login)
 import Usta.Types.Parse (parse, unparse)
+import Usta.Types.Token (Token)
 
 -- | What git asks for: the account on a host.
 type Request :: Type
@@ -49,18 +50,20 @@ parseRequest input = do
     field key = lookup key pairs
 
 -- | The answer to @get@: the user and the token, or nothing when usta has
--- no token for them.
-respond :: Keyring -> Request -> IO Text
-respond keyring request = do
+-- no token for them. @current@ turns what the keyring keeps into the
+-- token to send, as a browser sign-in keeps a refresh token.
+respond :: Keyring -> (Host -> Token -> IO (Maybe Token)) -> Request -> IO Text
+respond keyring current request = do
   found <- keyring.load request.host request.login
-  pure $ case found of
+  sent <- maybe (pure Nothing) (current request.host) found
+  pure $ case sent of
     Nothing -> ""
     Just token -> "username=" <> unparse request.login <> "\npassword=" <> unparse token <> "\n"
 
 -- | Runs the helper for git's @action@ ("get", "store" or "erase").
-helper :: Keyring -> String -> IO ()
-helper keyring action = do
+helper :: Keyring -> (Host -> Token -> IO (Maybe Token)) -> String -> IO ()
+helper keyring current action = do
   input <- decodeUtf8Lenient <$> B8.hGetContents stdin
   case (action, parseRequest input) of
-    ("get", Just request) -> respond keyring request >>= B8.hPutStr stdout . encodeUtf8
+    ("get", Just request) -> respond keyring current request >>= B8.hPutStr stdout . encodeUtf8
     _ -> pure ()

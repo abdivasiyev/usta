@@ -39,6 +39,7 @@ import qualified GI.Pango as Pango
 
 import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Badge as Badge
+import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import Usta.UI.Components.CommandPalette (shortcut)
@@ -65,6 +66,8 @@ import qualified Usta.UI.Components.Forge as Forge
 type Model :: Type
 data Model = Model
   { files :: [Diff.File]
+  , place :: Maybe Avatar.Place
+    -- ^ The forge the reviewers' pictures come from.
   , threads :: Threads
     -- ^ The review conversations, placed under their lines.
   , me :: Text
@@ -261,7 +264,7 @@ new actions panels m = do
   placedRef <- newIORef []
   entries <- forM m.files $ \f -> do
     placed <- forM [(t, at) | t <- m.threads.threads, t.path == f.path, Just at <- [place f.diffLines t]] $ \(t, (index, outdated)) -> do
-      drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, showCode = False, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock, reply = actions.reply t, upload = actions.upload}
+      drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, showCode = False, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock, reply = actions.reply t, upload = actions.upload, place = m.place}
       pure (index, (t, outdated, drawn))
     modifyIORef' placedRef (<> map snd placed)
     let attached = [(index, drawn.widget) | (index, (_, _, drawn)) <- placed]
@@ -843,6 +846,7 @@ lineLinks forge pull head' hash path (a, b) =
 fromFileDiffs :: Clock -> Text -> [D.FileDiff] -> Model
 fromFileDiffs c source changes = Model
   { files = map fromFileDiff changes
+  , place = Nothing
   , threads = Threads [] Nothing
   , me = ""
   , clock = c
@@ -872,7 +876,8 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 
 sample :: Model
 sample = Model
-  { files =
+  { place = Nothing
+  , files =
       [ Diff.File "usta.cabal" True
             [ Hunk "@@ -12,6 +12,8 @@ executable usta"
             , Context 13 13 "  main-is: Main.hs"

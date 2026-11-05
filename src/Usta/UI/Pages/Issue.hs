@@ -87,6 +87,8 @@ data Talk = Talk
     -- ^ Where files attached to its comments go.
   , draftKey :: Text
     -- ^ Where its unsent comments are kept, e.g. "host/owner/repo#12".
+  , place :: Maybe Avatar.Place
+    -- ^ The forge the authors' pictures come from.
   }
 
 -- | A comment as a card that edits, deletes and reacts when the forge's
@@ -110,6 +112,7 @@ commentWidget t reply opener c = case c.forge of
         Gtk.textBufferInsert reply end (q <> "\n") (-1)
     , react = if x.review == Nothing then t.react x.id else \_ _ -> pure (Left "React to a review on the pull request's page on the forge.")
     , changed = t.refresh
+    , place = t.place
     } >>= Gtk.toWidget
 
 -- | How much of a thread reaches the inbox, read and set on the forge.

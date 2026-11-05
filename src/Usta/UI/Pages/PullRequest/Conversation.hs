@@ -99,7 +99,9 @@ data Model = Model
 -- thread; a 'Left' is said under the box, and a 'Right' runs 'refresh'.
 type Actions :: Type
 data Actions = Actions
-  { comment :: Text -> IO (Either Text ())
+  { place :: Maybe Avatar.Place
+    -- ^ The forge the people's pictures come from.
+  , comment :: Text -> IO (Either Text ())
   , setClosed :: Bool -> IO (Either Text ())
   , merge :: D.Merge -> Bool -> IO (Either Text ())
     -- ^ 'True' deletes the branch after.
@@ -487,7 +489,9 @@ requestPicker actions m anchor = do
         GI.set mark [#visible := isJust fixed]
         #append check mark
         #append content check
-        Avatar.new 24 (T.toUpper (T.take 2 (nameOf c.who))) >>= #append content
+        (case c.who of
+          Person l -> Avatar.person 24 actions.place (unparse l)
+          Team t -> Avatar.new 24 (T.toUpper (T.take 2 t)) >>= Gtk.toWidget) >>= #append content
         texts <- vbox 0
         GI.set texts [#hexpand := True, #valign := Gtk.AlignCenter]
         name <- GI.new Gtk.Label [#xalign := 0, #useMarkup := True, #ellipsize := Pango.EllipsizeModeEnd, #cssClasses := ["name"]]
@@ -613,7 +617,9 @@ reviewerRow run actions r = do
   let (name, short) = case r.who of
         Person l -> (unparse l, unparse l)
         Team t -> ("team: " <> t, t)
-  Avatar.new 22 (T.toUpper (T.take 2 short)) >>= #append row
+  (case r.who of
+    Person l -> Avatar.person 22 actions.place (unparse l)
+    Team _ -> Avatar.new 22 (T.toUpper (T.take 2 short)) >>= Gtk.toWidget) >>= #append row
   texts <- vbox 0
   GI.set texts [#hexpand := True]
   label name ["name"] >>= #append texts

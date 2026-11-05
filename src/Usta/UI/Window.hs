@@ -244,8 +244,8 @@ buildWith start crashed given app = do
               { comment = source.comment h r n
               , setClosed = source.setClosed h r n
               , labels = labelPicker source h r n again
-              , talk = talkFor source h r n again me c
-              , assigning = assignPicker source h r n again me d.assignees
+              , talk = talkFor source (placeOf model.forge h) h r n again me c
+              , assigning = assignPicker source (placeOf model.forge h) h r n again me d.assignees
               , milestoning = milestonePicker source h r n again c d.milestone
               , milestoneNow = find (\g -> Just g.title == d.milestone) goals
               , refresh = again
@@ -325,7 +325,10 @@ buildWith start crashed given app = do
   -- The palette wraps the whole window, so it exists only further down.
   paletteOpener <- newIORef (pure ())
   syncChip <- GI.new Gtk.Box []
-  header <- headerBar Platform.current syncChip source.syncNow openSettings (join (readIORef paletteOpener))
+  -- The header shows the first account's picture.
+  firstAccount <- listToMaybe <$> source.accounts
+  let whoAmI = (\a -> (Just Avatar.Place {github = a.forge == Forge.GitHub, host = a.host}, a.login)) <$> firstAccount
+  header <- headerBar Platform.current whoAmI syncChip source.syncNow openSettings (join (readIORef paletteOpener))
 
   let openNotification n
         | n.kind == Inbox.Issue = openIssue "Inbox" (notificationIssue n)
@@ -341,19 +344,22 @@ buildWith start crashed given app = do
             either (Settings.notice anchor (if done then "Not marked done" else "Not moved to the inbox"))
               (const (join (readIORef inboxRef))) result
             pure False
+      -- The forge of the account on @host@, for pictures.
+      placeAt host = (\as -> listToMaybe [Avatar.Place {github = a.forge == Forge.GitHub, host = a.host} | a <- as, a.host == host]) <$> source.accounts
       -- The preview's description, latest comments and files, from the
       -- forge; a comment is new when it came after the user's own last one.
       previewDetails n = do
         discussed <- source.discussion n.host n.repo n.number
         changed <- if n.kind == Inbox.Issue then pure (Right []) else fmap (map change . snd) <$> source.pullFiles n.host n.repo n.number
         me <- maybe "" (.login) . find (\a -> a.host == n.host) <$> source.accounts
+        place <- placeAt n.host
         c <- clock
         pure $ do
           d <- discussed
           let everyone = d.opening : d.comments
               mineAt = [x.createdAt | x <- everyone, unparse x.author == me]
               fresh x = n.unread && unparse x.author /= me && all (< x.createdAt) mineAt
-              toSaid x = Inbox.Said {author = unparse x.author, when' = ago c x.createdAt, body = x.body, new = fresh x}
+              toSaid x = Inbox.Said {author = unparse x.author, when' = ago c x.createdAt, body = x.body, new = fresh x, place = place}
           pure Inbox.Details
             { description = (toSaid d.opening) {Inbox.new = False}
             , latest = map toSaid (reverse (take 2 (reverse d.comments)))
@@ -802,7 +808,8 @@ tabContent source panels reopen fetch summary showState tab = case tab of
           me <- maybe "" (.login) . find (\a -> a.host == host) <$> source.accounts
           pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, (reviewers, ready, goals, events))) d)
         actionsFor again d goals me c = Conversation.Actions
-          { comment = source.comment host repo n
+          { place = placeOf summary.forge host
+          , comment = source.comment host repo n
           , setClosed = source.setClosed host repo n
           , merge = source.merge host repo n
           , scheduleMerge = source.scheduleMerge host repo n
@@ -813,8 +820,8 @@ tabContent source panels reopen fetch summary showState tab = case tab of
           , unrequestReview = source.unrequestReview host repo n
           , candidates = source.reviewCandidates host repo n
           , labels = labelPicker source host repo n again
-          , talk = talkFor source host repo n again me c
-          , assigning = assignPicker source host repo n again me d.assignees
+          , talk = talkFor source (placeOf summary.forge host) host repo n again me c
+          , assigning = assignPicker source (placeOf summary.forge host) host repo n again me d.assignees
           , milestoning = milestonePicker source host repo n again c d.milestone
           , milestoneNow = find (\g -> Just g.title == d.milestone) goals
           , refresh = again
@@ -830,7 +837,8 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         (_, True) -> PullRequest.Closed
         _ -> summary.state
       let shown t = Thread.Shown
-            { thread = t, outdated = False, showCode = True, lastReviewed = threads.lastReviewed
+            { place = placeOf summary.forge host
+            , thread = t, outdated = False, showCode = True, lastReviewed = threads.lastReviewed
             , me = me, clock = c, reply = source.reply host repo n t, upload = Just (source.upload host repo n) }
           model = Conversation.fromDiscussion c d commits summary.branches checks
           running = fmap fst summary.checks == Just Warning
@@ -875,7 +883,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         }
         panels
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
-          {Files.threads = threads, Files.me = me, Files.links = links})
+          {Files.threads = threads, Files.me = me, Files.links = links, Files.place = placeOf summary.forge summary.host})
   PullRequest.Commits ->
     loadLive (source.pullCommits summary.host summary.repo summary.number) $ \_ (from, commits) -> do
       c <- clock
@@ -915,9 +923,10 @@ pushed e = case e.what of
   _ -> False
 
 -- | What comments on an issue or pull request can do.
-talkFor :: Source -> Text -> Text -> Int -> IO () -> Text -> Clock -> Issue.Talk
-talkFor source host repo n refresh me c = Issue.Talk
-  { me = me
+talkFor :: Source -> Maybe Avatar.Place -> Text -> Text -> Int -> IO () -> Text -> Clock -> Issue.Talk
+talkFor source place host repo n refresh me c = Issue.Talk
+  { place = place
+  , me = me
   , clock = c
   , editComment = source.editComment host repo n
   , deleteComment = source.deleteComment host repo
@@ -929,9 +938,10 @@ talkFor source host repo n refresh me c = Issue.Talk
 
 -- | The assignees picker of an issue or pull request, for @me@ (a login
 -- as text) and who it is assigned to.
-assignPicker :: Source -> Text -> Text -> Int -> IO () -> Text -> [Login] -> AssignPickers.Assignees
-assignPicker source host repo n refresh me current = AssignPickers.Assignees
-  { current = current
+assignPicker :: Source -> Maybe Avatar.Place -> Text -> Text -> Int -> IO () -> Text -> [Login] -> AssignPickers.Assignees
+assignPicker source place host repo n refresh me current = AssignPickers.Assignees
+  { place = place
+  , current = current
   , me = either (const Nothing) Just (parse me)
   , load = source.assignable host repo
   , save = source.setAssignees host repo n
@@ -1101,8 +1111,8 @@ shortcuts =
 
 -- | @syncChip@ holds the sync state, which the window keeps current;
 -- @onSync@ runs for the refresh button.
-headerBar :: Platform.Platform -> Gtk.Box -> IO () -> IO () -> IO () -> IO Gtk.HeaderBar
-headerBar platform syncChip onSync onSettings onSearch = do
+headerBar :: Platform.Platform -> Maybe (Maybe Avatar.Place, Text) -> Gtk.Box -> IO () -> IO () -> IO () -> IO Gtk.HeaderBar
+headerBar platform whoAmI syncChip onSync onSettings onSearch = do
   header <- GI.new Gtk.HeaderBar [#cssClasses := ["u-header"]]
   Platform.configureHeaderBar platform header
 
@@ -1137,7 +1147,7 @@ headerBar platform syncChip onSync onSettings onSearch = do
     , Button.tooltip = Just "Settings"
     }
   void $ GI.on settings #clicked onSettings
-  avatar <- Avatar.new 32 "AA"
+  avatar <- maybe (Avatar.new 32 "" >>= Gtk.toWidget) (\(place, login) -> Avatar.person 32 place login) whoAmI
 
   -- packEnd fills from the right edge inwards.
   #packEnd header avatar
@@ -1358,3 +1368,7 @@ browse :: Text -> IO ()
 browse url = do
   launcher <- Gtk.uriLauncherNew (Just url)
   Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+
+-- | Where a person's picture comes from on this forge.
+placeOf :: Forge.Kind -> Text -> Maybe Avatar.Place
+placeOf kind host = Just Avatar.Place {github = kind == Forge.GitHub, host = host}

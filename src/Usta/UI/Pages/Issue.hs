@@ -483,13 +483,14 @@ details actions m = do
   #append side labelsBox
   openLabels <- LabelPicker.attach (actions.labels (map snd m.labels)) editLabels
   void $ GI.on editLabels #clicked openLabels
+  (goal, openGoal) <- AssignPickers.milestoneSection actions.milestoning actions.milestoneNow
+  #append side goal
+  -- Every key before GTK takes the controller: it owns it after.
   labelKeys <- GI.new Gtk.ShortcutController [#scope := Gtk.ShortcutScopeManaged]
   shortcut labelKeys "l" openLabels
   shortcut labelKeys "a" openPeople
-  Gtk.widgetAddController side labelKeys
-  (goal, openGoal) <- AssignPickers.milestoneSection actions.milestoning actions.milestoneNow
-  #append side goal
   shortcut labelKeys "m" openGoal
+  Gtk.widgetAddController side labelKeys
   unless (null m.linkedPullRequests) $
     section side "Linked pull requests" $ \box ->
       forM_ m.linkedPullRequests $ \pr -> label pr ["link"] >>= #append box

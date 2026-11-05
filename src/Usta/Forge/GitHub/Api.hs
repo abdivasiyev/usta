@@ -60,6 +60,13 @@ module Usta.Forge.GitHub.Api
   , Checks (..)
   , CheckNode (..)
   , FoundNode (..)
+  , Team (..)
+  , PullState (..)
+  , ReviewNode (..)
+  , ThreadNode (..)
+  , NoteNode (..)
+  , pullStateQuery
+  , pullMutation
   , refsQuery
   , checksQuery
   , foundQuery
@@ -214,6 +221,25 @@ data Routes mode = Routes
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "jobs" :> Capture "job" Int64
            :> "logs" :> Get '[LogText] ByteString
     -- ^ GitHub answers with a redirect to the log, which the client follows.
+  , review
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "reviews" :> ReqBody '[JSON] Value :> Post '[JSON] Ignored
+  , deleteReview
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "reviews" :> Capture "review" Int64 :> Delete '[JSON] Ignored
+  , replyToComment
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "comments" :> Capture "comment" Int64 :> "replies" :> ReqBody '[JSON] Body :> Post '[JSON] Ignored
+  , merge
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "merge" :> ReqBody '[JSON] Value :> Put '[JSON] Ignored
+  , updateBranch
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "update-branch" :> ReqBody '[JSON] Value :> Verb 'PUT 202 '[JSON] Ignored
+  , deleteBranch
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "git" :> "refs" :> "heads" :> CaptureAll "branch" Text
+           :> DeleteNoContent
+  , teams :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "teams" :> Get '[JSON] [Team]
   , starred :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> GetNoContent
     -- ^ 204 when starred, 404 when not.
   , star :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> PutNoContent
@@ -237,6 +263,7 @@ data Graph mode = Graph
   , refs :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer RefPage)
   , checks :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer Checks)
   , found :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer (Page FoundNode))
+  , pullState :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer PullState)
   }
   deriving stock (Generic)
 
@@ -853,12 +880,13 @@ instance ToHttpApiData BaseHead where
   toUrlPiece (BaseHead base tip) = base <> "..." <> tip
 
 type Comparison :: Type
-data Comparison = Comparison {commits :: [RestCommit], files :: [Text]}
+data Comparison = Comparison {commits :: [RestCommit], files :: [Text], behindBy :: Int}
 
 instance FromJSON Comparison where
   parseJSON = withObject "Comparison" $ \o -> Comparison
     <$> o .: "commits"
     <*> (o .:? "files" .!= [] >>= traverse (withObject "File" (.: "filename")))
+    <*> o .:? "behind_by" .!= 0
 
 -- | Something with a name and a path, as the README answer.
 type Named' :: Type
@@ -1083,3 +1111,132 @@ foundQuery =
     <> " ... on PullRequest { number title closed updatedAt repository { nameWithOwner } }"
     <> " ... on Issue { number title closed updatedAt repository { nameWithOwner } }"
     <> " ... on Repository { nameWithOwner description updatedAt } } } }"
+
+type Team :: Type
+data Team = Team {slug :: Text, name :: Text}
+
+instance FromJSON Team where
+  parseJSON = withObject "Team" $ \o -> Team <$> o .: "slug" <*> o .: "name"
+
+-- | Where a pull request stands for review and merging, and who looks.
+type PullState :: Type
+data PullState = PullState
+  { viewer :: Login
+  , nodeId :: Text
+  , draft :: Bool
+  , mergeable :: Text
+    -- ^ "MERGEABLE", "CONFLICTING" or "UNKNOWN".
+  , autoMerge :: Bool
+  , headBranch :: Text
+  , baseBranch :: Text
+  , headRepo :: Maybe RepoName
+  , headSha :: Text
+  , requiredApprovals :: Int
+  , requested :: [Either Text Login]
+    -- ^ A team by its slug, or a person.
+  , latest :: [ReviewNode]
+    -- ^ Each reviewer's latest review.
+  , reviews :: [ReviewNode]
+    -- ^ The last 100, pending ones too.
+  , threads :: [ThreadNode]
+  }
+
+instance FromJSON PullState where
+  parseJSON = withObject "Data" $ \d -> do
+    viewer <- d .: "viewer" >>= (.: "login")
+    p <- d .: "repository" >>= (.: "found")
+    rule <- p .:? "baseRef" >>= maybe (pure Nothing) (.:? "branchProtectionRule")
+    requested <- p .: "reviewRequests" >>= (.: "nodes") >>= traverse (\r -> r .: "requestedReviewer" >>= \who -> do
+      slug <- who .:? "slug"
+      login <- who .:? "login"
+      pure (maybe (Left <$> slug) (Just . Right) login))
+    PullState viewer
+      <$> p .: "id"
+      <*> p .: "isDraft"
+      <*> p .: "mergeable"
+      <*> ((/= (Nothing :: Maybe Value)) <$> p .:? "autoMergeRequest")
+      <*> p .: "headRefName"
+      <*> p .: "baseRefName"
+      <*> (p .:? "headRepository" >>= maybe (pure Nothing) (.:? "nameWithOwner"))
+      <*> p .: "headRefOid"
+      <*> maybe (pure 0) (\r -> r .:? "requiredApprovingReviewCount" .!= 0) rule
+      <*> pure [w | Just w <- requested]
+      <*> (p .: "latestReviews" >>= (.: "nodes"))
+      <*> (p .: "reviews" >>= (.: "nodes"))
+      <*> (p .: "reviewThreads" >>= (.: "nodes"))
+
+type ReviewNode :: Type
+data ReviewNode = ReviewNode
+  { id :: Maybe Int64
+  , author :: Maybe Login
+  , state :: Text
+    -- ^ "APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED" or "PENDING".
+  , submittedAt :: Maybe UTCTime
+  , commit :: Maybe Text
+  }
+
+instance FromJSON ReviewNode where
+  parseJSON = withObject "Review" $ \o -> ReviewNode
+    <$> o .:? "databaseId"
+    <*> authorOf o
+    <*> o .: "state"
+    <*> o .:? "submittedAt"
+    <*> (o .:? "commit" >>= maybe (pure Nothing) (.:? "oid"))
+
+type ThreadNode :: Type
+data ThreadNode = ThreadNode
+  { path :: Text
+  , line :: Maybe Int
+  , originalLine :: Maybe Int
+  , resolvedBy :: Maybe Login
+  , notes :: [NoteNode]
+  }
+
+instance FromJSON ThreadNode where
+  parseJSON = withObject "Thread" $ \o -> ThreadNode
+    <$> o .: "path"
+    <*> o .:? "line"
+    <*> o .:? "originalLine"
+    <*> (o .:? "resolvedBy" >>= maybe (pure Nothing) (.:? "login"))
+    <*> (o .: "comments" >>= (.: "nodes"))
+
+type NoteNode :: Type
+data NoteNode = NoteNode
+  { id :: Int64
+  , author :: Maybe Login
+  , body :: Text
+  , createdAt :: UTCTime
+  , hunk :: Text
+  , url :: Text
+  , commit :: Maybe Text
+  }
+
+instance FromJSON NoteNode where
+  parseJSON = withObject "Comment" $ \o -> NoteNode
+    <$> o .: "databaseId"
+    <*> authorOf o
+    <*> o .: "body"
+    <*> o .: "createdAt"
+    <*> o .:? "diffHunk" .!= ""
+    <*> o .: "url"
+    <*> (o .:? "commit" >>= maybe (pure Nothing) (.:? "oid"))
+
+-- | A pull request's review and merge state, by @$owner@, @$name@ and
+-- @$number@.
+pullStateQuery :: Text
+pullStateQuery =
+  "query($owner: String!, $name: String!, $number: Int!) { viewer { login } repository(owner: $owner, name: $name) {"
+    <> " found: pullRequest(number: $number) { id isDraft mergeable autoMergeRequest { enabledAt } headRefName baseRefName"
+    <> " headRepository { nameWithOwner } headRefOid baseRef { branchProtectionRule { requiredApprovingReviewCount } }"
+    <> " reviewRequests(first: 50) { nodes { requestedReviewer { ... on User { login } ... on Team { slug } } } }"
+    <> " latestReviews(first: 50) { nodes { databaseId author { login } state submittedAt commit { oid } } }"
+    <> " reviews(last: 100) { nodes { databaseId author { login } state submittedAt commit { oid } } }"
+    <> " reviewThreads(first: 100) { nodes { path line originalLine resolvedBy { login }"
+    <> " comments(first: 100) { nodes { databaseId author { login } body createdAt diffHunk url commit { oid } } } } } } } }"
+
+-- | One of the mutations on a pull request by its @$id@: "markPullRequestReadyForReview",
+-- "disablePullRequestAutoMerge", or with @extra@ input fields
+-- "enablePullRequestAutoMerge" and "updatePullRequestBranch".
+pullMutation :: Text -> Text -> Text
+pullMutation name extra =
+  "mutation($id: ID!) { " <> name <> "(input: {pullRequestId: $id" <> extra <> "}) { clientMutationId } }"

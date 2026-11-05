@@ -19,13 +19,15 @@ module Usta.Forge.GitHub
   ) where
 
 import Control.Exception (throwIO, try)
-import Control.Monad (unless)
+import Control.Applicative ((<|>))
+import Control.Monad (unless, when)
+import Data.Char (isDigit)
+import Data.Int (Int64)
 import Data.Traversable (for)
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Aeson (ToJSON (..), Value (Null, String), object, (.=))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
-import Data.Kind (Constraint, Type)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -38,7 +40,7 @@ import Servant.API (getResponse, lookupResponseHeader, ResponseHeader (..))
 import Servant.Client (BaseUrl (..), ClientM, Scheme (Https))
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
 import qualified Usta.Forge.GitHub.Api as Api
 import Usta.Forge.Http (Client, connect, run, runChanged)
 import Usta.Types.Host (Host)
@@ -49,6 +51,10 @@ import qualified Usta.Types.Check as C
 import qualified Usta.Types.Commit as Cm
 import Usta.Types.Diff (FileDiff, parseDiff)
 import qualified Usta.Types.Discussion as D
+import Usta.Types.Discussion (Merge (..), Verdict (..))
+import qualified Usta.Types.Readiness as Rd
+import Usta.Types.Readiness (UpdateStyle (..))
+import qualified Usta.Types.Thread as Th
 import qualified Usta.Types.Release as Rel
 import qualified Usta.Types.Search as S
 import qualified Usta.Types.Tree as Tr
@@ -100,6 +106,10 @@ github manager host token = do
             if length got < 100 || n >= 20 then pure got else (got <>) <$> go (n + 1)
       commitsOn repo branch path n count = traverse commitOf =<< run rest (Api.api.commits (owner repo) (shortName repo)
         Api.CommitsQuery {sha = branch, path = path, page = Just n, perPage = Named (Just count)})
+      stateOfPull repo n = asked graph (Api.graph.pullState Api.GraphQuery {query = Api.pullStateQuery, variables = itemVariables repo n Nothing})
+      pullMutate repo n name extra = do
+        st <- stateOfPull repo n
+        () <$ asked graph (Api.graph.mutate Api.GraphQuery {query = Api.pullMutation name extra, variables = object ["id" .= st.nodeId]})
   -- Who the token signs in as, asked once.
   me <- newIORef Nothing
   let myLogin = readIORef me >>= \case
@@ -122,21 +132,45 @@ github manager host token = do
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}
     , pullDiff = \repo n -> run rest (Api.api.pullDiff (owner repo) (shortName repo) n) >>= diffOf
     , pullCommits = \repo n -> traverse commitOf =<< pages (Api.api.pullCommits (owner repo) (shortName repo) n)
-    , threads = soon
+    , threads = \repo n -> do
+        st <- stateOfPull repo n
+        let mine = [t | r <- st.reviews, r.author == Just st.viewer, r.state /= "PENDING", Just t <- [r.submittedAt]]
+        notes <- traverse threadOf st.threads
+        pure Th.Threads {threads = [t | Just t <- notes], lastReviewed = if null mine then Nothing else Just (maximum mine)}
     , checks = \repo n -> (\(Api.Checks cs) -> map checkOf cs) <$> asked graph (Api.graph.checks Api.GraphQuery {query = Api.checksQuery, variables = itemVariables repo n Nothing})
     , checkLog = \repo job -> decodeUtf8Lenient <$> run rest (Api.api.jobLog (owner repo) (shortName repo) (fromIntegral job.run))
-    , reviewers = soon
+    , reviewers = \repo n -> do
+        st <- stateOfPull repo n
+        let reviewed = [ Rv.Reviewer {who = Rv.Person l, stance = s', stale = r.commit /= Just st.headSha && s' == Rv.Approved}
+                       | r <- st.latest, Just l <- [r.author], Just s' <- [stanceOf r.state] ]
+            waiting = [Rv.Reviewer {who = either Rv.Team Rv.Person w, stance = Rv.Waiting, stale = False} | w <- st.requested]
+        pure (waiting <> [r | r <- reviewed, r.who `notElem` map (.who) waiting])
     , requestReview = \repo n whos ->
         () <$ run rest (Api.api.requestReviewers (owner repo) (shortName repo) n (reviewersBody whos))
     , unrequestReview = \repo n who ->
         () <$ run rest (Api.api.unrequestReviewers (owner repo) (shortName repo) n (reviewersBody [who]))
-    , readiness = soon
-    , markReady = soon
-    , updateBranch = soon
-    , scheduleMerge = soon
-    , cancelScheduledMerge = soon
-    , reviewCandidates = soon
-    , reply = soon
+    , readiness = \repo n -> do
+        st <- stateOfPull repo n
+        behind <- (.behindBy) <$> run rest (Api.api.compare (owner repo) (shortName repo) (Api.BaseHead st.baseBranch (headRef repo st)))
+        pure Rd.Readiness
+          { draft = st.draft, behind = behind, conflicts = st.mergeable == "CONFLICTING"
+          , requiredApprovals = st.requiredApprovals, scheduled = st.autoMerge }
+    , markReady = \repo n -> pullMutate repo n "markPullRequestReadyForReview" ""
+    , updateBranch = \repo n style -> case style of
+        ByMerge -> () <$ run rest (Api.api.updateBranch (owner repo) (shortName repo) n (object []))
+        ByRebase -> pullMutate repo n "updatePullRequestBranch" ", updateMethod: REBASE"
+    , scheduleMerge = \repo n how _ -> pullMutate repo n "enablePullRequestAutoMerge" (", mergeMethod: " <> mergeName how)
+    , cancelScheduledMerge = \repo n -> pullMutate repo n "disablePullRequestAutoMerge" ""
+    , reviewCandidates = \repo _ -> do
+        let (o, r) = (owner repo, shortName repo)
+        people <- pages (Api.api.assignees o r)
+        -- Only a repository in an organization has teams.
+        teams <- either (\(_ :: Failure) -> []) id <$> try (run rest (Api.api.teams o r))
+        pure $ [Rv.Candidate {who = Rv.Person p.login, about = "", changed = [], lastChanged = Nothing, members = Nothing} | p <- people]
+          <> [Rv.Candidate {who = Rv.Team t.slug, about = t.name, changed = [], lastChanged = Nothing, members = Nothing} | t <- teams]
+    , reply = \repo n t text -> case commentIdIn t.url of
+        Just i -> () <$ run rest (Api.api.replyToComment (owner repo) (shortName repo) n i (Api.Body text))
+        Nothing -> throwIO (Refused "usta could not tell which comment this thread starts with.")
     , recentCommits = \repo branch -> commitsOn repo (Just branch) Nothing 1 10
     , readme = \repo branch -> do
         found <- try (run rest (Api.api.readme (owner repo) (shortName repo) (Just branch)))
@@ -203,9 +237,23 @@ github manager host token = do
             mapM_ (\x -> run rest (Api.api.unreactToIssue o r n x.id)) [x | x <- given, x.user == Just login]
     , setClosed = \repo n closed ->
         () <$ run rest (Api.api.editIssue (owner repo) (shortName repo) n (object ["state" .= (if closed then "closed" else "open" :: Text)]))
-    , merge = soon
-    , review = soon
-    , discardPending = soon
+    , merge = \repo n how delete -> do
+        let (o, r) = (owner repo, shortName repo)
+        st <- stateOfPull repo n
+        () <$ run rest (Api.api.merge o r n (object ["merge_method" .= T.toLower (mergeName how)]))
+        -- A branch in a fork is the fork owner's to delete.
+        when (delete && st.headRepo == Just repo) $
+          () <$ run rest (Api.api.deleteBranch o r (T.splitOn "/" st.headBranch))
+    , review = \repo n verdict text notes ->
+        () <$ run rest (Api.api.review (owner repo) (shortName repo) n (object
+          [ "event" .= (case verdict of Approve -> "APPROVE"; RequestChanges -> "REQUEST_CHANGES"; CommentOnly -> "COMMENT" :: Text)
+          , "body" .= text
+          , "comments" .= [object ["path" .= x.path, "line" .= x.line, "side" .= ("RIGHT" :: Text), "body" .= x.body] | x <- notes] ]))
+    , discardPending = \repo n -> do
+        st <- stateOfPull repo n
+        let pending = [i | r <- st.reviews, r.state == "PENDING", r.author == Just st.viewer, Just i <- [r.id]]
+        mapM_ (\i -> run rest (Api.api.deleteReview (owner repo) (shortName repo) n i)) pending
+        pure (length pending)
     , createIssue = \repo new -> do
         created <- run rest (Api.api.createIssue (owner repo) (shortName repo) (object
           ["title" .= new.title, "body" .= new.body, "labels" .= new.labels, "assignees" .= map unparse new.assignees]))
@@ -269,21 +317,6 @@ github manager host token = do
         pure [Tr.Entry {path = e.path, kind = if e.folder then Tr.Folder else Tr.File, size = e.size} | e <- t.entries]
     , file = \repo ref path -> run rest (Api.api.file (owner repo) (shortName repo) (T.splitOn "/" path) (Just ref))
     }
-
--- | What the GitHub client does not do yet; each of its parts replaces
--- one of these.
-soon :: Soon a => a
-soon = later
-
-type Soon :: Type -> Constraint
-class Soon a where
-  later :: a
-
-instance Soon (IO a) where
-  later = throwIO (Refused "This is not on GitHub in usta yet.")
-
-instance Soon b => Soon (a -> b) where
-  later = const later
 
 -- | Who @token@ signs in as.
 whoAmI :: HTTP.Manager -> Host -> Token -> IO Login
@@ -633,3 +666,39 @@ reviewersBody :: [Rv.Who] -> Value
 reviewersBody whos = object
   [ "reviewers" .= [unparse l | Rv.Person l <- whos]
   , "team_reviewers" .= [t | Rv.Team t <- whos] ]
+
+-- | The branch to compare with: in a fork, as "owner:branch".
+headRef :: RepoName -> Api.PullState -> Text
+headRef repo st = case st.headRepo of
+  Just other | other /= repo -> owner other <> ":" <> st.headBranch
+  _ -> st.headBranch
+
+mergeName :: Merge -> Text
+mergeName how = case how of
+  Squash -> "SQUASH"
+  MergeCommit -> "MERGE"
+  Rebase -> "REBASE"
+
+stanceOf :: Text -> Maybe Rv.Stance
+stanceOf state = lookup state [("APPROVED", Rv.Approved), ("CHANGES_REQUESTED", Rv.ChangesRequested), ("COMMENTED", Rv.Commented)]
+
+-- | A thread with its notes; one GitHub cannot place on a line is left out.
+threadOf :: Api.ThreadNode -> IO (Maybe Th.Thread)
+threadOf t = case (t.notes, t.line <|> t.originalLine) of
+  (first : _, Just line) -> do
+    notes <- traverse (\c -> (\a -> Th.Note {author = a, body = c.body, createdAt = c.createdAt}) <$> maybe (parseM "ghost") pure c.author) t.notes
+    pure $ Just Th.Thread
+      { path = t.path
+      , line = line
+      -- The hunk ends at the commented line; a few lines show the code.
+      , code = reverse (take 4 (reverse (drop 1 (T.lines first.hunk))))
+      , commit = maybe "" (T.take 7) first.commit
+      , resolvedBy = t.resolvedBy
+      , notes = notes
+      , url = first.url
+      }
+  _ -> pure Nothing
+
+-- | The comment a thread's link points at: "…#discussion_r12345".
+commentIdIn :: Text -> Maybe Int64
+commentIdIn url = readMaybe (T.unpack (T.takeWhile isDigit (snd (T.breakOnEnd "discussion_r" url))))

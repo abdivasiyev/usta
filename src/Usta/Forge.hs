@@ -23,6 +23,7 @@ import Usta.Types.Check (Check, Job, Run, State)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
+import Usta.Types.Workflow (Workflow)
 import Usta.Types.Discussion (Comment, Discussion, Feeling, Merge, NewIssue, NewPull, Verdict, Watching)
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
@@ -125,6 +126,15 @@ data Forge = Forge
     -- repository has with these words.
   , runs :: RepoName -> IO [Run]
     -- ^ A repository's latest CI runs, newest first.
+  , startable :: RepoName -> Text -> IO [Workflow]
+    -- ^ The workflows on a branch that can be started by hand, with their
+    -- inputs.
+  , dispatch :: RepoName -> Workflow -> Text -> [(Text, Text)] -> IO ()
+    -- ^ Starts one on a branch, with its inputs' values.
+  , rerun :: RepoName -> Int64 -> Bool -> IO ()
+    -- ^ A run again, all of it or ('True') only its failed jobs.
+  , cancelRun :: RepoName -> Int64 -> IO ()
+  , rerunJob :: RepoName -> Job -> IO ()
   , workflows :: RepoName -> IO [Text]
     -- ^ The workflows the repository has now, by the names its runs give
     -- them: not those whose file was deleted, whose runs stay.

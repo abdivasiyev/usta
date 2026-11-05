@@ -6,6 +6,7 @@ module Usta.Types.Check
   , Run (..)
   ) where
 
+import Data.Int (Int64)
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
@@ -38,7 +39,9 @@ data Check = Check
 -- jobs as checks.
 type Run :: Type
 data Run = Run
-  { number :: Int
+  { id :: Int64
+    -- ^ The forge's own id of the run, to re-run or cancel it.
+  , number :: Int
     -- ^ As the forge's pages number it.
   , workflow :: Text
     -- ^ Its file, e.g. "ci.yml".

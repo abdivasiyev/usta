@@ -42,7 +42,7 @@ import Text.Read (readMaybe)
 
 import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
 import qualified Usta.Forge.GitHub.Api as Api
-import Usta.Forge.Http (Client, connect, run, runChanged)
+import Usta.Forge.Http (Client, connect, run, runChanged, runDone)
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
@@ -237,8 +237,8 @@ github manager host token = do
             body = Api.ReactionBody feeling
         login <- myLogin
         case (which, adding) of
-          (Just i, True) -> () <$ run rest (Api.api.reactToComment o r i body)
-          (Nothing, True) -> () <$ run rest (Api.api.reactToIssue o r n body)
+          (Just i, True) -> runDone rest (Api.api.reactToComment o r i body)
+          (Nothing, True) -> runDone rest (Api.api.reactToIssue o r n body)
           (Just i, False) -> do
             given <- run rest (Api.api.commentReactions o r i (Just (Api.feelingName feeling)) (Just 100))
             mapM_ (\x -> run rest (Api.api.unreactToComment o r i x.id)) [x | x <- given, x.user == Just login]

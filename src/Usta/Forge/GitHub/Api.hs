@@ -126,7 +126,7 @@ data Routes mode = Routes
   , repository :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> Get '[JSON] RepoInfo
   , postComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "number" Number
-           :> "comments" :> ReqBody '[JSON] Body :> Post '[JSON] RestComment
+           :> "comments" :> ReqBody '[JSON] Body :> PostCreated '[JSON] RestComment
   , editComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
            :> ReqBody '[JSON] Body :> Patch '[JSON] RestComment
@@ -143,7 +143,9 @@ data Routes mode = Routes
            :> "reactions" :> QueryParam "content" Text :> QueryParam "per_page" Int :> Get '[JSON] [RestReaction]
   , reactToIssue
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "number" Number
-           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Post '[JSON] Ignored
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> PostCreated '[JSON] Ignored
+    -- ^ 201 for a new reaction, 200 when it was there: run it with
+    -- 'Usta.Forge.Http.runDone'.
   , unreactToIssue
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "number" Number
            :> "reactions" :> Capture "reaction" Int64 :> DeleteNoContent
@@ -152,7 +154,9 @@ data Routes mode = Routes
            :> "reactions" :> QueryParam "content" Text :> QueryParam "per_page" Int :> Get '[JSON] [RestReaction]
   , reactToComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
-           :> "reactions" :> ReqBody '[JSON] ReactionBody :> Post '[JSON] Ignored
+           :> "reactions" :> ReqBody '[JSON] ReactionBody :> PostCreated '[JSON] Ignored
+    -- ^ 201 for a new reaction, 200 when it was there: run it with
+    -- 'Usta.Forge.Http.runDone'.
   , unreactToComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> "comments" :> Capture "id" Int64
            :> "reactions" :> Capture "reaction" Int64 :> DeleteNoContent
@@ -164,7 +168,7 @@ data Routes mode = Routes
            :> "labels" :> ReqBody '[JSON] LabelNames :> Put '[JSON] Ignored
   , createLabel
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "labels" :> ReqBody '[JSON] RestLabel
-           :> Post '[JSON] Ignored
+           :> PostCreated '[JSON] Ignored
   , assignees
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "assignees" :> RecordQueryParam ListQuery
            :> Get '[JSON] [User]
@@ -173,13 +177,13 @@ data Routes mode = Routes
            :> RecordQueryParam ListQuery :> Get '[JSON] [RestMilestone]
   , createIssue
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> ReqBody '[JSON] Value
-           :> Post '[JSON] Created
+           :> PostCreated '[JSON] Created
   , createPull
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> ReqBody '[JSON] Value
-           :> Post '[JSON] Created
+           :> PostCreated '[JSON] Created
   , requestReviewers
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
-           :> "requested_reviewers" :> ReqBody '[JSON] Value :> Post '[JSON] Ignored
+           :> "requested_reviewers" :> ReqBody '[JSON] Value :> PostCreated '[JSON] Ignored
   , unrequestReviewers
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
            :> "requested_reviewers" :> ReqBody '[JSON] Value :> Delete '[JSON] Ignored
@@ -231,7 +235,7 @@ data Routes mode = Routes
            :> "reviews" :> Capture "review" Int64 :> Delete '[JSON] Ignored
   , replyToComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
-           :> "comments" :> Capture "comment" Int64 :> "replies" :> ReqBody '[JSON] Body :> Post '[JSON] Ignored
+           :> "comments" :> Capture "comment" Int64 :> "replies" :> ReqBody '[JSON] Body :> PostCreated '[JSON] Ignored
   , merge
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
            :> "merge" :> ReqBody '[JSON] Value :> Put '[JSON] Ignored

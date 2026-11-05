@@ -8,6 +8,7 @@ module Usta.Forge.Http
   , apiUrl
   , run
   , runChanged
+  , runDone
   ) where
 
 import Control.Exception (throwIO)
@@ -76,6 +77,16 @@ runChanged :: Client -> ClientM a -> IO (Maybe a)
 runChanged (Client env) call = runClientM call env >>= \case
   Right a -> pure (Just a)
   Left (FailureResponse _ response) | statusCode response.responseStatusCode == 304 -> pure Nothing
+  Left e -> throwIO (failure e)
+
+-- | A call whose answer usta does not read: any 2xx is done, though the
+-- route names one status (GitHub answers a reaction that was already
+-- there with 200, a new one with 201).
+runDone :: Client -> ClientM a -> IO ()
+runDone (Client env) call = runClientM call env >>= \case
+  Right _ -> pure ()
+  Left (FailureResponse _ response) | code < 300, code >= 200 -> pure ()
+    where code = statusCode response.responseStatusCode
   Left e -> throwIO (failure e)
 
 -- | Bodies are left out on purpose: they can echo what was sent.

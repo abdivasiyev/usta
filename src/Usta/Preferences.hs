@@ -71,6 +71,9 @@ data Preferences = Preferences
     -- usta; off, they open in the browser.
   , checkUpdates :: Bool
     -- ^ Once a day, whether a newer usta is out.
+  , browser :: Maybe Text
+    -- ^ The app other links open in, by its bundle id on macOS; 'Nothing'
+    -- for the system's default.
   }
   deriving stock (Eq, Show)
 
@@ -82,6 +85,7 @@ defaults = Preferences
   , onlyInBackground = False
   , openLinks = True
   , checkUpdates = True
+  , browser = Nothing
   }
 
 -- | Each choice is stored by a name, so reordering constructors changes
@@ -102,6 +106,7 @@ instance ToJSON Preferences where
     , "onlyInBackground" .= p.onlyInBackground
     , "openLinks" .= p.openLinks
     , "checkUpdates" .= p.checkUpdates
+    , "browser" .= p.browser
     ]
 
 instance FromJSON Preferences where
@@ -112,7 +117,8 @@ instance FromJSON Preferences where
     onlyInBackground <- o .:? "onlyInBackground" .!= defaults.onlyInBackground
     openLinks <- o .:? "openLinks" .!= defaults.openLinks
     checkUpdates <- o .:? "checkUpdates" .!= defaults.checkUpdates
-    pure Preferences {interval = interval, theme = theme, notify = notify, onlyInBackground = onlyInBackground, openLinks = openLinks, checkUpdates = checkUpdates}
+    browser <- o .:? "browser"
+    pure Preferences {interval = interval, theme = theme, notify = notify, onlyInBackground = onlyInBackground, openLinks = openLinks, checkUpdates = checkUpdates, browser = browser}
 
 -- | @preferences.json@ in the folder that has the database.
 file :: IO FilePath
@@ -145,6 +151,7 @@ data Managed = Managed
   , onlyInBackground :: Maybe Bool
   , openLinks :: Maybe Bool
   , checkUpdates :: Maybe Bool
+  , browser :: Maybe Text
   }
 
 instance FromJSON Managed where
@@ -155,7 +162,8 @@ instance FromJSON Managed where
     onlyInBackground <- o .:? "onlyInBackground"
     openLinks <- o .:? "openLinks"
     checkUpdates <- o .:? "checkUpdates"
-    pure Managed {interval, theme, notify, onlyInBackground, openLinks, checkUpdates}
+    browser <- o .:? "browser"
+    pure Managed {interval, theme, notify, onlyInBackground, openLinks, checkUpdates, browser}
     where
       -- A name usta does not know is an error here: the user wrote it in
       -- their configuration and should hear it is wrong.
@@ -171,10 +179,11 @@ instance Semigroup Managed where
     , onlyInBackground = a.onlyInBackground <|> b.onlyInBackground
     , openLinks = a.openLinks <|> b.openLinks
     , checkUpdates = a.checkUpdates <|> b.checkUpdates
+    , browser = a.browser <|> b.browser
     }
 
 instance Monoid Managed where
-  mempty = Managed Nothing Nothing Nothing Nothing Nothing Nothing
+  mempty = Managed Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 -- | The user's file, which Home Manager writes.
 managedFile :: IO FilePath
@@ -201,7 +210,7 @@ fixedKeys :: Managed -> [Text]
 fixedKeys m =
   [k | (k, True) <- [ ("interval", has m.interval), ("theme", has m.theme), ("notify", has m.notify)
                     , ("onlyInBackground", has m.onlyInBackground), ("openLinks", has m.openLinks)
-                    , ("checkUpdates", has m.checkUpdates) ]]
+                    , ("checkUpdates", has m.checkUpdates), ("browser", has m.browser) ]]
   where
     has :: Maybe a -> Bool
     has = maybe False (const True)
@@ -215,6 +224,7 @@ over m p = Preferences
   , onlyInBackground = fromMaybe p.onlyInBackground m.onlyInBackground
   , openLinks = fromMaybe p.openLinks m.openLinks
   , checkUpdates = fromMaybe p.checkUpdates m.checkUpdates
+  , browser = m.browser <|> p.browser
   }
 
 -- | What usta goes by: @preferences.json@ under @config.json@.
@@ -234,4 +244,5 @@ keeping m before new = Preferences
   , onlyInBackground = maybe new.onlyInBackground (const before.onlyInBackground) m.onlyInBackground
   , openLinks = maybe new.openLinks (const before.openLinks) m.openLinks
   , checkUpdates = maybe new.checkUpdates (const before.checkUpdates) m.checkUpdates
+  , browser = maybe new.browser (const before.browser) m.browser
   }

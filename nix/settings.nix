@@ -47,6 +47,12 @@ in {
         onlyInBackground = flag "Notify only while usta is not the active window.";
         openLinks = flag "Open forge links in usta rather than the browser.";
         checkUpdates = flag "Check once a day whether a newer usta is out.";
+        browser = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          example = "app.zen-browser.zen";
+          description = "On macOS, the bundle id of the browser links usta does not open go to; the system's default when null.";
+        };
       };
     };
   };
@@ -63,6 +69,6 @@ in {
         then null
         else themes.${s.theme};
       notify = s.notifications;
-      inherit (s) onlyInBackground openLinks checkUpdates;
+      inherit (s) onlyInBackground openLinks checkUpdates browser;
     };
 }

@@ -243,6 +243,43 @@
       '';
     });
 
+    # Smoke tests of what is shipped: `nix flake check`. The package's
+    # own build runs the test suite.
+    checks = forAllSystems (pkgs: let
+      usta = ustaFor pkgs;
+      inherit (pkgs.stdenv.hostPlatform) isDarwin isLinux;
+    in
+      {
+        # The installed program starts, and is the version it says.
+        runs = pkgs.runCommand "usta-runs" {} ''
+          ${usta}/bin/usta --version | grep -qx "usta ${usta.version}"
+          touch $out
+        '';
+      }
+      // pkgs.lib.optionalAttrs isLinux {
+        # The desktop entry and the AppStream data are valid.
+        desktop = pkgs.runCommand "usta-desktop" {nativeBuildInputs = [pkgs.desktop-file-utils pkgs.appstream];} ''
+          desktop-file-validate ${usta}/share/applications/io.github.abdivasiyev.Usta.desktop
+          appstreamcli validate --no-net ${usta}/share/metainfo/io.github.abdivasiyev.Usta.metainfo.xml
+          test -f ${usta}/share/icons/hicolor/scalable/apps/io.github.abdivasiyev.Usta.svg
+          touch $out
+        '';
+      }
+      // pkgs.lib.optionalAttrs isDarwin {
+        # usta.app has its icon, its version, and a program that starts.
+        app = let
+          app = ustaAppFor pkgs;
+        in
+          pkgs.runCommand "usta-app" {nativeBuildInputs = [pkgs.python3];} ''
+            contents=${app}/Applications/usta.app/Contents
+            test -s $contents/Resources/usta.icns
+            python3 -c "import plistlib, sys; p = plistlib.load(open(sys.argv[1], 'rb')); assert p['CFBundleShortVersionString'] == sys.argv[2], p; assert p['CFBundleExecutable'] == 'usta', p" \
+              $contents/Info.plist ${usta.version}
+            $contents/MacOS/usta --version | grep -qx "usta ${usta.version}"
+            touch $out
+          '';
+      });
+
     apps = forAllSystems (pkgs: {
       default = {
         type = "app";

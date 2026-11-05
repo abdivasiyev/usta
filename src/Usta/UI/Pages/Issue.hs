@@ -102,12 +102,13 @@ commentWidget t reply opener c = case c.forge of
     , mine = unparse x.author == t.me
     , badge = if unparse x.author == opener && x.id /= Nothing then Just "Author" else Nothing
     , upload = t.upload
-    , edit = t.editComment x.id
-    , delete = t.deleteComment <$> x.id
+    -- A review's text is edited on the forge's page.
+    , edit = if x.review == Nothing then t.editComment x.id else const (pure (Left "Edit a review on the pull request's page on the forge."))
+    , delete = if x.review == Nothing then t.deleteComment <$> x.id else Nothing
     , quote = \q -> do
         end <- Gtk.textBufferGetEndIter reply
         Gtk.textBufferInsert reply end (q <> "\n") (-1)
-    , react = t.react x.id
+    , react = if x.review == Nothing then t.react x.id else \_ _ -> pure (Left "React to a review on the pull request's page on the forge.")
     , changed = t.refresh
     } >>= Gtk.toWidget
 
@@ -276,7 +277,7 @@ data Actions = Actions
 fromDiscussion :: Clock -> D.Discussion -> Model -> Model
 fromDiscussion c d m = m
   { closed = d.closed
-  , comments = said "opened " d.opening : map (said "commented ") d.comments
+  , comments = said "opened " d.opening : [said (verbOf x.review) x | x <- d.comments]
   , events = []
   , assignees = [(initials (unparse login), unparse login) | login <- d.assignees]
   , labels = [(labelTone l.color, l.name) | l <- d.labels]
@@ -293,6 +294,11 @@ fromDiscussion c d m = m
       , forge = Just (T.strip verb, x)
       }
     initials = T.toUpper . T.take 2
+    verbOf r = case r of
+      Just D.Approve -> "approved "
+      Just D.RequestChanges -> "requested changes "
+      Just D.CommentOnly -> "reviewed "
+      Nothing -> "commented "
 
 -- | The header over @content@, which is the 'thread' once it is loaded.
 -- @content@ gets what sets the header's Open or Closed badge, for when the

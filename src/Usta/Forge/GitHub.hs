@@ -28,6 +28,7 @@ import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Aeson (ToJSON (..), Value (Null, String), object, (.=))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
+import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -509,7 +510,10 @@ discussionOf graph repo n = do
         maybe (pure d.comments.nodes) (fmap (d.comments.nodes <>) . more) d.comments.next
   rest' <- maybe (pure []) more first.comments.next
   opening <- commentOf first.opening
-  comments <- traverse commentOf (first.comments.nodes <> rest')
+  said <- traverse commentOf (first.comments.nodes <> rest')
+  -- A pull request's reviews with text of their own read as comments.
+  reviewed <- traverse (\r -> (\c -> c {D.review = verdictOf r.state}) <$> commentOf r.comment) [r | r <- first.reviews, not (T.null (T.strip r.comment.body))]
+  let comments = sortOn (.createdAt) (said <> reviewed)
   pure D.Discussion
     { opening = opening
     , comments = comments
@@ -531,12 +535,13 @@ commentOf c = do
     , edited = c.edited
     , url = c.url
     , reactions = [D.Reaction {feeling = f, count = g.count, mine = g.mine} | g <- c.reactions, g.count > 0, Just f <- [Api.feelingOf g.content]]
+    , review = Nothing
     }
 
 restComment :: Api.RestComment -> IO D.Comment
 restComment c = do
   author <- maybe (parseM "ghost") pure c.author
-  pure D.Comment {author = author, body = c.body, createdAt = c.createdAt, id = Just c.id, edited = c.updatedAt > c.createdAt, url = c.url, reactions = []}
+  pure D.Comment {author = author, body = c.body, createdAt = c.createdAt, id = Just c.id, edited = c.updatedAt > c.createdAt, url = c.url, reactions = [], review = Nothing}
 
 milestoneOf :: Api.RestMilestone -> M.Milestone
 milestoneOf m = M.Milestone {title = m.title, open = m.open, due = m.due, closedAt = m.closedAt, openItems = m.openItems, closedItems = m.closedItems}
@@ -564,6 +569,8 @@ eventsOf nodes = do
         "AutoMergeEnabledEvent" -> Just (Tl.MergeScheduled True)
         "AutoMergeDisabledEvent" -> Just (Tl.MergeScheduled False)
         "HeadRefDeletedEvent" -> Just Tl.BranchDeleted
+        -- One with text is a comment in the conversation.
+        "PullRequestReview" | maybe True (T.null . T.strip) e.reviewBody -> e.reviewState >>= verdictOf >>= \v -> if v == CommentOnly then Nothing else Just (Tl.Reviewed v)
         _ -> Nothing
         where
           labeled on = (\l -> Tl.Labeled on L.Label {name = l.name, color = l.color}) <$> e.label
@@ -730,3 +737,6 @@ threadOf t = case (t.notes, t.line <|> t.originalLine) of
 -- | The comment a thread's link points at: "…#discussion_r12345".
 commentIdIn :: Text -> Maybe Int64
 commentIdIn url = readMaybe (T.unpack (T.takeWhile isDigit (snd (T.breakOnEnd "discussion_r" url))))
+
+verdictOf :: Text -> Maybe Verdict
+verdictOf state = lookup state [("APPROVED", Approve), ("CHANGES_REQUESTED", RequestChanges), ("COMMENTED", CommentOnly)]

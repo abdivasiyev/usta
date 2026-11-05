@@ -36,6 +36,7 @@ module Usta.Forge.GitHub.Api
   , Ignored (..)
   , DiscussionNode (..)
   , CommentNode (..)
+  , ReviewText (..)
   , ReactionGroup (..)
   , Item (..)
   , TimelineNode (..)
@@ -674,7 +675,16 @@ data DiscussionNode = DiscussionNode
   , labels :: [LabelNode]
   , milestone :: Maybe Text
   , comments :: Page CommentNode
+  , reviews :: [ReviewText]
+    -- ^ A pull request's reviews; an issue has none.
   }
+
+-- | A review as a comment, with its state ("APPROVED" …).
+type ReviewText :: Type
+data ReviewText = ReviewText {comment :: CommentNode, state :: Text}
+
+instance FromJSON ReviewText where
+  parseJSON v = withObject "Review" (\o -> ReviewText <$> parseJSON v <*> o .: "state") v
 
 instance FromJSON DiscussionNode where
   parseJSON = withObject "Data" $ \d -> do
@@ -688,7 +698,8 @@ instance FromJSON DiscussionNode where
       <*> (o .: "assignees" >>= (.: "nodes") >>= traverse (.: "login"))
       <*> (o .: "labels" >>= (.: "nodes"))
       <*> (o .:? "milestone" >>= traverse (.: "title"))
-      <*> (o .: "comments" >>= connection)) item
+      <*> (o .: "comments" >>= connection)
+      <*> (o .:? "reviews" >>= maybe (pure []) (.: "nodes"))) item
 
 -- | A comment, or the description (which has no database id here).
 type CommentNode :: Type
@@ -707,7 +718,7 @@ instance FromJSON CommentNode where
     <$> o .:? "databaseId"
     <*> authorOf o
     <*> o .: "body"
-    <*> o .: "createdAt"
+    <*> (o .:? "createdAt" >>= maybe (o .: "submittedAt") pure)
     <*> ((/= (Nothing :: Maybe Value)) <$> o .:? "lastEditedAt")
     <*> o .: "url"
     <*> o .: "reactionGroups"
@@ -746,6 +757,8 @@ data TimelineNode = TimelineNode
   , source :: Maybe (Number, Text)
   , commitAuthor :: Maybe Login
   , committedAt :: Maybe UTCTime
+  , reviewState :: Maybe Text
+  , reviewBody :: Maybe Text
   }
 
 instance FromJSON TimelineNode where
@@ -756,8 +769,8 @@ instance FromJSON TimelineNode where
     commit <- o .:? "commit"
     TimelineNode
       <$> o .: "__typename"
-      <*> authorOfKey "actor" o
-      <*> o .:? "createdAt"
+      <*> ((<|>) <$> authorOfKey "actor" o <*> authorOfKey "author" o)
+      <*> ((<|>) <$> o .:? "createdAt" <*> o .:? "submittedAt")
       <*> o .:? "label"
       <*> (o .:? "assignee" >>= maybe (pure Nothing) (.:? "login"))
       <*> (o .:? "requestedReviewer" >>= maybe (pure Nothing) (.:? "login"))
@@ -767,6 +780,8 @@ instance FromJSON TimelineNode where
       <*> pure source
       <*> maybe (pure Nothing) (\c -> c .:? "author" >>= maybe (pure Nothing) (\a -> a .:? "user" >>= maybe (pure Nothing) (.:? "login"))) commit
       <*> maybe (pure Nothing) (.:? "committedDate") commit
+      <*> o .:? "state"
+      <*> o .:? "body"
 
 authorOfKey :: Text -> Object -> Parser (Maybe Login)
 authorOfKey key o = o .:? Data.Aeson.Key.fromText key >>= maybe (pure Nothing) (.:? "login")
@@ -779,7 +794,8 @@ reactionFields = "reactionGroups { content viewerHasReacted reactors { totalCoun
 discussionQuery :: Text
 discussionQuery =
   "query($owner: String!, $name: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $name) {"
-    <> " found: issueOrPullRequest(number: $number) { ... on Issue { " <> common <> " } ... on PullRequest { " <> common <> " merged } } } }"
+    <> " found: issueOrPullRequest(number: $number) { ... on Issue { " <> common <> " } ... on PullRequest { " <> common <> " merged"
+    <> " reviews(first: 100) { nodes { author { login } body state createdAt lastEditedAt url " <> reactionFields <> " } } } } } }"
   where
     common =
       "id author { login } body createdAt lastEditedAt url " <> reactionFields
@@ -797,10 +813,11 @@ timelineQuery =
       "timelineItems(first: 250, itemTypes: [LABELED_EVENT, UNLABELED_EVENT, ASSIGNED_EVENT, UNASSIGNED_EVENT,"
         <> " MILESTONED_EVENT, DEMILESTONED_EVENT, RENAMED_TITLE_EVENT, CLOSED_EVENT, REOPENED_EVENT, CROSS_REFERENCED_EVENT"
         <> extra <> "]) { nodes { __typename " <> fields <> (if T.null extra then "" else pullFields') <> " } }"
-    pullKinds = ", MERGED_EVENT, REVIEW_REQUESTED_EVENT, REVIEW_REQUEST_REMOVED_EVENT, PULL_REQUEST_COMMIT, AUTO_MERGE_ENABLED_EVENT, AUTO_MERGE_DISABLED_EVENT, HEAD_REF_DELETED_EVENT"
+    pullKinds = ", PULL_REQUEST_REVIEW, MERGED_EVENT, REVIEW_REQUESTED_EVENT, REVIEW_REQUEST_REMOVED_EVENT, PULL_REQUEST_COMMIT, AUTO_MERGE_ENABLED_EVENT, AUTO_MERGE_DISABLED_EVENT, HEAD_REF_DELETED_EVENT"
     -- Only a pull request's timeline has these.
     pullFields' =
       " ... on MergedEvent { actor { login } createdAt }"
+        <> " ... on PullRequestReview { author { login } submittedAt state body }"
         <> " ... on ReviewRequestedEvent { actor { login } createdAt requestedReviewer { ... on User { login } } }"
         <> " ... on ReviewRequestRemovedEvent { actor { login } createdAt requestedReviewer { ... on User { login } } }"
         <> " ... on PullRequestCommit { commit { committedDate author { user { login } } } }"

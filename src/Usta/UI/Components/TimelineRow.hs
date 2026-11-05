@@ -18,6 +18,7 @@ import qualified Usta.UI.Components.Icon as Icon
 import Usta.UI.Format (Clock, ago)
 import Usta.Types.Label (Label (..))
 import Usta.Types.Parse (unparse)
+import Usta.Types.Discussion (Verdict (..))
 import Usta.Types.Timeline (Event (..), Happening (..))
 
 -- | The words of a row: plain text, a label chip, a struck-out old title,
@@ -49,6 +50,7 @@ iconOf h = case h of
   Pushed _ -> Icon.Commit
   MergeScheduled _ -> Icon.Clock
   BranchDeleted -> Icon.Trash
+  Reviewed _ -> Icon.Check
 
 pieces :: Happening -> [Piece]
 pieces h = case h of
@@ -70,6 +72,9 @@ pieces h = case h of
   MergeScheduled True -> [Words "set this to merge when the checks pass"]
   MergeScheduled False -> [Words "stopped the merge when the checks pass"]
   BranchDeleted -> [Words "deleted the branch"]
+  Reviewed Approve -> [Words "approved these changes"]
+  Reviewed RequestChanges -> [Words "requested changes"]
+  Reviewed CommentOnly -> [Words "reviewed"]
 
 piece :: Piece -> Text
 piece p = case p of

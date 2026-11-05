@@ -101,6 +101,7 @@ import qualified Usta.Types.Link as Link
 import qualified Usta.Waiting as Waiting
 import qualified Usta.Log as Log
 import qualified Usta.UI.Pages.ReportProblem as ReportProblem
+import qualified Usta.UI.Components.Pager as Pager
 import qualified Usta.UI.Components.UpdateBanner as UpdateBanner
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
 import qualified Usta.Updates as Updates
@@ -457,9 +458,9 @@ buildWith start crashed given app = do
             , title = counted "Pull requests" r.pullRequests
             , build = do
                 synced <- filter (\pr -> pr.host == r.host && pr.repo == r.name) <$> source.pullRequests
-                let load = do
+                let load listing from = do
                       c <- clock
-                      fmap (map (PullRequests.listed c r.forge)) <$> source.repoPullRequests r.host r.name
+                      fmap (fmap (PullRequests.listed c r.forge)) <$> source.repoPullRequests r.host r.name listing from
                 PullRequests.forRepository synced load (\pr -> openPullRequestWith pr.fetching "Repositories" (summaryOf pr))
                   >>= Gtk.toWidget
             }
@@ -468,9 +469,9 @@ buildWith start crashed given app = do
             , title = counted "Issues" r.issues
             , build = do
                 synced <- filter (\i -> i.host == r.host && i.repo == r.name) <$> source.issues
-                let load = do
+                let load listing from = do
                       c <- clock
-                      fmap (map (Issues.fromIssue c r.forge)) <$> source.repoIssues r.host r.name
+                      fmap (fmap (Issues.fromIssue c r.forge)) <$> source.repoIssues r.host r.name listing from
                 Issues.forRepository synced load (openIssue "Repositories" . issueDetail) >>= Gtk.toWidget
             }
         , Repositories.Tab
@@ -1200,7 +1201,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , UpdateBanner.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
+  , UpdateBanner.css, Pager.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, ReportProblem.css, Skeleton.css, Progress.css
   , windowCss
   ]

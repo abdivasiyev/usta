@@ -68,6 +68,7 @@ import Usta.Types.Timeline (Event)
 import Usta.Types.Reviewer (Candidate, Reviewer, Who)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
+import Usta.Types.Listing (Listing, Paged)
 import Usta.Types.Tree (Entry)
 import Usta.Types.Thread (Thread, Threads)
 import Usta.Types.Discussion (Discussion, Feeling, Merge, NewIssue, NewPull, Verdict, Watching)
@@ -194,10 +195,10 @@ data Source = Source
     -- ^ By host, repository, base branch and branch: the commits and
     -- paths a pull request between them would have.
   , compareDiff :: Text -> Text -> Text -> Text -> IO (Either Text [FileDiff])
-  , repoPullRequests :: Text -> Text -> IO (Either Text [P.PullRequest])
-    -- ^ A repository's latest pull requests in any state, from the forge,
-    -- whoever they involve.
-  , repoIssues :: Text -> Text -> IO (Either Text [I.Issue])
+  , repoPullRequests :: Text -> Text -> Listing -> Maybe Text -> IO (Either Text (Paged P.PullRequest))
+    -- ^ A page of a repository's pull requests from the forge, whoever
+    -- they involve: the first, or the one after the cursor.
+  , repoIssues :: Text -> Text -> Listing -> Maybe Text -> IO (Either Text (Paged I.Issue))
   , runs :: Text -> Text -> IO (Either Text [Run])
     -- ^ A repository's latest CI runs, from the forge.
   , branchList :: Text -> Text -> Text -> IO (Either Text (From, [Branch]))
@@ -357,8 +358,8 @@ fromDatabase pool changes statuses sync = Source
   , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
   , compareDiff = \_ _ _ _ -> pure (Left unavailable)
-  , repoPullRequests = \_ _ -> pure (Left unavailable)
-  , repoIssues = \_ _ -> pure (Left unavailable)
+  , repoPullRequests = \_ _ _ _ -> pure (Left unavailable)
+  , repoIssues = \_ _ _ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
   , discardPending = \_ _ _ -> pure (Left unavailable)
   , branchList = \_ _ _ -> pure (Left unavailable)
@@ -457,8 +458,8 @@ samples = Source
   , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
   , compareDiff = \_ _ _ _ -> pure (Left unavailable)
-  , repoPullRequests = \_ _ -> pure (Left unavailable)
-  , repoIssues = \_ _ -> pure (Left unavailable)
+  , repoPullRequests = \_ _ _ _ -> pure (Left unavailable)
+  , repoIssues = \_ _ _ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
   , discardPending = \_ _ _ -> pure (Left unavailable)
   , branchList = \_ _ _ -> pure (Left unavailable)
@@ -588,8 +589,8 @@ withAccounts pool accounts source = source
   , setMilestone = \host repo n t -> changing (onForge host repo n (\f name number -> f.setMilestone name number t))
   , compare = \host repo into from -> onRepo host repo (\f name -> f.compare name into from)
   , compareDiff = \host repo into from -> onRepo host repo (\f name -> f.compareDiff name into from)
-  , repoPullRequests = \host repo -> onRepo host repo (\f name -> f.repoPullRequests name)
-  , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
+  , repoPullRequests = \host repo listing from -> onRepo host repo (\f name -> f.repoPullRequests name listing from)
+  , repoIssues = \host repo listing from -> onRepo host repo (\f name -> f.repoIssues name listing from)
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
   , releases = \host repo -> onRepo host repo (\f name -> f.releases name)
   , searchForges = \words' -> do
@@ -748,8 +749,8 @@ tracking track s = s
   , setMilestone = \h r n t -> track (s.setMilestone h r n t)
   , compare = \h r a b -> track (s.compare h r a b)
   , compareDiff = \h r a b -> track (s.compareDiff h r a b)
-  , repoPullRequests = \h r -> track (s.repoPullRequests h r)
-  , repoIssues = \h r -> track (s.repoIssues h r)
+  , repoPullRequests = \h r l c -> track (s.repoPullRequests h r l c)
+  , repoIssues = \h r l c -> track (s.repoIssues h r l c)
   , runs = \h r -> track (s.runs h r)
   , discardPending = \h r n -> track (s.discardPending h r n)
   , branchList = \h r b -> track (s.branchList h r b)

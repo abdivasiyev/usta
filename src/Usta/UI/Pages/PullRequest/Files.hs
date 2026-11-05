@@ -263,7 +263,7 @@ new actions panels m = do
         }
 
   placedRef <- newIORef []
-  entries <- forM m.files $ \f -> do
+  entries' <- forM m.files $ \f -> do
     placed <- forM [(t, at) | t <- m.threads.threads, t.path == f.path, Just at <- [place f.diffLines t]] $ \(t, (index, outdated)) -> do
       drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, showCode = False, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock, reply = actions.reply t, upload = actions.upload, place = m.place}
       pure (index, (t, outdated, drawn))
@@ -287,23 +287,43 @@ new actions panels m = do
           pure False
       (,) 0 <$> Gtk.toWidget slot
     markBox <- viewedMark f.viewed
-    diff <- Diff.newWith opts f (attached <> maybe [] pure pictures) (commenting f.path) $ \isViewed -> do
-      setViewed markBox isViewed
-      updateProgress
-    #append main diff
+    -- The diff sits in a holder, so a change of options draws it again in
+    -- place, with its threads and pictures and whether it was viewed.
+    holder <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+    viewedNow <- newIORef f.viewed
+    let parts = attached <> maybe [] pure pictures
+        drawWith o = do
+          Gtk.widgetGetFirstChild holder >>= mapM_ (Gtk.boxRemove holder)
+          mapM_ (detach . snd) parts
+          isViewed <- readIORef viewedNow
+          diff <- Diff.newWith o f {Diff.viewed = isViewed} parts (commenting f.path) $ \now -> do
+            writeIORef viewedNow now
+            setViewed markBox now
+            updateProgress
+          #append holder diff
+    drawWith opts
+    #append main holder
     button <- fileRow f markBox [(outdated, drawn) | (_, (_, outdated, drawn)) <- placed]
     #append side button
-    pure (Entry f button markBox diff)
+    pure (Entry f button markBox holder, drawWith)
+  let redraws = map snd entries'
+      entries = map fst entries'
   writeIORef entriesRef entries
+  -- Only the diffs are drawn again, where the reader is; the page stays.
   let choose change = do
         modifyIORef' panels.options change
         waiting <- readIORef pendingRef
         if null waiting
-          then actions.refresh
+          then do
+            o <- readIORef panels.options
+            at <- Gtk.adjustmentGetValue adjustment
+            mapM_ ($ o) redraws
+            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT_IDLE (Gtk.adjustmentSetValue adjustment at >> pure False)
           else GI.set sourceNote [#label := "Applies when the Files tab opens again: notes are waiting for your review."]
   forM_ (zip [False, True] layoutButtons) $ \(isSplit, b) -> void $ GI.on b #toggled $ do
     active <- GI.get b #active
-    when (active && isSplit /= opts.split) $ choose (\o -> o {Diff.split = isSplit})
+    now <- (.split) <$> readIORef panels.options
+    when (active && isSplit /= now) $ choose (\o -> o {Diff.split = isSplit})
   void $ GI.on spaceCheck #toggled $ GI.get spaceCheck #active >>= \on' -> choose (\o -> o {Diff.ignoreSpace = on'})
   void $ GI.on wordsCheck #toggled $ GI.get wordsCheck #active >>= \on' -> choose (\o -> o {Diff.changedWords = on'})
   #append side progress
@@ -387,7 +407,9 @@ new actions panels m = do
   shortcut keys "Return" (onCurrent (.toggle))
   shortcut keys "r" (onCurrent (.focusReply))
   -- s switches unified and split, w hides whitespace changes.
-  shortcut keys "s" (forM_ (zip [False, True] layoutButtons) (\(isSplit, b) -> when (isSplit /= opts.split) (GI.set b [#active := True])))
+  shortcut keys "s" $ do
+    now <- (.split) <$> readIORef panels.options
+    forM_ (zip [False, True] layoutButtons) (\(isSplit, b) -> when (isSplit /= now) (GI.set b [#active := True]))
   shortcut keys "w" (GI.get spaceCheck #active >>= \on' -> GI.set spaceCheck [#active := not on'])
   -- On the chosen lines, or the line under the pointer.
   let onLines act = readIORef keysRef >>= mapM_ act
@@ -959,3 +981,7 @@ css = mconcat
   , "box.u-files box.placeholder-gutter { background: var(--window); }"
   , "box.u-files box.placeholder-lines { padding: 12px 20px 16px; }"
   ]
+
+-- | Takes @w@ out of where it is, so it can go into a diff drawn again.
+detach :: Gtk.Widget -> IO ()
+detach w = Gtk.widgetGetParent w >>= mapM_ (\p -> GI.castTo Gtk.Box p >>= maybe (Gtk.widgetUnparent w) (`Gtk.boxRemove` w))

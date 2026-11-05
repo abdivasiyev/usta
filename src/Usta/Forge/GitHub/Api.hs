@@ -84,6 +84,8 @@ module Usta.Forge.GitHub.Api
   , pullFields
   , issueFields
   , reposQuery
+  , OneRepo (..)
+  , repoQuery
   ) where
 
 import Control.Applicative ((<|>))
@@ -288,6 +290,7 @@ data Graph mode = Graph
   { searchPulls :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer (Page PullNode))
   , searchIssues :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer (Page IssueNode))
   , repositories :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer Repos)
+  , repository :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer OneRepo)
   , discussion :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer DiscussionNode)
   , timeline :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer (Item [TimelineNode]))
   , mutate :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer Ignored)
@@ -414,6 +417,14 @@ connection = withObject "Connection" $ \c -> do
 -- | The viewer's repositories, a page of them.
 type Repos :: Type
 newtype Repos = Repos (Page RepoNode)
+
+-- | One repository, by its owner and name; 'Nothing' when GitHub has none
+-- the viewer can see.
+type OneRepo :: Type
+newtype OneRepo = OneRepo (Maybe RepoNode)
+
+instance FromJSON OneRepo where
+  parseJSON = withObject "Data" $ \d -> OneRepo <$> d .:? "repository"
 
 instance FromJSON Repos where
   parseJSON = withObject "Data" $ \d -> do
@@ -559,6 +570,12 @@ reposQuery =
     <> " orderBy: {field: UPDATED_AT, direction: DESC}) {"
     <> " totalCount pageInfo { hasNextPage endCursor } nodes { nameWithOwner description defaultBranchRef { name }"
     <> " isPrivate isArchived pullRequests(states: OPEN) { totalCount } issues(states: OPEN) { totalCount } updatedAt } } } }"
+
+repoQuery :: Text
+repoQuery =
+  "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {"
+    <> " nameWithOwner description defaultBranchRef { name }"
+    <> " isPrivate isArchived pullRequests(states: OPEN) { totalCount } issues(states: OPEN) { totalCount } updatedAt } }"
 
 -- | A page of a REST list; GitHub gives at most 100 a page.
 type ListQuery :: Type

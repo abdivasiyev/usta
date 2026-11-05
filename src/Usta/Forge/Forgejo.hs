@@ -98,6 +98,7 @@ forgejo manager base host token = do
     , repositories = \known -> case known.since of
         Just _ -> pure NotModified
         Nothing -> Fetched Nothing <$> repositoriesOf client host
+    , repository = \repo -> repositoryOf host <$> run client (Api.api.repository (owner repo) (shortName repo))
     , markRead = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Read)))
     , markUnread = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Unread)))
     , discussion = \repo n -> do
@@ -814,18 +815,19 @@ issueOf host (i, involvement) = I.Issue
 repositoriesOf :: Client -> Host -> IO [R.Repository]
 repositoriesOf client host = do
   found <- run client $ everyPage $ \page limit -> Api.api.repositories Api.ListQuery {page = page, limit = limit}
-  pure (map fromRepository found)
-  where
-    fromRepository r = R.Repository
-      { host = host
-      , name = r.fullName
-      , description = if T.null r.description then Nothing else Just r.description
-      , defaultBranch = r.defaultBranch
-      , private = r.private
-      , openPullRequests = r.openPullRequests
-      , openIssues = r.openIssues
-      , updatedAt = r.updatedAt
-      }
+  pure (map (repositoryOf host) found)
+
+repositoryOf :: Host -> Api.Repository -> R.Repository
+repositoryOf host r = R.Repository
+  { host = host
+  , name = r.fullName
+  , description = if T.null r.description then Nothing else Just r.description
+  , defaultBranch = r.defaultBranch
+  , private = r.private
+  , openPullRequests = r.openPullRequests
+  , openIssues = r.openIssues
+  , updatedAt = r.updatedAt
+  }
 
 wordsOf :: Lt.Listing -> Maybe Text
 wordsOf listing = let w = T.strip listing.words in if T.null w then Nothing else Just w

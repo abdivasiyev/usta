@@ -63,6 +63,8 @@ data Forge = Forge
     -- ^ The ones the account is involved in.
   , issues :: Known -> IO (Fetched [Issue])
   , repositories :: Known -> IO (Fetched [Repository])
+  , repository :: RepoName -> IO Repository
+    -- ^ Any one you can see, synced or not, as a link or a search finds it.
   , markRead :: ThreadId -> IO ()
   , markUnread :: ThreadId -> IO ()
     -- ^ Puts a notification back among the unread, for "Move to inbox".

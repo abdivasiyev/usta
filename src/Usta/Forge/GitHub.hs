@@ -129,6 +129,10 @@ github manager host token = do
     , repositories = \known -> case known.since of
         Just _ -> pure NotModified
         Nothing -> Fetched Nothing <$> repositoriesOf graph host
+    , repository = \repo -> do
+        Api.OneRepo found <- asked graph (Api.graph.repository Api.GraphQuery
+          {query = Api.repoQuery, variables = object ["owner" .= owner repo, "name" .= shortName repo]})
+        maybe (throwIO (Refused "GitHub has no such repository you can see.")) (pure . repositoryOf host) found
     , markRead = \thread -> () <$ run rest (Api.api.markThread thread)
     , markUnread = \_ -> throwIO (Refused "GitHub cannot mark a notification unread again.")
     , cloneUrls = \repo -> do
@@ -504,20 +508,22 @@ repositoriesOf client host = go (1 :: Int) Nothing
       Api.Repos found <- asked client (Api.graph.repositories Api.GraphQuery
         { query = Api.reposQuery
         , variables = object ["after" .= maybe Null String after] })
-      let here = map repositoryOf found.nodes
+      let here = map (repositoryOf host) found.nodes
       case found.next of
         Just cursor | n < 10 -> (here <>) <$> go (n + 1) (Just cursor)
         _ -> pure here
-    repositoryOf r = R.Repository
-      { host = host
-      , name = r.name
-      , description = r.description >>= \d -> if T.null d then Nothing else Just d
-      , defaultBranch = fromMaybe "main" r.defaultBranch
-      , private = r.private
-      , openPullRequests = r.openPullRequests
-      , openIssues = r.openIssues
-      , updatedAt = r.updatedAt
-      }
+
+repositoryOf :: Host -> Api.RepoNode -> R.Repository
+repositoryOf host r = R.Repository
+  { host = host
+  , name = r.name
+  , description = r.description >>= \d -> if T.null d then Nothing else Just d
+  , defaultBranch = fromMaybe "main" r.defaultBranch
+  , private = r.private
+  , openPullRequests = r.openPullRequests
+  , openIssues = r.openIssues
+  , updatedAt = r.updatedAt
+  }
 
 itemVariables :: RepoName -> Number -> Maybe Text -> Value
 itemVariables repo n after =

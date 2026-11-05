@@ -1,0 +1,56 @@
+## haskell LightPalette
+<span foreground="#6D28D9">module</span> <span foreground="#1F47A8">Main</span> (main) <span foreground="#6D28D9">where</span>
+
+<span foreground="#7A808A" style="italic">-- | Says hello.</span>
+main :: <span foreground="#1F47A8">IO</span> ()
+main = <span foreground="#8A5A00">putStrLn</span> <span foreground="#1F7A3A">&quot;hello&quot;</span> &gt;&gt; <span foreground="#8A5A00">print</span> (<span foreground="#C2410C">1</span> + <span foreground="#C2410C">2.5</span> :: <span foreground="#1F47A8">Double</span>)
+
+## haskell DarkPalette
+<span foreground="#B79CF2">module</span> <span foreground="#8FB0F4">Main</span> (main) <span foreground="#B79CF2">where</span>
+
+<span foreground="#8A9099" style="italic">-- | Says hello.</span>
+main :: <span foreground="#8FB0F4">IO</span> ()
+main = <span foreground="#E5C07B">putStrLn</span> <span foreground="#7FCB94">&quot;hello&quot;</span> &gt;&gt; <span foreground="#E5C07B">print</span> (<span foreground="#F0A070">1</span> + <span foreground="#F0A070">2.5</span> :: <span foreground="#8FB0F4">Double</span>)
+
+## nix LightPalette
+{ pkgs, ... }: {
+  <span foreground="#7A808A" style="italic"># The app.</span>
+  home.packages = [ pkgs.usta ];
+  programs.usta.settings.theme = <span foreground="#1F7A3A">&quot;Dark&quot;</span>;
+}
+
+## nix DarkPalette
+{ pkgs, ... }: {
+  <span foreground="#8A9099" style="italic"># The app.</span>
+  home.packages = [ pkgs.usta ];
+  programs.usta.settings.theme = <span foreground="#7FCB94">&quot;Dark&quot;</span>;
+}
+
+## yaml LightPalette
+<span foreground="#8A5A00">on</span><span foreground="#6D28D9">:</span>
+<span foreground="#1F47A8">  </span><span foreground="#8A5A00">push</span><span foreground="#6D28D9">:</span>
+<span foreground="#1F47A8">    </span><span foreground="#8A5A00">tags</span><span foreground="#6D28D9">:</span><span foreground="#1F47A8"> </span><span foreground="#6D28D9">[</span><span foreground="#1F7A3A">&quot;v*&quot;</span><span foreground="#6D28D9">]</span>
+<span foreground="#8A5A00">jobs</span><span foreground="#6D28D9">:</span>
+<span foreground="#1F47A8">  </span><span foreground="#8A5A00">release</span><span foreground="#6D28D9">:</span><span foreground="#7A808A" style="italic"> # a comment</span>
+<span foreground="#1F47A8">    </span><span foreground="#8A5A00">runs-on</span><span foreground="#6D28D9">:</span><span foreground="#1F47A8"> ubuntu-24.04</span>
+
+## yaml DarkPalette
+<span foreground="#E5C07B">on</span><span foreground="#B79CF2">:</span>
+<span foreground="#8FB0F4">  </span><span foreground="#E5C07B">push</span><span foreground="#B79CF2">:</span>
+<span foreground="#8FB0F4">    </span><span foreground="#E5C07B">tags</span><span foreground="#B79CF2">:</span><span foreground="#8FB0F4"> </span><span foreground="#B79CF2">[</span><span foreground="#7FCB94">&quot;v*&quot;</span><span foreground="#B79CF2">]</span>
+<span foreground="#E5C07B">jobs</span><span foreground="#B79CF2">:</span>
+<span foreground="#8FB0F4">  </span><span foreground="#E5C07B">release</span><span foreground="#B79CF2">:</span><span foreground="#8A9099" style="italic"> # a comment</span>
+<span foreground="#8FB0F4">    </span><span foreground="#E5C07B">runs-on</span><span foreground="#B79CF2">:</span><span foreground="#8FB0F4"> ubuntu-24.04</span>
+
+## diff LightPalette
+<span foreground="#1F47A8">@@ -1,2 +1,2 @@</span>
+<span foreground="#1F7A3A">-old line</span>
++new line
+ context
+
+## diff DarkPalette
+<span foreground="#8FB0F4">@@ -1,2 +1,2 @@</span>
+<span foreground="#7FCB94">-old line</span>
++new line
+ context
+

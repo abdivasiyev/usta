@@ -68,7 +68,7 @@ import Usta.Types.Timeline (Event)
 import Usta.Types.Reviewer (Candidate, Reviewer, Who)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
-import Usta.Types.Listing (Listing, Paged)
+import Usta.Types.Listing (Counts, Listing, Paged)
 import Usta.Types.Tree (Entry)
 import Usta.Types.Thread (Thread, Threads)
 import Usta.Types.Discussion (Discussion, Feeling, Merge, NewIssue, NewPull, Verdict, Watching)
@@ -199,6 +199,7 @@ data Source = Source
     -- ^ A page of a repository's pull requests from the forge, whoever
     -- they involve: the first, or the one after the cursor.
   , repoIssues :: Text -> Text -> Listing -> Maybe Text -> IO (Either Text (Paged I.Issue))
+  , repoCounts :: Text -> Text -> Bool -> Text -> IO (Either Text Counts)
   , runs :: Text -> Text -> IO (Either Text [Run])
     -- ^ A repository's latest CI runs, from the forge.
   , branchList :: Text -> Text -> Text -> IO (Either Text (From, [Branch]))
@@ -360,6 +361,7 @@ fromDatabase pool changes statuses sync = Source
   , compareDiff = \_ _ _ _ -> pure (Left unavailable)
   , repoPullRequests = \_ _ _ _ -> pure (Left unavailable)
   , repoIssues = \_ _ _ _ -> pure (Left unavailable)
+  , repoCounts = \_ _ _ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
   , discardPending = \_ _ _ -> pure (Left unavailable)
   , branchList = \_ _ _ -> pure (Left unavailable)
@@ -460,6 +462,7 @@ samples = Source
   , compareDiff = \_ _ _ _ -> pure (Left unavailable)
   , repoPullRequests = \_ _ _ _ -> pure (Left unavailable)
   , repoIssues = \_ _ _ _ -> pure (Left unavailable)
+  , repoCounts = \_ _ _ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
   , discardPending = \_ _ _ -> pure (Left unavailable)
   , branchList = \_ _ _ -> pure (Left unavailable)
@@ -591,6 +594,7 @@ withAccounts pool accounts source = source
   , compareDiff = \host repo into from -> onRepo host repo (\f name -> f.compareDiff name into from)
   , repoPullRequests = \host repo listing from -> onRepo host repo (\f name -> f.repoPullRequests name listing from)
   , repoIssues = \host repo listing from -> onRepo host repo (\f name -> f.repoIssues name listing from)
+  , repoCounts = \host repo pulls words' -> onRepo host repo (\f name -> f.repoCounts name pulls words')
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
   , releases = \host repo -> onRepo host repo (\f name -> f.releases name)
   , searchForges = \words' -> do
@@ -751,6 +755,7 @@ tracking track s = s
   , compareDiff = \h r a b -> track (s.compareDiff h r a b)
   , repoPullRequests = \h r l c -> track (s.repoPullRequests h r l c)
   , repoIssues = \h r l c -> track (s.repoIssues h r l c)
+  , repoCounts = \h r p w -> track (s.repoCounts h r p w)
   , runs = \h r -> track (s.runs h r)
   , discardPending = \h r n -> track (s.discardPending h r n)
   , branchList = \h r b -> track (s.branchList h r b)

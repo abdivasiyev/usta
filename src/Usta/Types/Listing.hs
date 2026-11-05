@@ -5,6 +5,7 @@ module Usta.Types.Listing
   , Order (..)
   , Listing (..)
   , Paged (..)
+  , Counts (..)
   ) where
 
 import Data.Kind (Type)
@@ -19,8 +20,20 @@ type Order :: Type
 data Order = RecentlyUpdated | Newest | Oldest
   deriving stock (Eq, Show, Enum, Bounded)
 
+-- | @words@ are searched for in titles and text; empty, all are listed.
 type Listing :: Type
-data Listing = Listing {which :: Which, order :: Order}
+data Listing = Listing {which :: Which, order :: Order, words :: Text}
+  deriving stock (Eq, Show)
+
+-- | How many there are of each 'Which', where the forge can tell.
+type Counts :: Type
+data Counts = Counts
+  { opened :: Maybe Int
+  , drafts :: Maybe Int
+  , merged :: Maybe Int
+  , shut :: Maybe Int
+  , every :: Maybe Int
+  }
   deriving stock (Eq, Show)
 
 -- | One page: its items, how many there are in all when the forge says,

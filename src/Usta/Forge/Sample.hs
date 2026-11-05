@@ -20,7 +20,7 @@ import Data.Time (NominalDiffTime, UTCTime, addUTCTime)
 
 import Usta.Forge (Failure, Fetched (..), Known (..))
 import qualified Usta.Forge as F
-import Usta.Types.Listing (Paged (..))
+import Usta.Types.Listing (Counts (..), Paged (..))
 import Usta.Types.Account (Account (..))
 import Usta.Types.Host (Host)
 import Usta.Types.Thread (Threads (..))
@@ -91,6 +91,7 @@ new now account = do
         , F.timeline = \_ _ -> pure []
         , F.repoPullRequests = \_ _ _ -> pure (Paged [] (Just 0) Nothing)
         , F.repoIssues = \_ _ _ -> pure (Paged [] (Just 0) Nothing)
+        , F.repoCounts = \_ _ _ -> pure (Counts Nothing Nothing Nothing Nothing Nothing)
         , F.runs = \_ -> pure []
         , F.discardPending = \_ _ -> pure 0
         , F.branchList = \_ -> pure []

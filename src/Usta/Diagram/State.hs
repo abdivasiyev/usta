@@ -12,7 +12,7 @@ module Usta.Diagram.State
 import Data.Kind (Type)
 import Data.List (nub)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Traversable (for)
@@ -210,18 +210,21 @@ draw measure d = do
                 p0 = Route.clip (outlineOf a) c0 z0 (case inner of { x : _ -> x; [] -> c1 }) 0
                 p1 = Route.clip (outlineOf b) c1 z1 (if null inner then c0 else last inner) extra
             pure (p0 : inner <> [p1])
-          arrows = concat (snd (foldl take' (routes, []) (zip moves events)))
+          taken = snd (foldl take' (routes, []) (zip moves events))
           take' (left, acc) ((a, b, t), e) = case Map.lookup (a, b) left of
-            Just (ps : more) -> (Map.insert (a, b) more left, acc <> [arrow a b t e ps])
+            Just (ps : more) -> (Map.insert (a, b) more left, acc <> [(a, b, t, e, ps)])
             _ -> (left, acc)
-          arrow a b t e ps = case path' a b ps 2 of
-            [] -> []
-            path ->
-              let mid = Route.middle path
-               in Path {start = head' path, segments = Route.smooth path, line = pen Line 1.3, begin = NoHead, end = Arrow}
-                    : concat [ [ Rect {at = Point (mid.x - z.w / 2 - 4) (mid.y - z.h / 2 - 1), size = Size (z.w + 8) (z.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
-                               , Text {at = mid, text = ev, font = regular 11, color = Muted, anchor = Middle} ]
-                             | (Just ev, Just z) <- [(t.event, e)] ]
+          bowed = Route.spread [(a, b, ps) | (a, b, _, _, ps) <- taken]
+          wires = [(t, e, path) | ((a, b, t, e, _), ps) <- zip taken bowed, path@(_ : _) <- [path' a b ps 2]]
+          -- Labels keep off the states and one another.
+          keepOff = [Route.around c z | (st, z, _) <- children, Just c <- [Map.lookup st.name centers]]
+          spots = Route.labelSpots keepOff [(path, if isJust t.event then e else Nothing) | (t, e, path) <- wires]
+          arrows = concat
+            [ Path {start = head' path, segments = Route.smooth path, line = pen Line 1.3, begin = NoHead, end = Arrow}
+                : concat [ [ Rect {at = Point (mid.x - z.w / 2 - 4) (mid.y - z.h / 2 - 1), size = Size (z.w + 8) (z.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
+                           , Text {at = mid, text = ev, font = regular 11, color = Muted, anchor = Middle} ]
+                         | (Just ev, Just z, Just mid) <- [(t.event, e, spot)] ]
+            | ((t, e, path), spot) <- zip wires spots ]
           joins = concat
             [ let (a, b) = if n.onLeft then (noteKey i, n.target) else (n.target, noteKey i)
                in case path' a b (fromMaybe [] (Map.lookup (a, b) routes >>= listToMaybe')) 0 of

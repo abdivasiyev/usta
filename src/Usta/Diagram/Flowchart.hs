@@ -15,7 +15,7 @@ module Usta.Diagram.Flowchart
 
 import Data.Kind (Type)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isJust, mapMaybe)
 import Data.Traversable (for)
 
 import qualified Usta.Diagram.Route as Route
@@ -56,26 +56,36 @@ draw measure chart = do
       routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
       shapeAt name = (,) <$> Map.lookup name centers <*> Map.lookup name byName
       -- Each edge takes the next route between its two nodes.
-      edgeItems = concat (snd (foldl takeRoute (routes, []) (zip chart.edges labels)))
+      taken = snd (foldl takeRoute (routes, []) (zip chart.edges labels))
       takeRoute (left, acc) (e, label) = case Map.lookup (e.from, e.to) left of
-        Just (ps : rest) -> (Map.insert (e.from, e.to) rest left, acc <> [edge e label ps])
-        _ | e.from == e.to, Just (c, s) <- shapeAt e.from -> (left, acc <> [loop e label c s])
+        Just (ps : rest) | e.from /= e.to -> (Map.insert (e.from, e.to) rest left, acc <> [(e, label, ps)])
         _ -> (left, acc)
-      edge e label ps = case ps of
+      bowed = Route.spread [(e.from, e.to, ps) | (e, _, ps) <- taken]
+      wires = [(e, label, path) | ((e, label, _), ps) <- zip taken bowed, Just path <- [clipped e ps]]
+      clipped e ps = case ps of
         first : _ | Just (c0, s0) <- shapeAt e.from, Just (c1, s1) <- shapeAt e.to ->
           let inner = drop 1 (take (length ps - 1) ps)
               start = edgeOf c0 s0 (headOr (last' c1 ps) inner) 0
               finish = edgeOf c1 s1 (lastOr first inner) (if e.arrow then 2 else 0)
-              path = start : inner <> [finish]
-           in [ Path {start = start, segments = Route.smooth path, line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead} ]
-                <> maybe [] (labelAt (Route.middle path)) ((,) <$> e.label <*> label)
-        _ -> []
-      loop e label c s =
+           in Just (start : inner <> [finish])
+        _ -> Nothing
+      loops = [(e, label, c, s) | (e, label) <- zip chart.edges labels, e.from == e.to, Just (c, s) <- [shapeAt e.from]]
+      loopSpot c s = Point (c.x + s.box.w / 2 + 30) c.y
+      -- Labels keep off the nodes, the loops' labels and one another.
+      keepOff = [Route.around c s.box | s <- sized, Just c <- [Map.lookup s.node.name centers]]
+             <> [Route.around (loopSpot c s) z | (_, Just z, c, s) <- loops]
+      spots = Route.labelSpots keepOff [(path, if isJust e.label then label else Nothing) | (e, label, path) <- wires]
+      edgeItems =
+        concat [ Path {start = headOr (Point 0 0) path, segments = Route.smooth path, line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead}
+                   : maybe [] (\p -> maybe [] (labelAt p) ((,) <$> e.label <*> label)) spot
+               | ((e, label, path), spot) <- zip wires spots ]
+          <> concatMap loop loops
+      loop (e, label, c, s) =
         let side = c.x + s.box.w / 2
             a = Point {x = side, y = c.y - 8}
             b = Point {x = side, y = c.y + 8}
          in [ Path {start = a, segments = [CurveTo (Point (side + 34) (c.y - 30)) (Point (side + 34) (c.y + 30)) b], line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead} ]
-              <> maybe [] (labelAt (Point (side + 30) c.y)) ((,) <$> e.label <*> label)
+              <> maybe [] (labelAt (loopSpot c s)) ((,) <$> e.label <*> label)
       labelAt p (t, size') =
         [ Rect {at = Point (p.x - size'.w / 2 - 4) (p.y - size'.h / 2 - 1), size = Size (size'.w + 8) (size'.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
         , Text {at = p, text = t, font = labelFont, color = Muted, anchor = Middle}

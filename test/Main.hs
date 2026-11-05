@@ -5,6 +5,8 @@ module Main (main) where
 import Test.Tasty (defaultMain, testGroup)
 
 import qualified Usta.Types.ParseTests
+import qualified Usta.Types.LinkTests
+import qualified Usta.UI.FormatTests
 
 main :: IO ()
 main =
@@ -12,4 +14,6 @@ main =
     testGroup
       "usta"
       [ Usta.Types.ParseTests.tests
+      , Usta.Types.LinkTests.tests
+      , Usta.UI.FormatTests.tests
       ]

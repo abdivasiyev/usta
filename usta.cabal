@@ -315,10 +315,15 @@ test-suite usta-test
   build-depends:
     aeson,
     base,
+    bytestring,
+    containers,
+    directory,
+    filepath,
     hedgehog,
     tasty,
     tasty-hedgehog,
     tasty-hunit,
+    temporary,
     text,
     time,
     usta

@@ -99,10 +99,15 @@
         testHaskellDepends = with hsPkgs; [
           aeson
           base
+          bytestring
+          containers
+          directory
+          filepath
           hedgehog
           tasty
           tasty-hedgehog
           tasty-hunit
+          temporary
           text
           time
         ];

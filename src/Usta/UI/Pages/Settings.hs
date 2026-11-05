@@ -10,6 +10,7 @@ module Usta.UI.Pages.Settings
   , sample
   , new
   , notice
+  , confirm
   , css
   ) where
 

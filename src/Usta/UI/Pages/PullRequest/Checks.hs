@@ -15,7 +15,7 @@ module Usta.UI.Pages.PullRequest.Checks
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
-import Control.Monad (forM, forM_, void)
+import Control.Monad (forM, forM_, void, when)
 import Data.Char (isDigit)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -62,6 +62,10 @@ data Model = Model
   , stepsOf :: Job -> IO (Either Text (State, [(Text, State)]))
     -- ^ A running job's state and steps, asked again every 5 seconds;
     -- its log comes once it ends.
+  , rerunJob :: Maybe (Job -> IO (Either Text ()))
+    -- ^ A finished job again; 'Nothing' where the forge cannot.
+  , rerunDone :: IO ()
+    -- ^ Once a job was started again, e.g. to list the runs anew.
   }
 
 new :: Model -> IO Gtk.Widget
@@ -159,9 +163,16 @@ checkDetail m check = do
   copy <- Button.new Button.defaults { Button.label = Just "Copy log" }
   GI.set copy [#visible := False]
   #append header copy
+  -- A finished job of the forge's own CI can run again from here.
+  forM_ ((,) <$> m.rerunJob <*> check.job) $ \(again, job) -> when (check.state `elem` [Passed, Failed, Skipped]) $ do
+    b <- Button.new Button.defaults { Button.label = Just "↻ Re-run job" }
+    void $ GI.on b #clicked $ Button.busy b ([] :: [Gtk.Widget]) "Starting…" (again job) $ \case
+      Right () -> m.rerunDone
+      Left why -> GI.set b [#tooltipText := why]
+    #append header b
   forM_ check.url $ \url -> do
     open <- Button.new Button.defaults { Button.label = Just "Open in browser", Button.variant = Button.Primary }
-    GI.set open [#tooltipText := "Its page on the forge, where it can be run again"]
+    GI.set open [#tooltipText := "Its page on the forge"]
     void $ GI.on open #clicked (openUri url)
     #append header open
   #append box header

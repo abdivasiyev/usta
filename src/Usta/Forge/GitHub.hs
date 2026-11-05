@@ -140,6 +140,9 @@ github manager host token = do
         notes <- traverse threadOf st.threads
         pure Th.Threads {threads = [t | Just t <- notes], lastReviewed = if null mine then Nothing else Just (maximum mine)}
     , checks = \repo n -> (\(Api.Checks cs) -> map checkOf cs) <$> asked graph (Api.graph.checks Api.GraphQuery {query = Api.checksQuery, variables = itemVariables repo n Nothing})
+    , workflows = \repo -> do
+        Api.Workflows ws <- run rest (Api.api.workflows (owner repo) (shortName repo) Api.ListQuery {page = Just 1, perPage = Named (Just 100)})
+        pure [name | (name, state) <- ws, state /= "deleted"]
     , jobSteps = \repo job -> do
         j <- run rest (Api.api.job (owner repo) (shortName repo) (fromIntegral job.run))
         pure (stateOf j.status j.conclusion, [(name, stateOf status conclusion) | (name, status, conclusion) <- j.steps])

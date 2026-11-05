@@ -256,6 +256,14 @@ forgejo manager base host token = do
         pure (map (checkOf host) combined.statuses)
     -- The first attempt's: the status links the job, not its attempts.
     , jobSteps = \_ _ -> throwIO (Refused "Forgejo does not list a job's steps.")
+    -- Forgejo has no list of workflows: they are the files of the first
+    -- of its workflow folders the default branch has, named as its runs
+    -- name them, by file.
+    , workflows = \repo -> do
+        let inFolder dir = either (\(_ :: Failure) -> []) (\es -> [e.name | e <- es, e.kind == "file", any (`T.isSuffixOf` e.name) [".yml", ".yaml"]])
+              <$> try (run client (Api.api.folder (owner repo) (shortName repo) [dir, "workflows"]))
+        found <- traverse inFolder [".forgejo", ".gitea", ".github"]
+        pure (take 1 [names | names@(_ : _) <- found] >>= id)
     , checkLog = \repo job -> run site (Api.web.jobLog (owner repo) (shortName repo) job.run job.index 1)
     , reviewers = \repo n -> do
         pull <- run client (Api.api.pullRequest (owner repo) (shortName repo) n)

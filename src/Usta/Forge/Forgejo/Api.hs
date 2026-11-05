@@ -166,6 +166,10 @@ data Routes mode = Routes
   , contents
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "contents"
            :> RecordQueryParam RefQuery :> Get '[JSON] [Entry]
+  , folder
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "contents" :> CaptureAll "path" Text
+           :> Get '[JSON] [Entry]
+    -- ^ A folder on the default branch.
   , raw
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "raw" :> Capture "path" Text
            :> RecordQueryParam RefQuery :> Get '[RawText] Text

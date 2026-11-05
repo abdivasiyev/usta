@@ -55,6 +55,7 @@ module Usta.Forge.GitHub.Api
   , WorkflowRuns (..)
   , WorkflowRun (..)
   , Jobs (..)
+  , Workflows (..)
   , RestJob (..)
   , JobSteps (..)
   , RefPage (..)
@@ -222,6 +223,9 @@ data Routes mode = Routes
   , runs
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> RecordQueryParam ListQuery
            :> Get '[JSON] WorkflowRuns
+  , workflows
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "workflows"
+           :> RecordQueryParam ListQuery :> Get '[JSON] Workflows
   , runJobs
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int64
            :> "jobs" :> Get '[JSON] Jobs
@@ -1297,3 +1301,12 @@ instance FromJSON JobSteps where
     <$> o .: "status"
     <*> o .:? "conclusion"
     <*> (o .:? "steps" .!= [] >>= traverse (withObject "Step" (\x -> (,,) <$> x .: "name" <*> x .: "status" <*> x .:? "conclusion")))
+
+-- | Each workflow's name and state: "active", "deleted" (its file is
+-- gone), or one of the "disabled_…" states.
+type Workflows :: Type
+newtype Workflows = Workflows [(Text, Text)]
+
+instance FromJSON Workflows where
+  parseJSON = withObject "Workflows" $ \o -> Workflows
+    <$> (o .: "workflows" >>= traverse (withObject "Workflow" (\w -> (,) <$> w .: "name" <*> w .: "state")))

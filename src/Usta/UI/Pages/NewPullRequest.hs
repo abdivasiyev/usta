@@ -13,22 +13,28 @@ module Usta.UI.Pages.NewPullRequest
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM, forM_, join, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
+import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
+import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.BranchPicker as BranchPicker
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
+import qualified Usta.UI.Components.Diff as Diff
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
+import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
+import Usta.UI.Format (clock)
+import Usta.Types.Branch (Branch (..))
 import Usta.Types.Discussion (NewPull (..))
 import Usta.Types.Parse (parse)
 
@@ -52,10 +58,10 @@ data Model = Model
 -- | What the form asks of the forge. Each runs off the main thread.
 type Actions :: Type
 data Actions = Actions
-  { branchesOf :: Place -> IO (Either Text [Text])
-  , compareOf :: Place -> Text -> Text -> IO (Either Text ([(Text, Text)], [Text]))
+  { branchesOf :: Place -> IO (Either Text [Branch])
+  , compareOf :: Place -> Text -> Text -> IO (Either Text ([(Text, Text)], [Diff.File]))
     -- ^ Into and from: the commits (short hash and subject) and the
-    -- paths the pull request would have.
+    -- changes the pull request would have.
   , create :: Place -> NewPull -> IO (Either Text Int)
   , opened :: Place -> Int -> Text -> (Text, Text) -> IO ()
     -- ^ With the new pull request's number, title and branches (head
@@ -98,17 +104,17 @@ new actions m = do
   repoField <- Gtk.toWidget repo >>= field "Repository"
   GI.set repoField [#hexpand := True]
   #append row repoField
-  intoList <- Gtk.stringListNew (Just [])
-  into <- Gtk.dropDownNew (Just intoList) (Nothing :: Maybe Gtk.Expression)
-  Gtk.toWidget into >>= field "Into" >>= #append row
+  -- Each picker is drawn again when a branch is chosen in it.
+  intoSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+  Gtk.toWidget intoSlot >>= field "Into" >>= #append row
   arrow <- label "←" ["muted", "arrow"]
   GI.set arrow [#valign := Gtk.AlignEnd]
   #append row arrow
-  fromList <- Gtk.stringListNew (Just [])
-  from <- Gtk.dropDownNew (Just fromList) (Nothing :: Maybe Gtk.Expression)
-  Gtk.toWidget from >>= field "From" >>= #append row
+  fromSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+  Gtk.toWidget fromSlot >>= field "From" >>= #append row
   #append main row
   status <- label "" ["small", "muted"]
+  GI.set status [#visible := False]
   #append main status
 
   titleEntry <- GI.new Gtk.Entry [#placeholderText := "What it does, e.g. feat: render the main window", #cssClasses := ["title-entry"]]
@@ -150,34 +156,46 @@ new actions m = do
   #append page columns
 
   let placeAt i = if i >= 0 && i < length m.places then Just (m.places !! i) else Nothing
-  names <- newIORef ([] :: [Text])
-  let selected list = do
-        i <- fromIntegral <$> Gtk.dropDownGetSelected list
-        shown <- readIORef names
-        pure (if i < length shown then Just (shown !! i) else Nothing)
-      fill shown place = do
-        writeIORef names shown
-        forM_ [intoList, fromList] $ \l -> do
-          n <- Gio.listModelGetNItems l
-          Gtk.stringListSplice l 0 n (Just shown)
-        let at name = length (takeWhile (/= name) shown)
-            base = at place.defaultBranch
-        Gtk.dropDownSetSelected into (fromIntegral base)
-        -- The first other branch, as the one with the changes.
-        Gtk.dropDownSetSelected from (fromIntegral (length (takeWhile (== place.defaultBranch) shown)))
+  into <- newIORef (Nothing :: Maybe Text)
+  from <- newIORef (Nothing :: Maybe Text)
+  -- The branches of the repository chosen, fetched once for both pickers.
+  known <- newIORef (pure (Left "Loading branches\8230") :: IO (Either Text [Branch]))
+  c <- clock
+  previewRef <- newIORef (pure ())
+  let picker slot ref place = do
+        old <- Gtk.widgetGetFirstChild slot
+        forM_ old (Gtk.boxRemove slot)
+        shown <- readIORef ref
+        fetch <- readIORef known
+        b <- BranchPicker.new BranchPicker.Picker
+          { shown = maybe "Choose a branch" id shown, defaultBranch = place.defaultBranch, clock = c
+          , branches = fetch, tags = Nothing
+          , choose = \name -> writeIORef ref (Just name) >> picker slot ref place >> join (readIORef previewRef)
+          , note = "" }
+        #append slot b
+      pickers place = picker intoSlot into place >> picker fromSlot from place
+      selected = readIORef
       load = do
         index <- fromIntegral <$> Gtk.dropDownGetSelected repo
         forM_ (placeAt index) $ \place -> do
-          fill [] place
-          GI.set status [#label := "Loading branches\8230"]
+          writeIORef into Nothing >> writeIORef from Nothing
+          writeIORef known (pure (Left "Loading branches\8230"))
+          pickers place
+          say status "Loading branches\8230"
           void $ forkIO $ do
             found <- actions.branchesOf place
             void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+              writeIORef known (pure found)
               case found of
                 Right shown -> do
-                  fill shown place
-                  GI.set status [#label := if length shown < 2 then "The repository has one branch: push another to open a pull request." else ""]
-                Left text -> GI.set status [#label := text]
+                  let others = [b.name | b <- shown, b.name /= place.defaultBranch]
+                  writeIORef into (Just place.defaultBranch)
+                  -- The first other branch, as the one with the changes.
+                  writeIORef from (take 1 others `orFirst` Nothing)
+                  pickers place
+                  say status (if null others then "The repository has one branch: push another to open a pull request." else "")
+                  join (readIORef previewRef)
+                Left text -> say status text
               pure False
       submit draft = do
         index <- fromIntegral <$> Gtk.dropDownGetSelected repo
@@ -228,46 +246,81 @@ new actions m = do
               void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
                 latest <- readIORef asked
                 when (latest == turn) $ case found of
-                  Right (commits, paths) -> contents b t commits paths >>= Gtk.toWidget >>= replace . Just
+                  Right (commits, changes) -> contents scroll b t commits changes >>= Gtk.toWidget >>= replace . Just
                   Left text -> label text ["small", "muted"] >>= Gtk.toWidget >>= replace . Just
                 pure False
           _ -> replace Nothing
+  writeIORef previewRef preview
   Gtk.dropDownSetSelected repo (fromIntegral m.chosen)
   void $ GI.on repo (GI.PropertyNotify #selected) (const load)
-  forM_ [into, from] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const preview)
   load
   void $ GI.on createButton #clicked (submit False)
   void $ GI.on draftButton #clicked (submit True)
   Gtk.toWidget page
   where
     names' = filter (not . T.null) . map T.strip . T.splitOn ","
+    orFirst (x : _) _ = Just x
+    orFirst [] d = d
 
--- | What the pull request would contain: its commits and changed paths.
-contents :: Text -> Text -> [(Text, Text)] -> [Text] -> IO Gtk.Box
-contents into from commits paths = do
-  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+-- | What the pull request would contain: its commits, and the files it
+-- changes, one a row, with their diffs under them. A row scrolls
+-- @scroll@ to its diff.
+contents :: Gtk.ScrolledWindow -> Text -> Text -> [(Text, Text)] -> [Diff.File] -> IO Gtk.Box
+contents scroll into from commits changes = do
+  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12]
   if null commits
     then label (from <> " has no commits that " <> into <> " lacks: there is nothing to merge.") ["small", "muted"]
            >>= #append box
     else do
-      Card.sectionTitle (count (length commits) "commit" <> " · " <> count (length paths) "file" <> " changed")
-        >>= #append box
-      card <- Card.new
+      (tabs, buttons) <- Segmented.new
+        [ "Commits " <> T.pack (show (length commits))
+        , "Files changed " <> T.pack (show (length changes)) ] 0
+      #append box tabs
+      stack <- GI.new Gtk.Stack [#vhomogeneous := False, #interpolateSize := True]
+      #append box stack
+
+      commitCard <- Card.new
       forM_ commits $ \(short, subject) -> do
         row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 12, #cssClasses := ["content-row"]]
         label short ["mono", "hash"] >>= #append row
-        label subject [] >>= #append row
-        #append card row
-      unless (null paths) $ do
-        files <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["content-row"]]
-        names <- label (T.intercalate " · " paths) ["mono"]
-        GI.set names [#hexpand := True, #wrap := True]
-        #append files names
-        #append card files
-      #append box card
+        s' <- label subject []
+        GI.set s' [#ellipsize := Pango.EllipsizeModeEnd]
+        #append row s'
+        #append commitCard row
+      void $ Gtk.stackAddNamed stack commitCard (Just "commits")
+
+      files <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 16]
+      list <- Card.new
+      #append files list
+      diffs <- forM changes $ \f -> do
+        d <- Diff.plain f
+        #append files d
+        pure d
+      forM_ (zip changes diffs) $ \(f, d) -> do
+        row <- GI.new Gtk.Button [#cssClasses := ["content-row", "file-row"]]
+        inner <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
+        GI.new Gtk.Image [#iconName := "text-x-generic-symbolic"] >>= #append inner
+        name <- label f.path ["mono"]
+        GI.set name [#hexpand := True, #ellipsize := Pango.EllipsizeModeMiddle]
+        #append inner name
+        let (added, removed) = T.breakOn " " (Diff.stat f)
+        label added ["mono", "added"] >>= #append inner
+        label (T.strip removed) ["mono", "removed"] >>= #append inner
+        GI.set row [#child := inner]
+        void $ GI.on row #clicked $ do
+          (ok, point) <- Gtk.widgetComputePoint d scroll =<< pointAt 0 0
+          adjustment <- Gtk.scrolledWindowGetVadjustment scroll
+          now <- Gtk.adjustmentGetValue adjustment
+          when ok $ Graphene.getPointY point >>= \y -> Gtk.adjustmentSetValue adjustment (now + realToFrac y - 12)
+        #append list row
+      void $ Gtk.stackAddNamed stack files (Just "files")
+      forM_ (zip buttons ["commits", "files"]) $ \(b, name) ->
+        void $ GI.on b #toggled $ GI.get b #active >>= \on' -> when on' (Gtk.stackSetVisibleChildName stack name)
   pure box
   where
-    count n noun = T.pack (show n) <> " " <> noun <> (if n == 1 then "" else "s")
+    pointAt x y = do
+      p <- Graphene.newZeroPoint
+      Graphene.pointInit p x y
 
 -- | A small caption above an input.
 field :: Text -> Gtk.Widget -> IO Gtk.Box
@@ -276,6 +329,10 @@ field caption input = do
   label caption ["caption"] >>= #append box
   #append box input
   pure box
+
+-- | A note that takes no room when it says nothing.
+say :: Gtk.Label -> Text -> IO ()
+say l text = GI.set l [#label := text, #visible := not (T.null text)]
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
@@ -309,6 +366,7 @@ css = mconcat
   , "  background: var(--surface); color: var(--text); box-shadow: none;"
   , "}"
   , "box.u-new-pr entry.title-entry { min-height: 42px; font-size: 15px; }"
+  , "box.u-new-pr menubutton.u-branch-button > button { min-height: 40px; border-radius: 8px; }"
   , "box.u-new-pr dropdown > button {"
   , "  min-height: 40px; padding: 0 10px; border: 1px solid var(--input-border); border-radius: 8px;"
   , "  background: var(--surface); color: var(--text); box-shadow: none; background-image: none;"
@@ -323,5 +381,7 @@ css = mconcat
   , "  background: var(--surface);"
   , "}"
   , "box.u-new-pr box.content-row { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }"
-  , "box.u-new-pr box.content-row:last-child { border-bottom: none; }"
+  , "box.u-new-pr box.content-row:last-child, box.u-new-pr button.content-row:last-child { border-bottom: none; }"
+  , "box.u-new-pr button.file-row { padding: 8px 12px; border: none; border-radius: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; background-image: none; box-shadow: none; }"
+  , "box.u-new-pr button.file-row:hover { background: var(--border-subtle); }"
   ]

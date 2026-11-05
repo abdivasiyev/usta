@@ -17,6 +17,7 @@ module Usta.UI.Components.Diff
   , new
   , newWith
   , plain
+  , stat
   , css
   ) where
 
@@ -519,6 +520,7 @@ choosing path body overlay rows c = do
 numbersWidth :: Double
 numbersWidth = 108
 
+-- | "+12 −3".
 stat :: File -> Text
 stat file = "+" <> count isAdded <> " −" <> count isRemoved
   where

@@ -193,6 +193,7 @@ data Source = Source
   , compare :: Text -> Text -> Text -> Text -> IO (Either Text ([Commit], [Text]))
     -- ^ By host, repository, base branch and branch: the commits and
     -- paths a pull request between them would have.
+  , compareDiff :: Text -> Text -> Text -> Text -> IO (Either Text [FileDiff])
   , repoPullRequests :: Text -> Text -> IO (Either Text [P.PullRequest])
     -- ^ A repository's latest pull requests in any state, from the forge,
     -- whoever they involve.
@@ -353,6 +354,7 @@ fromDatabase pool changes statuses sync = Source
   , milestones = \_ _ -> pure (Left unavailable)
   , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
+  , compareDiff = \_ _ _ _ -> pure (Left unavailable)
   , repoPullRequests = \_ _ -> pure (Left unavailable)
   , repoIssues = \_ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
@@ -452,6 +454,7 @@ samples = Source
   , milestones = \_ _ -> pure (Left unavailable)
   , setMilestone = \_ _ _ _ -> pure (Left unavailable)
   , compare = \_ _ _ _ -> pure (Left unavailable)
+  , compareDiff = \_ _ _ _ -> pure (Left unavailable)
   , repoPullRequests = \_ _ -> pure (Left unavailable)
   , repoIssues = \_ _ -> pure (Left unavailable)
   , runs = \_ _ -> pure (Left unavailable)
@@ -582,6 +585,7 @@ withAccounts pool accounts source = source
   , milestones = \host repo -> onRepo host repo (\f name -> f.milestones name)
   , setMilestone = \host repo n t -> changing (onForge host repo n (\f name number -> f.setMilestone name number t))
   , compare = \host repo into from -> onRepo host repo (\f name -> f.compare name into from)
+  , compareDiff = \host repo into from -> onRepo host repo (\f name -> f.compareDiff name into from)
   , repoPullRequests = \host repo -> onRepo host repo (\f name -> f.repoPullRequests name)
   , repoIssues = \host repo -> onRepo host repo (\f name -> f.repoIssues name)
   , runs = \host repo -> onRepo host repo (\f name -> f.runs name)
@@ -741,6 +745,7 @@ tracking track s = s
   , milestones = \h r -> track (s.milestones h r)
   , setMilestone = \h r n t -> track (s.setMilestone h r n t)
   , compare = \h r a b -> track (s.compare h r a b)
+  , compareDiff = \h r a b -> track (s.compareDiff h r a b)
   , repoPullRequests = \h r -> track (s.repoPullRequests h r)
   , repoIssues = \h r -> track (s.repoIssues h r)
   , runs = \h r -> track (s.runs h r)

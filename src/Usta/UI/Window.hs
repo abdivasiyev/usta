@@ -218,10 +218,12 @@ buildWith start crashed given app = do
               , PullRequest.checks = Nothing, PullRequest.branches = branches
               }
         NewPullRequest.new NewPullRequest.Actions
-          { branchesOf = \p -> source.branches p.host p.repo
-          , compareOf = \p into from -> fmap
-              (\(cs, paths) -> ([(T.take 7 (unparse c.sha), c.subject) | c <- cs], paths))
-              <$> source.compare p.host p.repo into from
+          { branchesOf = \p -> fmap snd <$> source.branchList p.host p.repo p.defaultBranch
+          , compareOf = \p into from -> do
+              commits <- source.compare p.host p.repo into from
+              changes <- source.compareDiff p.host p.repo into from
+              pure $ (\(cs, _) fs -> ([(T.take 7 (unparse c.sha), c.subject) | c <- cs], map Files.fromFileDiff fs))
+                <$> commits <*> changes
           , create = \p -> source.createPull p.host p.repo
           , opened = opened
           , cancel = backToMain

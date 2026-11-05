@@ -111,8 +111,10 @@ new s = do
   #append bar snippet
   label count ["muted"] >>= #append bar
   when anyNew $ Badge.new Accent "new reply" >>= #append bar
-  showButton <- GI.new Gtk.Button [#label := "Show", #cssClasses := ["flat", "show"]]
-  #append bar showButton
+  -- The whole bar opens it; "Show" only says so.
+  label "Show" ["muted", "show"] >>= #append bar
+  Gtk.widgetSetCursorFromName bar (Just "pointer")
+  GI.set bar [#tooltipText := "Show the conversation"]
   #append card bar
 
   -- The whole thread.
@@ -203,7 +205,9 @@ new s = do
         GI.set card [#visible := open || not s.outdated || resolved']
         GI.set bar [#visible := not whole']
         GI.set whole [#visible := whole']
-  void $ GI.on showButton #clicked (setOpen True)
+  opening <- GI.new Gtk.GestureClick []
+  void $ GI.on opening #released $ \_ _ _ -> setOpen True
+  Gtk.widgetAddController bar opening
   void $ GI.on hide #clicked (setOpen False)
   GI.set card [#visible := True]
   setOpen (not resolved')
@@ -376,7 +380,8 @@ css :: Text
 css = mconcat
   [ "box.u-thread { margin: 8px 12px 8px 108px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }"
   , "box.u-thread.resolved, box.u-thread.outdated { background: var(--window); }"
-  , "box.u-thread box.bar { padding: 6px 12px; min-height: 26px; font-size: 13px; }"
+  , "box.u-thread box.bar { padding: 6px 12px; min-height: 26px; font-size: 13px; border-radius: 8px; }"
+  , "box.u-thread box.bar:hover { background: var(--border-subtle); }"
   , "box.u-thread box.top { padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }"
   , "box.u-thread label.strong { font-weight: 600; }"
   , "box.u-thread label.tick { color: var(--success); }"

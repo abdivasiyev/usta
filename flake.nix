@@ -133,7 +133,7 @@
           warp
         ];
         # The UI tests need a display; the build runs the others.
-        testTarget = "usta-test";
+        testTargets = ["usta-test"];
         # The UI tests send keys to GTK from C.
         testPkgconfigDepends = [pkgs.gtk4];
         # The keyring: Keychain Services ship with macOS's SDK.

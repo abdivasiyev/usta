@@ -85,6 +85,7 @@ import qualified Usta.Types.Diff as Changes
 import qualified Usta.Types.Discussion as D
 import Usta.Types.Thread (Threads (..))
 import Usta.Preferences (Preferences (..), Theme (..))
+import qualified Usta.Preferences as Preferences
 import Usta.Types.Discussion (Merge (..))
 import Usta.Types.Login (Login)
 import Usta.Types.Milestone (Milestone (..))
@@ -299,6 +300,7 @@ buildWith start crashed given app = do
                     source.signIn source.browserSignIn openSettings
               }
         chosen <- source.preferences
+        fixed <- either (const []) Preferences.fixedKeys <$> Preferences.loadManaged
         folder <- source.mirrorsFolder
         home <- getHomeDirectory
         let model = (Settings.sample shortcuts)
@@ -314,6 +316,7 @@ buildWith start crashed given app = do
               , Settings.onPreferences = \p -> do
                   applyTheme p.theme
                   source.setPreferences p
+              , Settings.fixed = fixed
               , Settings.version = Updates.current
               , Settings.onCheckUpdates = fmap (\found -> listToMaybe [(T.pack (showVersion r.version), browse r.page) | Just r <- [found], Updates.newer r]) <$> Updates.latest
               }

@@ -15,7 +15,7 @@ module Usta.UI.Pages.Settings
 
 import qualified Usta.Types.Link as Link
 import Control.Concurrent (forkIO)
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
@@ -66,6 +66,9 @@ data Model = Model
     -- ^ Keys and what they do, as the shortcut strip shows them.
   , canNotify :: Bool
     -- ^ 'False' when the desktop would not show usta's notifications.
+  , fixed :: [Text]
+    -- ^ The choices set in the Nix configuration, by their names in
+    -- preferences.json; Settings shows them and does not change them.
   , version :: Text
   , onCheckUpdates :: IO (Either Text (Maybe (Text, IO ())))
     -- ^ Off the main thread: a newer version and what opens its release
@@ -120,6 +123,10 @@ new onBack onAddAccount m = do
         p <- f <$> readIORef chosen
         writeIORef chosen p
         m.onPreferences p
+  unless (null m.fixed) $ do
+    note <- label "Some settings come from your Nix configuration (programs.usta.settings, written to ~/.config/usta/config.json). Change them there and rebuild." ["nix-note"]
+    GI.set note [#wrap := True]
+    #append content note
   sections <- forM [minBound .. maxBound] $ \s -> do
     widget <- section s m change onAddAccount
     #append content widget
@@ -183,7 +190,7 @@ section s m change onAddAccount = do
           void $ GI.on interval (GI.PropertyNotify #selected) $ \_ -> do
             i <- fromIntegral <$> Gtk.dropDownGetSelected interval
             when (i < length intervals) $ change (\p -> p {interval = intervals !! i})
-          setting "Sync forges" [plain "How often usta asks your forges for new activity"]
+          setting' "interval" "Sync forges" [plain "How often usta asks your forges for new activity"]
             =<< sequence [Gtk.toWidget interval]
       , do
           folder <- button "Show in folder" Button.Secondary (const m.onShowMirrors)
@@ -204,15 +211,15 @@ section s m change onAddAccount = do
           setting "Offline cache" [plain "Pull requests, issues and comments stored in a local database"] [clear]
       ]
     Notifications -> sequence
-      [ setting "Desktop notifications"
+      [ setting' "notify" "Desktop notifications"
           [plain (if m.canNotify then "Review requests, mentions and failed checks"
                   else "On macOS they show once usta is installed as an app; this copy runs outside one")]
           =<< sequence [switch m.preferences.notify (\on p -> p {notify = on})]
-      , setting "Only when usta is in the background" [plain "Stay quiet while you are looking at the app"]
+      , setting' "onlyInBackground" "Only when usta is in the background" [plain "Stay quiet while you are looking at the app"]
           =<< sequence [switch m.preferences.onlyInBackground (\on p -> p {onlyInBackground = on})]
       ]
     Links -> do
-      opening <- setting "Open forge links in usta"
+      opening <- setting' "openLinks" "Open forge links in usta"
         [plain "Links to your forges in comments, in the search or given as ", code "usta <link>", plain " open the pull request, issue or repository here; every other link goes to the browser"]
         =<< sequence [switch m.preferences.openLinks (\on p -> p {openLinks = on})]
       others <- setting "Other links open in" [plain "The system's default browser. Installed as an app, usta also opens ", code "usta://<forge link>", plain " links from anywhere on the system"] []
@@ -234,10 +241,10 @@ section s m change onAddAccount = do
         GI.set said [#label := maybe "Opens in the browser: not a forge link" id where']
       sequence [pure opening, pure others, pure trying, Gtk.toWidget answer]
     Appearance -> sequence
-      [ setting "Theme" [] =<< sequence [themeChoice m.preferences.theme (\t -> change (\p -> p {theme = t}))]
+      [ setting' "theme" "Theme" [] =<< sequence [themeChoice m.preferences.theme (\t -> change (\p -> p {theme = t}))]
       ]
     Updates -> do
-      checking <- setting "Check for updates"
+      checking <- setting' "checkUpdates" "Check for updates"
         [plain "Once a day usta asks GitHub for its latest release. Nothing about you or your forges is sent"]
         =<< sequence [switch m.preferences.checkUpdates (\on p -> p {checkUpdates = on})]
       said <- label "" ["muted"]
@@ -260,6 +267,8 @@ section s m change onAddAccount = do
   #append box card
   Gtk.toWidget box
   where
+    -- A row for a choice the Nix configuration may fix.
+    setting' key = locked (key `elem` m.fixed)
     capitalize t = T.toUpper (T.take 1 t) <> T.drop 1 t
     switch on set' = do
       w <- GI.new Gtk.Switch [#active := on]
@@ -284,7 +293,12 @@ code t = Piece t True
 
 -- | A row: a title with an optional description, controls on the right.
 setting :: Text -> [Piece] -> [Gtk.Widget] -> IO Gtk.Widget
-setting title pieces controls = do
+setting = locked False
+
+-- | A row whose choice, when @fixed@, comes from the Nix configuration:
+-- a "Set in Nix" pill, and its controls dimmed.
+locked :: Bool -> Text -> [Piece] -> [Gtk.Widget] -> IO Gtk.Widget
+locked fixed' title pieces controls = do
   row <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                         , #spacing := 12
                         , #cssClasses := ["setting"]
@@ -294,11 +308,18 @@ setting title pieces controls = do
                           , #hexpand := True
                           , #valign := Gtk.AlignCenter
                           ]
-  label title ["title"] >>= #append texts
+  heading <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  label title ["title"] >>= #append heading
+  when fixed' $ do
+    pill <- label "Set in Nix" ["nix-pill"]
+    GI.set pill [#tooltipText := "programs.usta.settings, in ~/.config/usta/config.json"]
+    #append heading pill
+  #append texts heading
   when (not (null pieces)) $ description pieces >>= #append texts
   #append row texts
   forM_ controls $ \c -> do
     GI.set c [#valign := Gtk.AlignCenter]
+    when fixed' $ GI.set c [#sensitive := False, #tooltipText := "Set in your Nix configuration"]
     #append row c
   Gtk.toWidget row
 
@@ -436,6 +457,7 @@ sample keys = Model
   , onClearCache = pure (Right ())
   , shortcuts = keys
   , canNotify = True
+  , fixed = []
   , version = "0.1.0"
   , onCheckUpdates = pure (Right Nothing)
   }
@@ -463,6 +485,9 @@ css = mconcat
   , "}"
   , "box.u-settings box.content { padding: 24px 32px 48px; }"
   , "box.u-settings label.section-title { font-size: 19px; font-weight: 600; }"
+  , "box.u-settings box.setting > :disabled { opacity: 0.45; }"
+  , "box.u-settings label.nix-pill { padding: 1px 8px; border-radius: 10px; background: var(--border-subtle); color: var(--text-soft); font-size: 12px; font-weight: 500; }"
+  , "box.u-settings label.nix-note { padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--window); color: var(--text-soft); font-size: 13px; }"
   , "box.u-settings box.answer { background: var(--accent-bg); }"
   , "box.u-settings box.answer image { color: var(--success); }"
   , "box.u-settings box.setting { padding: 14px 16px; border-bottom: 1px solid var(--border-subtle); }"

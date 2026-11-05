@@ -461,7 +461,7 @@ buildWith start crashed given app = do
                 let load listing from = do
                       c <- clock
                       fmap (fmap (PullRequests.listed c r.forge)) <$> source.repoPullRequests r.host r.name listing from
-                PullRequests.forRepository synced load (\pr -> openPullRequestWith pr.fetching "Repositories" (summaryOf pr))
+                PullRequests.forRepository synced load (source.repoCounts r.host r.name True) (\pr -> openPullRequestWith pr.fetching "Repositories" (summaryOf pr))
                   >>= Gtk.toWidget
             }
         , Repositories.Tab
@@ -472,7 +472,7 @@ buildWith start crashed given app = do
                 let load listing from = do
                       c <- clock
                       fmap (fmap (Issues.fromIssue c r.forge)) <$> source.repoIssues r.host r.name listing from
-                Issues.forRepository synced load (openIssue "Repositories" . issueDetail) >>= Gtk.toWidget
+                Issues.forRepository synced load (source.repoCounts r.host r.name False) (openIssue "Repositories" . issueDetail) >>= Gtk.toWidget
             }
         , Repositories.Tab
             { followsBranch = False

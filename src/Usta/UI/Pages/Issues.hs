@@ -17,7 +17,10 @@ module Usta.UI.Pages.Issues
 import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Control.Concurrent (forkIO)
+import Control.Exception (SomeException, try)
+import qualified GI.GLib as GLib
 import Data.Kind (Type)
 import Data.List (nub, sortOn)
 import Data.Maybe (isJust)
@@ -229,24 +232,24 @@ showingLabel s = case s of
 -- involve the user, then the repository's from @load@ a page at a time,
 -- for the state and order chosen; the forge's total shows on the state's
 -- tab. The label filter and the filter box work on what is loaded.
-forRepository :: [Issue] -> (Lt.Listing -> Maybe Text -> IO (Either Text (Lt.Paged Issue))) -> (Issue -> IO ()) -> IO Gtk.Box
-forRepository synced load onOpen = do
+forRepository :: [Issue] -> (Lt.Listing -> Maybe Text -> IO (Either Text (Lt.Paged Issue))) -> (Text -> IO (Either Text Lt.Counts)) -> (Issue -> IO ()) -> IO Gtk.Box
+forRepository synced load counts onOpen = do
   items <- newIORef synced
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 10
                          , #hexpand := True
                          , #cssClasses := ["u-issues", "in-repo"]
                          ]
-  known <- newIORef Nothing
-  let countWith k s shown = case (k, length (filter (shows' s) shown)) of
-        (Just (s', t), _) | s' == s -> showingLabel s <> "  " <> thousands t
+  known <- newIORef []
+  let countWith k s shown = case (lookup s k, length (filter (shows' s) shown)) of
+        (Just t, _) -> showingLabel s <> "  " <> thousands t
         (_, n) | n > 0, s == ShowOpen -> showingLabel s <> "  " <> T.pack (show n)
         _ -> showingLabel s
-      count = countWith Nothing
+      count = countWith []
   (states, stateButtons) <- Segmented.new (map (`count` synced) [minBound ..]) 0
   Gtk.widgetAddCssClass states "tabs"
   labelChoice <- Gtk.dropDownNewFromStrings ["Any label"]
-  filterBox <- GI.new Gtk.SearchEntry [#placeholderText := "Filter issues", #hexpand := True, #halign := Gtk.AlignEnd, #widthRequest := 230]
+  filterBox <- GI.new Gtk.SearchEntry [#placeholderText := "Filter issues", #searchDelay := 500, #hexpand := True, #halign := Gtk.AlignEnd, #widthRequest := 230]
   sorts <- Gtk.dropDownNewFromStrings ["Newest", "Oldest"]
   toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   mapM_ (#append toolbar) =<< sequence [Gtk.toWidget states, Gtk.toWidget labelChoice, Gtk.toWidget filterBox, Gtk.toWidget sorts]
@@ -290,34 +293,53 @@ forRepository synced load onOpen = do
   let listing = do
         s <- readIORef showing
         order <- Gtk.dropDownGetSelected sorts
+        words' <- Gtk.editableGetText filterBox
         pure Lt.Listing
           { which = case s of {ShowOpen -> Lt.Opened; ShowClosed -> Lt.Shut; ShowAll -> Lt.Every}
-          , order = if order == 1 then Lt.Oldest else Lt.Newest }
+          , order = if order == 1 then Lt.Oldest else Lt.Newest
+          , words = words' }
       got first p = do
         s <- readIORef showing
-        forM_ p.total $ \t -> writeIORef known (Just (s, t))
+        forM_ p.total $ \t -> modifyIORef' known (\k -> (s, t) : filter ((/= s) . fst) k)
         before <- if first then pure [] else readIORef items
         fill (before <> [i | i <- p.items, i.number `notElem` map (.number) before])
   pager <- Pager.new scroll (\cursor -> listing >>= \l -> load l cursor) got $ \n t -> case t of
     Just total | total > n -> "Showing " <> thousands n <> " of " <> thousands total
     _ -> if n == 0 then "" else "All " <> thousands n <> " shown"
   #append page pager.widget
-  let again = do
-        writeIORef known Nothing
+  -- Every state's count, for the words searched; off the main thread.
+  asked <- newIORef (0 :: Int)
+  let recount = do
+        words' <- Gtk.editableGetText filterBox
+        turn <- (+ 1) <$> readIORef asked
+        writeIORef asked turn
+        void $ forkIO $ do
+          found <- try (counts words') :: IO (Either SomeException (Either Text Lt.Counts))
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            latest <- readIORef asked
+            case found of
+              Right (Right c) | latest == turn -> writeIORef known [(st, n) | (st, Just n) <- [(ShowOpen, c.opened), (ShowClosed, c.shut), (ShowAll, c.every)]] >> draw
+              _ -> pure ()
+            pure False
+      again = do
         fill synced
         pager.restart
+      searchAgain = again >> recount
   forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> void $ GI.on b #toggled $ do
     active <- GI.get b #active
     when active (writeIORef showing st >> again)
   void $ GI.on labelChoice (GI.PropertyNotify #selected) (const draw)
   void $ GI.on sorts (GI.PropertyNotify #selected) (const again)
-  void $ GI.on filterBox #searchChanged draw
+  -- What is loaded filters at once; the forge is asked once typing stops.
+  void $ GI.on filterBox #changed draw
+  void $ GI.on filterBox #searchChanged searchAgain
   void $ GI.on list #rowActivated $ \row -> do
     index <- Gtk.listBoxRowGetIndex row
     rows <- readIORef shownRows
     when (index >= 0 && fromIntegral index < length rows) $ onOpen (rows !! fromIntegral index)
 
   pager.restart
+  recount
   pure page
   where
     selectedText d = do

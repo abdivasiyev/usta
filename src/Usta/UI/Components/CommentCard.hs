@@ -53,6 +53,8 @@ data Card = Card
     -- ^ Where files attached while editing go.
   , changed :: IO ()
     -- ^ After an edit or delete, e.g. to reload the page.
+  , place :: Maybe Avatar.Place
+    -- ^ The forge the author's picture comes from.
   }
 
 new :: Card -> IO Gtk.Box
@@ -60,7 +62,7 @@ new c = do
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-comment-card"]]
   top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["head"]]
   let who = unparse c.comment.author
-  Avatar.new 24 (T.toUpper (T.take 2 who)) >>= #append top
+  Avatar.person 24 c.place who >>= #append top
   label who ["strong"] >>= #append top
   when' <- label (c.verb <> " " <> ago c.clock c.comment.createdAt <> (if c.comment.edited then " · edited" else "")) ["muted"]
   GI.set when' [#hexpand := True]

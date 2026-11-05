@@ -161,6 +161,7 @@ data Said = Said
     -- ^ Markdown, as written.
   , new :: Bool
     -- ^ Since the user last took part.
+  , place :: Maybe Avatar.Place
   }
 
 -- | What the cache does not hold: the description, the latest comments
@@ -573,7 +574,7 @@ saidCard x = do
   card <- Card.new
   when x.new $ Gtk.widgetAddCssClass card "new"
   top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["said-top"]]
-  Avatar.new 24 (T.toUpper (T.take 2 x.author)) >>= #append top
+  Avatar.person 24 x.place x.author >>= #append top
   label x.author ["said-author"] >>= #append top
   label ("· " <> x.when') ["muted"] >>= #append top
   when x.new $ Badge.new Accent "New" >>= #append top

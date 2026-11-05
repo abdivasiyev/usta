@@ -57,6 +57,8 @@ data Shown = Shown
   , reply :: Text -> IO (Either Text ())
     -- ^ Adds a note; runs off the main thread.
   , upload :: Maybe Attach.Uploader
+  , place :: Maybe Avatar.Place
+    -- ^ The forge the authors' pictures come from.
   }
 
 -- | The drawn thread, and what the Files tab does with it.
@@ -157,7 +159,7 @@ new s = do
   noteBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   let addNote who when'' isFresh body = do
         row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["note"]]
-        Avatar.new 24 (T.toUpper (T.take 2 who)) >>= \a -> GI.set a [#valign := Gtk.AlignStart] >> #append row a
+        Avatar.person 24 s.place who >>= \a -> GI.set a [#valign := Gtk.AlignStart] >> #append row a
         column <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #hexpand := True]
         top' <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
         label who ["strong"] >>= #append top'

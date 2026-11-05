@@ -49,6 +49,8 @@ data Assignees = Assignees
   , load :: IO (Either Text [Candidate])
   , save :: [Login] -> IO (Either Text ())
   , saved :: IO ()
+  , place :: Maybe Avatar.Place
+    -- ^ The forge the people's pictures come from.
   }
 
 type Milestones :: Type
@@ -170,7 +172,7 @@ assignees a anchor = do
           if null group then pure [] else do
             label (T.toUpper heading) ["lbl"] >>= #append f.list
             forM group $ \(login, name) -> do
-              (b, mark, tag) <- personRow (unparse login) name
+              (b, mark, tag) <- personRow a.place (unparse login) name
               void $ GI.on b #clicked (toggle login)
               #append f.list b
               pure (login, T.toLower (unparse login <> " " <> name), b, mark, tag)
@@ -281,7 +283,7 @@ assigneesSection a = do
   #append section header
   forM_ a.current $ \login -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-    Avatar.new 22 (T.toUpper (T.take 2 (unparse login))) >>= #append row
+    Avatar.person 22 a.place (unparse login) >>= #append row
     label (unparse login) [] >>= #append row
     #append section row
   when (null a.current) $ do
@@ -334,15 +336,15 @@ sectionHead title hint = do
   pure (header, edit)
 
 -- | A person to tick: box, avatar, login and full name, and "new".
-personRow :: Text -> Text -> IO (Gtk.Button, Gtk.Image, Gtk.Label)
-personRow login name = do
+personRow :: Maybe Avatar.Place -> Text -> Text -> IO (Gtk.Button, Gtk.Image, Gtk.Label)
+personRow place login name = do
   b <- GI.new Gtk.Button [#cssClasses := ["row"]]
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
   check <- GI.new Gtk.Box [#valign := Gtk.AlignCenter, #cssClasses := ["check"]]
   mark <- Icon.new 11 Icon.Check
   #append check mark
   #append content check
-  Avatar.new 24 (T.toUpper (T.take 2 login)) >>= #append content
+  Avatar.person 24 place login >>= #append content
   texts <- box 0
   GI.set texts [#hexpand := True, #valign := Gtk.AlignCenter]
   label login ["name"] >>= #append texts

@@ -299,3 +299,20 @@ executable usta
     text,
     time,
     usta
+
+test-suite usta-test
+  import: language
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  other-modules:
+    Usta.Types.ParseTests
+  ghc-options: -threaded
+  build-depends:
+    base,
+    hedgehog,
+    tasty,
+    tasty-hedgehog,
+    tasty-hunit,
+    text,
+    usta

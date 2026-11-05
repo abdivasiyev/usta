@@ -57,7 +57,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
-      - uses: DeterminateSystems/magic-nix-cache-action@v8
       - name: Import the signing certificate
         if: env.SIGNING == 'true'
         env:
@@ -98,7 +97,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
-      - uses: DeterminateSystems/magic-nix-cache-action@v8
       - name: Build the AppImage, .deb and .rpm
         # The .deb and .rpm carry usta's own GTK under /nix/store: the
         # distributions' GTK is older than the 4.20 usta needs.

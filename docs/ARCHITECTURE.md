@@ -156,7 +156,7 @@ is left and why.
 - A component goes in `Usta/UI/Components/` when two places need it.
 - Each module with styles exports a `css :: Text`; add it to the list at
   the end of `Window.hs`.
-- Add the module to `other-modules` in `usta.cabal`.
+- Add the module to the library's `exposed-modules` in `usta.cabal`.
 
 ## The cache and migrations
 

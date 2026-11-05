@@ -12,16 +12,22 @@ extra-source-files:
   data/file-icons/*.svg
   data/file-icons/map.json
 
-executable usta
-  main-is: Main.hs
-  hs-source-dirs:
-    app
-    src
+common language
+  default-language: GHC2024
+  default-extensions:
+    DuplicateRecordFields
+    NoFieldSelectors
+    OverloadedRecordDot
+  ghc-options: -Wall
 
+library
+  import: language
+  hs-source-dirs: src
   autogen-modules:
     Paths_usta
   other-modules:
     Paths_usta
+  exposed-modules:
     Usta.Accounts
     Usta.Bus
     Usta.DB
@@ -259,12 +265,6 @@ executable usta
     time,
     typed-process
 
-  default-language: GHC2024
-  default-extensions:
-    DuplicateRecordFields
-    NoFieldSelectors
-    OverloadedRecordDot
-  ghc-options: -Wall -threaded
   c-sources:
     cbits/appearance.c
     cbits/keyring.c
@@ -280,3 +280,22 @@ executable usta
       UserNotifications
   else
     pkgconfig-depends: libsecret-1
+
+executable usta
+  import: language
+  main-is: Main.hs
+  hs-source-dirs: app
+  ghc-options: -threaded
+  build-depends:
+    base,
+    directory,
+    filepath,
+    gi-gio,
+    gi-gtk4,
+    haskell-gi-base,
+    http-client,
+    http-client-tls,
+    persistent,
+    text,
+    time,
+    usta

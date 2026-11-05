@@ -34,9 +34,9 @@
         pname = "usta";
         version = "0.1.0";
         src = pkgs.lib.cleanSource ./.;
-        isLibrary = false;
+        isLibrary = true;
         isExecutable = true;
-        executableHaskellDepends = with hsPkgs; [
+        libraryHaskellDepends = with hsPkgs; [
           aeson
           file-embed
           yaml
@@ -83,8 +83,21 @@
           time
           typed-process
         ];
+        executableHaskellDepends = with hsPkgs; [
+          base
+          directory
+          filepath
+          gi-gio
+          gi-gtk4
+          haskell-gi-base
+          http-client
+          http-client-tls
+          persistent
+          text
+          time
+        ];
         # The keyring: Keychain Services ship with macOS's SDK.
-        executablePkgconfigDepends = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [pkgs.libsecret];
+        libraryPkgconfigDepends = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [pkgs.libsecret];
         license = pkgs.lib.licenses.asl20;
         mainProgram = "usta";
       }).overrideAttrs (old: {

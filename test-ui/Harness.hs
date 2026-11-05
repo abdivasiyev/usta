@@ -20,6 +20,9 @@ module Harness
   , withWindow
   , showPage
   , click
+  , labelsReading
+  , placeIn
+  , scrollLongest
   , openMenu
   , dialogTitled
   ) where
@@ -31,6 +34,7 @@ import Control.Monad (filterM, forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base.BasicTypes (GObject, ManagedPtr)
 import Data.GI.Base.ManagedPtr (withManagedPtr)
+import Data.List (sortOn)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Word (Word32)
@@ -152,6 +156,8 @@ foreign import ccall "usta_test_press" c_press :: Ptr Gtk.EventControllerKey -> 
 screenshot :: Gtk.IsWidget w => w -> FilePath -> IO Bool
 screenshot target path = do
   w <- Gtk.toWidget target
+  -- A window behind others may not be drawn anew: bring it up first.
+  Gtk.widgetGetRoot w >>= maybe (pure Nothing) (GI.castTo Gtk.Window) >>= mapM_ Gtk.windowPresent
   width <- Gtk.widgetGetWidth w
   height <- Gtk.widgetGetHeight w
   paintable <- Gtk.widgetPaintableNew (Just w)
@@ -195,8 +201,15 @@ showPage w page = do
 click :: Gtk.IsWidget w => w -> Text -> IO Bool
 click w text = do
   buttons <- descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Button)
-  found <- filterM (\b -> (== Just text) <$> Gtk.buttonGetLabel b) buttons
-  case found of
+  -- Its label, or one of the labels in it, as a tab with a count has.
+  let reads b = do
+        own <- Gtk.buttonGetLabel b
+        inside <- labelsUnder b
+        pure (own == Just text || text `elem` inside)
+  found <- filterM reads buttons
+  -- One on screen before one on a page behind it.
+  shown <- filterM Gtk.widgetGetMapped found
+  case shown <> found of
     b : _ -> Gtk.widgetActivate b
     [] -> pure False
 
@@ -218,4 +231,27 @@ openMenu w tip = do
   found <- filterM (\m -> (== Just tip) <$> Gtk.widgetGetTooltipText m) menus
   case found of
     m : _ -> Gtk.menuButtonPopup m >> pure True
+    [] -> pure False
+
+labelsUnder :: Gtk.IsWidget w => w -> IO [Text]
+labelsUnder w = descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Label) >>= mapM Gtk.labelGetLabel
+
+-- | The labels on screen under @w@ that read @text@.
+labelsReading :: Gtk.IsWidget w => Text -> w -> IO [Gtk.Label]
+labelsReading text w = widgetsOf Gtk.Label w >>= filterM (fmap (== text) . Gtk.labelGetLabel)
+
+-- | Where in @within@ the widget's top left corner is.
+placeIn :: (Gtk.IsWidget a, Gtk.IsWidget b) => a -> b -> IO (Maybe (Float, Float))
+placeIn widget within = do
+  origin <- Graphene.newZeroPoint
+  (ok, p) <- Gtk.widgetComputePoint widget within origin
+  if ok then (\x y -> Just (x, y)) <$> Graphene.getPointX p <*> Graphene.getPointY p else pure Nothing
+
+-- | Scrolls the longest view on screen under @w@ down by @by@ pixels.
+scrollLongest :: Gtk.IsWidget w => w -> Double -> IO Bool
+scrollLongest w by = do
+  views <- widgetsOf Gtk.ScrolledWindow w
+  sized <- forM views $ \v -> Gtk.scrolledWindowGetVadjustment v >>= \a -> (,) a <$> Gtk.adjustmentGetUpper a
+  case reverse (sortOn snd sized) of
+    (a, _) : _ -> Gtk.adjustmentGetValue a >>= \now -> Gtk.adjustmentSetValue a (now + by) >> pure True
     [] -> pure False

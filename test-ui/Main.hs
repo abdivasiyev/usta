@@ -25,6 +25,8 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Harness
 import Usta.Preferences (Theme (..))
 import qualified Usta.Preferences as Preferences
+import Usta.Details (From (..))
+import Usta.Types.Diff (parseDiff)
 import qualified Usta.Types.Platform as Platform
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
 import qualified Usta.UI.Platform as UIPlatform
@@ -65,6 +67,23 @@ tests app =
     , dependentTestGroup "dialogs open over their window"
         AllFinish
         [ testCase (T.unpack title) (dialogOverWindow app button title) | (button, title) <- [("+ New", "New repository"), ("⑂ Fork…", "Fork"), ("Clone…", "Clone")] ]
+    , testCase "a pull request opens from the inbox, and its files show" $ withWindow app withDiff $ \w -> do
+        onMain (click w "Open review") >>= assertBool "no Open review"
+        -- Pages cross-fade: the inbox is on screen a moment longer.
+        let only wanted = (\ls -> wanted `elem` ls && "Mark all done" `notElem` ls) <$> labelsIn w
+        eventually "the pull request's tabs" 3000 (only "Conversation")
+        onMain (click w "Files") >>= assertBool "no Files tab"
+        eventually "the changed file" 3000 (only "usta.cabal")
+        -- A picture shows what was last drawn: let a frame be.
+        onMain (Gtk.windowPresent w) >> pause 800
+        eventually "drawing it" 3000 (screenshot w "dist-newstyle/ui-shots/pull-request-files.png")
+        -- Down the long file, its name stays on top of the diff.
+        let nameAt = labelsReading "usta.cabal" w >>= mapM (`placeIn` w)
+        scrolled <- onMain (scrollLongest w 600)
+        assertBool "no diff to scroll" scrolled
+        pause 400
+        after <- onMain nameAt
+        assertBool ("the file's name went with its lines: " <> show after) (any (maybe False (\(x, y) -> x > 280 && y > 150 && y < 320)) after)
     , testCase "Enter sends a comment, and Shift Enter starts a line" editorSends
     , testCase "Emacs keys in a text field" emacsKeys
     , testCase "the repositories' forge filter narrows the list" $ withWindow app Source.samples $ \w -> do
@@ -151,3 +170,16 @@ dialogOverWindow app button title = withWindow app Source.samples $ \w -> do
   assertBool "not over the window" (parent == Just mine)
   onMain (Gtk.windowGetModal dialog) >>= assertBool "not modal"
   onMain (Gtk.windowDestroy dialog)
+
+-- | The sample data, with a diff for every pull request: the long file
+-- of "usta.cabal" and a short one.
+withDiff :: Source.Source
+withDiff = Source.samples {Source.pullFiles = \_ _ _ -> pure ((,) FromForge <$> parseDiff diff)}
+  where
+    diff = T.unlines $
+      [ "diff --git a/usta.cabal b/usta.cabal", "--- a/usta.cabal", "+++ b/usta.cabal", "@@ -1,80 +1,81 @@" ]
+        <> [" line " <> T.pack (show n) | n <- [1 .. 40 :: Int]]
+        <> ["-  build-depends: base", "+  build-depends:", "+    base,"]
+        <> [" line " <> T.pack (show n) | n <- [43 .. 80 :: Int]]
+        <> [ "diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1 +1 @@", "-usta", "+usta, a forge client" ]
+

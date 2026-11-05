@@ -306,6 +306,7 @@ test-suite usta-test
   main-is: Main.hs
   hs-source-dirs: test
   other-modules:
+    Usta.DiagramTests
     Usta.GitTests
     Usta.GraphTests
     Usta.PreferencesTests

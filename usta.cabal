@@ -311,6 +311,7 @@ test-suite usta-test
     Usta.GraphTests
     Usta.MermaidTests
     Usta.PreferencesTests
+    Usta.SyncTests
     Usta.Types.DiffTests
     Usta.Types.LinkTests
     Usta.Types.ParseTests

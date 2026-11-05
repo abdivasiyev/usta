@@ -12,6 +12,7 @@ import qualified Usta.Types.DiffTests
 import qualified Usta.Types.WorkflowTests
 import qualified Usta.GraphTests
 import qualified Usta.UI.Pages.PullRequest.ChecksTests
+import qualified Usta.UI.Components.FileIconTests
 
 main :: IO ()
 main =
@@ -26,4 +27,5 @@ main =
       , Usta.Types.WorkflowTests.tests
       , Usta.GraphTests.tests
       , Usta.UI.Pages.PullRequest.ChecksTests.tests
+      , Usta.UI.Components.FileIconTests.tests
       ]

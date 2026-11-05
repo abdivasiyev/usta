@@ -2,6 +2,9 @@
 -- everything that runs without a window.
 module Main (main) where
 
+import System.Environment (setEnv)
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty (defaultMain, testGroup)
 
 import qualified Usta.Types.ParseTests
@@ -20,8 +23,14 @@ import qualified Usta.DiagramTests
 import qualified Usta.MermaidTests
 import qualified Usta.UI.HighlightTests
 
+-- | The tests run with a home of their own: what usta keeps beside its
+-- cache (drafts, viewed files, the log) never touches the real one.
 main :: IO ()
-main =
+main = withSystemTempDirectory "usta-test" $ \home -> do
+  setEnv "HOME" home
+  setEnv "XDG_DATA_HOME" (home </> "data")
+  setEnv "XDG_CONFIG_HOME" (home </> "config")
+  setEnv "XDG_CONFIG_DIRS" (home </> "etc")
   defaultMain $
     testGroup
       "usta"

@@ -17,6 +17,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad (forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
+import Data.Int (Int32)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -41,6 +42,8 @@ data Commit = Commit
     -- ^ The body below the subject; may be empty.
   , author :: Text
   , initials :: Text
+  , login :: Maybe Text
+    -- ^ The author's account, for the picture.
   , age :: Text
   , changes :: [Diff.File]
   }
@@ -53,6 +56,7 @@ fromCommit c commit = Commit
   , message = commit.body
   , author = commit.author
   , initials = T.toUpper (T.take 2 commit.author)
+  , login = commit.login
   , age = ago c commit.authoredAt
   , changes = []
   }
@@ -64,8 +68,8 @@ type LoadChanges = Commit -> IO (Either Text [Diff.File])
 
 -- | @source@ says where the commits came from, as "History from the local
 -- mirror".
-new :: Text -> LoadChanges -> [Commit] -> IO Gtk.Widget
-new source loadChanges commits = do
+new :: Maybe Avatar.Place -> Text -> LoadChanges -> [Commit] -> IO Gtk.Widget
+new place source loadChanges commits = do
   columns <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
                             , #cssClasses := ["u-commits"]
                             ]
@@ -82,7 +86,7 @@ new source loadChanges commits = do
   #append columns detailScroll
 
   rows <- forM commits $ \c -> do
-    button <- commitRow c
+    button <- commitRow place c
     #append side button
     pure (c, button)
   let select c = do
@@ -90,7 +94,7 @@ new source loadChanges commits = do
           if other.hash == c.hash
             then Gtk.widgetAddCssClass button "selected"
             else Gtk.widgetRemoveCssClass button "selected"
-        content <- detail loadChanges c
+        content <- detail place loadChanges c
         GI.set detailScroll [#child := content]
   forM_ rows $ \(c, button) -> void $ GI.on button #clicked (select c)
   forM_ (take 1 commits) select
@@ -99,10 +103,10 @@ new source loadChanges commits = do
     plural 1 = " commit"
     plural _ = " commits"
 
-commitRow :: Commit -> IO Gtk.Button
-commitRow c = do
+commitRow :: Maybe Avatar.Place -> Commit -> IO Gtk.Button
+commitRow place c = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
-  avatar <- Avatar.new 24 c.initials
+  avatar <- pictureOf place 24 c
   GI.set avatar [#valign := Gtk.AlignStart]
   #append content avatar
   text <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #hexpand := True]
@@ -122,8 +126,8 @@ commitRow c = do
   where
     age' = "committed " <> c.age
 
-detail :: LoadChanges -> Commit -> IO Gtk.Box
-detail loadChanges c = do
+detail :: Maybe Avatar.Place -> LoadChanges -> Commit -> IO Gtk.Box
+detail place loadChanges c = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 16, #cssClasses := ["commit-detail"]]
   header <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
   title <- label c.subject ["commit-title"]
@@ -136,7 +140,7 @@ detail loadChanges c = do
       GI.set body [#wrap := True]
       #append header body
   meta <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Avatar.new 20 c.initials >>= #append meta
+  pictureOf place 20 c >>= #append meta
   label c.author ["small", "strong"] >>= #append meta
   label ("committed " <> c.age) ["muted", "small"] >>= #append meta
   fullHash <- label c.hash ["mono", "small", "muted"]
@@ -167,7 +171,7 @@ sample :: [Commit]
 sample =
   [ Commit "e1c90fa3b7d24c61a9f05e8812c4d6b0f3a7e921" "feat: add gi-gtk4 dependency"
       "Adds the GTK4 bindings to the cabal file and the flake derivation."
-      "abdivasiyev" "AA" "5 min ago"
+      "abdivasiyev" "AA" (Just "abdivasiyev") "5 min ago"
       [ Diff.File "usta.cabal" False
           [ Hunk "@@ -12,6 +12,8 @@ executable usta"
           , Context 13 13 "  main-is: Main.hs"
@@ -203,3 +207,7 @@ css = mconcat
   , "box.u-commits box.commit-detail { padding: 20px 24px; }"
   , "box.u-commits label.commit-title { font-size: 18px; font-weight: 600; }"
   ]
+
+-- | The author's picture, or initials without an account.
+pictureOf :: Maybe Avatar.Place -> Int32 -> Commit -> IO Gtk.Widget
+pictureOf place size c = maybe (Avatar.new size c.initials >>= Gtk.toWidget) (Avatar.person size place) c.login

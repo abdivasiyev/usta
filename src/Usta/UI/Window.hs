@@ -499,6 +499,7 @@ buildWith start crashed given app = do
                   { branch = r.defaultBranch
                   , page = \n -> fmap snd <$> source.history r.host r.name r.defaultBranch n
                   , changes = \x -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff r.host r.name x.sha
+                  , place = placeOf r.forge r.host
                   }
             }
         , Repositories.Tab
@@ -956,7 +957,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
       let changesOf commit = case parse commit.hash of
             Left _ -> pure (Left "That commit hash is not one usta can read.")
             Right sha -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff summary.host summary.repo sha
-      Commits.new (said from "history from the local mirror" "history from the forge's API") changesOf
+      Commits.new (placeOf summary.forge summary.host) (said from "history from the local mirror" "history from the forge's API") changesOf
         (map (Commits.fromCommit c) commits)
   PullRequest.Checks -> do
     -- Run workflow, on the pull request's branch.

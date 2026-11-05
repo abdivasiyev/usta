@@ -43,6 +43,8 @@ data Actions = Actions
     -- ^ The history's page, from 1, 50 commits each; off the main thread.
   , changes :: Commit -> IO (Either Text [Diff.File])
     -- ^ A commit's changes against its first parent; off the main thread.
+  , place :: Maybe Avatar.Place
+    -- ^ Where the authors' pictures come from.
   }
 
 new :: Clock -> Actions -> IO Gtk.Widget
@@ -58,9 +60,13 @@ new c a = do
   #append page' top
   groups <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
   #append page' groups
-  more <- Button.new Button.defaults {Button.label = Just "Load more", Button.variant = Button.Secondary, Button.small = True}
+  -- The next page comes as the list is scrolled to its end; Try again
+  -- shows only when a page failed.
+  more <- Button.new Button.defaults {Button.label = Just "Try again", Button.variant = Button.Secondary, Button.small = True}
   GI.set more [#halign := Gtk.AlignCenter, #visible := False]
   #append page' more
+  loadingMore <- GI.new Gtk.Label [#label := "Loading more…", #visible := False, #cssClasses := ["muted", "small"]]
+  #append page' loadingMore
   listScroll <- GI.new Gtk.ScrolledWindow [#child := page', #hscrollbarPolicy := Gtk.PolicyTypeNever, #vexpand := True]
   void $ Gtk.stackAddNamed stack listScroll (Just "list")
   detail <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #cssClasses := ["detail"]]
@@ -69,6 +75,9 @@ new c a = do
 
   loaded <- newIORef []
   nextPage <- newIORef (1 :: Int)
+  -- Whether a page is on its way, and whether there is one after.
+  busy <- newIORef False
+  hasMore <- newIORef True
   selected <- newIORef Nothing
   let clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
       dayOf t = localDay (utcToLocalTime c.zone t)
@@ -85,8 +94,9 @@ new c a = do
         when (null shown && not (null commits)) $ label "No commit matches." ["muted"] >>= #append groups
         forM_ (groupBy ((==) `on` (dayOf . (.authoredAt))) shown) $ \day -> do
           forM_ (take 1 day) $ \first -> label (dayName first.authoredAt) ["day"] >>= #append groups
-          list <- GI.new Gtk.ListBox [#selectionMode := Gtk.SelectionModeSingle, #cssClasses := ["u-card", "commits"]]
-          forM_ day $ \x -> commitRow c x >>= #append list
+          -- One click chooses a commit; a double click or Enter opens it.
+          list <- GI.new Gtk.ListBox [#selectionMode := Gtk.SelectionModeSingle, #activateOnSingleClick := False, #cssClasses := ["u-card", "commits"]]
+          forM_ day $ \x -> commitRow c a.place x >>= #append list
           void $ GI.on list #rowActivated $ \row -> do
             i <- Gtk.listBoxRowGetIndex row
             when (i >= 0 && fromIntegral i < length day) $ open (day !! fromIntegral i)
@@ -96,22 +106,37 @@ new c a = do
           #append groups list
       load = do
         n <- readIORef nextPage
-        GI.set more [#sensitive := False, #label := "Loading…"]
+        writeIORef busy True
+        GI.set more [#visible := False]
+        GI.set loadingMore [#visible := n > 1]
         void $ forkIO $ do
           result <- try (a.page n)
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            writeIORef busy False
+            GI.set loadingMore [#visible := False]
             case result of
               Right (Right commits) -> do
                 modifyIORef' loaded (<> commits)
                 writeIORef nextPage (n + 1)
-                GI.set more [#visible := length commits == 50, #sensitive := True, #label := "Load more"]
+                writeIORef hasMore (length commits == 50)
                 draw
+                -- A page that does not fill the view has no end to scroll to.
+                void $ GLib.idleAdd GLib.PRIORITY_DEFAULT_IDLE (fill >> pure False)
               Right (Left problem) -> failed problem
               Left (e :: SomeException) -> failed (T.pack (show e))
             pure False
       failed problem = do
-        GI.set more [#visible := False]
+        GI.set more [#visible := True]
         label problem ["muted"] >>= #append groups
+      next = do
+        waiting <- readIORef busy
+        more' <- readIORef hasMore
+        when (more' && not waiting) load
+      fill = do
+        adjustment <- Gtk.scrolledWindowGetVadjustment listScroll
+        upper <- Gtk.adjustmentGetUpper adjustment
+        shown <- Gtk.adjustmentGetPageSize adjustment
+        when (upper <= shown + 1) next
       open x = do
         clear detail
         back <- Button.new Button.defaults {Button.label = Just "← Commits", Button.variant = Button.Flat, Button.small = True}
@@ -141,6 +166,7 @@ new c a = do
             pure False
   void $ GI.on filterBox #searchChanged draw
   void $ GI.on more #clicked load
+  void $ GI.on listScroll #edgeReached $ \position -> when (position == Gtk.PositionTypeBottom) next
 
   -- Enter opens the chosen commit, y copies its hash, Esc goes back.
   keys <- GI.new Gtk.ShortcutController []
@@ -157,10 +183,13 @@ new c a = do
   load
   Gtk.toWidget stack
 
-commitRow :: Clock -> Commit -> IO Gtk.Box
-commitRow c x = do
+commitRow :: Clock -> Maybe Avatar.Place -> Commit -> IO Gtk.Box
+commitRow c place x = do
   row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["commit"]]
-  Avatar.new 24 (T.toUpper (T.take 2 x.author)) >>= #append row
+  -- The picture of the author's account; initials when it is not known.
+  case x.login of
+    Just who -> Avatar.person 24 place who >>= #append row
+    Nothing -> Avatar.new 24 (T.toUpper (T.take 2 x.author)) >>= #append row
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #hexpand := True]
   subject <- label x.subject ["subject"]
   GI.set subject [#ellipsize := Pango.EllipsizeModeEnd]
@@ -180,6 +209,8 @@ css = mconcat
   , "stack.u-repo-commits list.commits { background: transparent; border-radius: 8px; }"
   , "stack.u-repo-commits list.commits row { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); }"
   , "stack.u-repo-commits list.commits row:last-child { border-bottom: none; }"
+  , "stack.u-repo-commits list.commits row { transition: background 120ms ease-out; }"
+  , "stack.u-repo-commits list.commits row:hover { background: var(--window); }"
   , "stack.u-repo-commits list.commits row:selected { background: var(--accent-bg); }"
   , "stack.u-repo-commits label.subject { font-weight: 500; }"
   , "stack.u-repo-commits label.small { font-size: 12px; }"

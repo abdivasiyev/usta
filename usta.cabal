@@ -139,6 +139,7 @@ executable usta
     Usta.UI.Components.BranchPicker
     Usta.UI.Components.Button
     Usta.UI.Components.Card
+    Usta.UI.Components.Choices
     Usta.UI.Components.CodeView
     Usta.UI.Components.CommandPalette
     Usta.UI.Components.CommentCard

@@ -132,6 +132,16 @@
           wai
           warp
         ];
+        benchmarkHaskellDepends = with hsPkgs; [
+          base
+          containers
+          filepath
+          persistent
+          tasty-bench
+          temporary
+          text
+          time
+        ];
         # The UI tests need a display; the build runs the others.
         testTargets = ["usta-test"];
         # The UI tests send keys to GTK from C.

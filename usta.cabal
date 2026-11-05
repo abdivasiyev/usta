@@ -390,3 +390,20 @@ test-suite usta-ui-test
     temporary,
     text,
     usta
+
+benchmark usta-bench
+  import: language
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: bench
+  ghc-options: -threaded
+  build-depends:
+    base,
+    containers,
+    filepath,
+    persistent,
+    tasty-bench,
+    temporary,
+    text,
+    time,
+    usta

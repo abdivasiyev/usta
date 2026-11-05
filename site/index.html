@@ -45,15 +45,16 @@ a{color:#2F5FD0}a:hover{color:#1E46A8}
   <h1 style="margin: 0; font-size: clamp(40px, 6vw, 68px); line-height: 1.04; font-weight: 800; letter-spacing: -0.035em; max-width: 900px">Your forges, in one fast native window.</h1>
   <p style="margin: 0; font-size: 19px; line-height: 1.55; color: #4B515B; max-width: 680px">usta is a desktop client for GitHub and Forgejo. One inbox for reviews, mentions and failed checks; pull requests read from real git diffs; and it keeps working when the network does not.</p>
   <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 6px">
-    <a id="get-macos" class="download primary" href="https://github.com/abdivasiyev/usta/releases/latest">
+    <a id="get-macos" class="download primary" href="https://github.com/abdivasiyev/usta/releases/latest/download/usta.dmg">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
       Download for macOS
     </a>
-    <a id="get-linux" class="download" href="https://github.com/abdivasiyev/usta/releases/latest">
+    <a id="get-linux" class="download" href="https://github.com/abdivasiyev/usta/releases/latest/download/usta-x86_64.AppImage">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
       Download for Linux
     </a>
   </div>
+  <p id="latest" style="margin: 0; font-size: 14px; color: #4B515B" hidden></p>
   <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #3B4049; background: #ECEEF2; padding: 8px 14px; border-radius: 8px">nix run github:abdivasiyev/usta</code>
 </section>
 
@@ -226,12 +227,16 @@ a{color:#2F5FD0}a:hover{color:#1E46A8}
     <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 14px; padding: 26px; display: flex; flex-direction: column; gap: 12px">
       <h3 style="margin: 0; font-size: 20px">macOS</h3>
       <p style="margin: 0; color: #4B515B; line-height: 1.55">Download <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px">usta.dmg</code> from the latest release and drag usta into Applications.</p>
-      <a href="https://github.com/abdivasiyev/usta/releases/latest" style="font-weight: 600">Latest release →</a>
+      <a href="https://github.com/abdivasiyev/usta/releases/latest/download/usta.dmg" style="font-weight: 600">Download usta.dmg →</a>
     </div>
     <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 14px; padding: 26px; display: flex; flex-direction: column; gap: 12px">
       <h3 style="margin: 0; font-size: 20px">Linux</h3>
-      <p style="margin: 0; color: #4B515B; line-height: 1.55">Download <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px">usta-x86_64.AppImage</code>, make it executable and run it.</p>
-      <a href="https://github.com/abdivasiyev/usta/releases/latest" style="font-weight: 600">Latest release →</a>
+      <p style="margin: 0; color: #4B515B; line-height: 1.55">Download <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px">usta-x86_64.AppImage</code>, make it executable and run it, or install the package for your system.</p>
+      <span style="display: flex; flex-wrap: wrap; gap: 16px">
+        <a href="https://github.com/abdivasiyev/usta/releases/latest/download/usta-x86_64.AppImage" style="font-weight: 600">AppImage →</a>
+        <a id="get-deb" href="https://github.com/abdivasiyev/usta/releases/latest" style="font-weight: 600" hidden>.deb →</a>
+        <a id="get-rpm" href="https://github.com/abdivasiyev/usta/releases/latest" style="font-weight: 600" hidden>.rpm →</a>
+      </span>
     </div>
     <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 14px; padding: 26px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
       <h3 style="margin: 0; font-size: 20px">Nix</h3>
@@ -266,6 +271,28 @@ programs.usta = {
     document.getElementById("get-linux").classList.add("primary");
   }
 })();
+
+// The newest release: its number, and the packages whose names carry it.
+// The buttons work without this: GitHub sends latest/download/<file> to
+// the newest release's file.
+fetch("https://api.github.com/repos/abdivasiyev/usta/releases/latest", {headers: {Accept: "application/vnd.github+json"}})
+  .then(function (r) { return r.ok ? r.json() : null; })
+  .then(function (release) {
+    if (!release) return;
+    var latest = document.getElementById("latest");
+    var day = new Date(release.published_at).toLocaleDateString(undefined, {year: "numeric", month: "long", day: "numeric"});
+    latest.textContent = "Latest: " + release.tag_name + ", released " + day;
+    latest.hidden = false;
+    (release.assets || []).forEach(function (asset) {
+      var kind = /\.deb$/.test(asset.name) ? "get-deb" : /\.rpm$/.test(asset.name) ? "get-rpm" : null;
+      if (kind) {
+        var link = document.getElementById(kind);
+        link.href = asset.browser_download_url;
+        link.hidden = false;
+      }
+    });
+  })
+  .catch(function () {});
 </script>
 </body>
 </html>

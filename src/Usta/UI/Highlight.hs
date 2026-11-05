@@ -34,7 +34,8 @@ newtype Language = Language Syntax
 
 -- | By file name, e.g. "src/Usta/Git.hs" or "flake.nix".
 languageFor :: FilePath -> Maybe Language
-languageFor path = Language <$> listToMaybe (syntaxesByFilename defaultSyntaxMap path)
+-- Skylighting's "Default" is plain text: no language.
+languageFor path = Language <$> listToMaybe [s | s <- syntaxesByFilename defaultSyntaxMap path, Skylighting.sName s /= "Default"]
 
 -- | By the name after a Markdown fence, e.g. "haskell", or an extension
 -- such as "sh".

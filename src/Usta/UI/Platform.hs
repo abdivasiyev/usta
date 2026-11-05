@@ -10,10 +10,16 @@ module Usta.UI.Platform
   , canNotify
   , shortcut
   , configureHeaderBar
+  , dialogOver
   ) where
 
+import Control.Monad (forM_, void)
 import Data.GI.Base (AttrOp ((:=)), set)
+import qualified Data.GI.Base as GI
+import Data.GI.Base.ManagedPtr (withManagedPtr)
 import Data.Text (Text)
+import Foreign.Ptr (Ptr)
+import qualified GI.Gdk as Gdk
 import qualified GI.Gtk as Gtk
 
 import Usta.Types.Platform (Platform (..), canNotify, current)
@@ -34,3 +40,27 @@ configureHeaderBar platform header = case platform of
   Windows -> set header [#decorationLayout := "icon:minimize,maximize,close"]
   -- On Linux the desktop's gtk-decoration-layout setting decides.
   _ -> pure ()
+
+-- | Opens @dialog@ over @parent@: on top of it and modal to it, as GTK
+-- does; on macOS also as a child window, so a full-screen usta shows it
+-- over itself rather than on a full-screen space of its own.
+dialogOver :: Gtk.Window -> Maybe Gtk.Window -> IO ()
+dialogOver dialog parent = forM_ parent $ \p -> do
+  Gtk.windowSetTransientFor dialog (Just p)
+  case current of
+    MacOS -> do
+      let both act = do
+            mine <- Gtk.nativeGetSurface dialog
+            theirs <- Gtk.nativeGetSurface p
+            case (mine, theirs) of
+              (Just a, Just b) -> withManagedPtr a $ \pa -> withManagedPtr b $ \pb -> act pa pb
+              _ -> pure ()
+      void $ GI.on dialog #map (both c_attach)
+      void $ GI.on dialog #unmap (both c_detach)
+    _ -> pure ()
+  -- Closed, the dialog hands the focus back to the window it was over, so
+  -- usta never ends up with no window in front.
+  void $ GI.on dialog #destroy (Gtk.windowPresent p)
+
+foreign import ccall unsafe "usta_attach_dialog" c_attach :: Ptr Gdk.Surface -> Ptr Gdk.Surface -> IO ()
+foreign import ccall unsafe "usta_detach_dialog" c_detach :: Ptr Gdk.Surface -> Ptr Gdk.Surface -> IO ()

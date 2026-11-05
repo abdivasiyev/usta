@@ -270,6 +270,7 @@ executable usta
     cbits/keyring.c
     cbits/notify.c
     cbits/urls.c
+    cbits/windows.c
 
   if os(darwin)
     frameworks:

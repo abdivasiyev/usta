@@ -478,7 +478,7 @@ buildWith start crashed given app = do
             , title = "Actions"
             , build = do
                 c <- clock
-                RepositoryActions.new c (source.runs r.host r.name) (source.checkLog r.host r.name) (source.jobSteps r.host r.name)
+                RepositoryActions.new c (source.runs r.host r.name) (source.workflows r.host r.name) (source.checkLog r.host r.name) (source.jobSteps r.host r.name)
             }
         , Repositories.Tab
             { followsBranch = True

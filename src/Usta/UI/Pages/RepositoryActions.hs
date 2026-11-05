@@ -31,10 +31,11 @@ import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Check (Job, Run (..), State (..))
 
--- | @load@ asks the forge for the runs; @logOf@ for a job's log, @stepsOf@
--- for a running job's steps.
-new :: Clock -> IO (Either Text [Run]) -> (Job -> IO (Either Text Text)) -> (Job -> IO (Either Text (State, [(Text, State)]))) -> IO Gtk.Widget
-new c load logOf stepsOf = do
+-- | @load@ asks the forge for the runs; @current@ for the workflows the
+-- repository has now, which the filter offers (a deleted one's runs still
+-- list); @logOf@ for a job's log, @stepsOf@ for a running job's steps.
+new :: Clock -> IO (Either Text [Run]) -> IO (Either Text [Text]) -> (Job -> IO (Either Text Text)) -> (Job -> IO (Either Text (State, [(Text, State)]))) -> IO Gtk.Widget
+new c load current logOf stepsOf = do
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 16, #cssClasses := ["u-repo-actions"]]
   -- The runs keep to a narrow column; the jobs and logs take the rest.
   left <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10, #hexpand := False, #widthRequest := 380]
@@ -80,9 +81,10 @@ new c load logOf stepsOf = do
         first <- Gtk.listBoxGetRowAtIndex list 0
         Gtk.listBoxSelectRow list first
         when (null rows) (clear right)
-      fill runs = do
+      fill (runs, named) = do
         writeIORef items runs
-        choices workflows "All workflows" (nub (map (.workflow) runs))
+        -- Without the forge's list, the workflows the runs name.
+        choices workflows "All workflows" (either (const (nub (map (.workflow) runs))) id named)
         choices branches "Any branch" (nub (map (.branch) runs))
         draw
   forM_ [workflows, branches, states] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const draw)
@@ -94,12 +96,12 @@ new c load logOf stepsOf = do
       runDetail c logOf stepsOf (rows !! fromIntegral index) >>= #append right
 
   void $ forkIO $ do
-    result <- try load
+    result <- try ((,) <$> load <*> current)
     void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
       Gtk.boxRemove card loading
       case result of
-        Right (Right runs) -> fill runs
-        Right (Left problem) -> GI.set note [#label := "The forge could not list the runs. " <> problem, #visible := True]
+        Right (Right runs, named) -> fill (runs, named)
+        Right (Left problem, _) -> GI.set note [#label := "The forge could not list the runs. " <> problem, #visible := True]
         Left (e :: SomeException) -> GI.set note [#label := "The forge could not list the runs. " <> T.pack (show e), #visible := True]
       pure False
   Gtk.toWidget page

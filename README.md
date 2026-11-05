@@ -1,5 +1,7 @@
 # usta
 
+[![Landing page](https://github.com/abdivasiyev/usta/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/abdivasiyev/usta/actions/workflows/pages/pages-build-deployment)
+
 A desktop client to connect with your forge.
 
 usta shows your pull requests, issues and notifications from GitHub, GitLab
@@ -96,7 +98,9 @@ secrets for signing and notarizing.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setting up, testing and pull
+requests, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the
+code is built. The landing page is <https://usta.azizovich.uz>.
 
 ## License
 

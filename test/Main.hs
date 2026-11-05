@@ -11,6 +11,7 @@ import qualified Usta.UpdatesTests
 import qualified Usta.Types.DiffTests
 import qualified Usta.Types.WorkflowTests
 import qualified Usta.GraphTests
+import qualified Usta.UI.Pages.PullRequest.ChecksTests
 
 main :: IO ()
 main =
@@ -24,4 +25,5 @@ main =
       , Usta.Types.DiffTests.tests
       , Usta.Types.WorkflowTests.tests
       , Usta.GraphTests.tests
+      , Usta.UI.Pages.PullRequest.ChecksTests.tests
       ]

@@ -8,6 +8,8 @@ module Usta.UI.Pages.PullRequest.Checks
   ( LogLine (..)
   , Model (..)
   , parseLog
+  , ansiPieces
+  , ansiMarkup
   , logView
   , new
   , css
@@ -288,9 +290,17 @@ ansiPieces t = go (Nothing, False) (T.splitOn "\ESC[" t)
       let (codes, after) = T.span (\c -> isDigit c || c == ';') chunk
           command = T.take 1 after
           text = T.drop 1 after
-          look' = if command == "m" then foldl apply look (codesOf codes) else look
+          look' = if command == "m" then styles look (codesOf codes) else look
        in (look', text) : concatMap' look' more
     codesOf c = if T.null c then [0] else [n | p <- T.splitOn ";" c, Just n <- [readMaybe (T.unpack p) :: Maybe Int]]
+    -- 38 and 48 take a 256-color ("5;n") or RGB ("2;r;g;b") color after
+    -- them: its numbers are no codes of their own, and usta keeps its
+    -- palette for them.
+    styles look codes = case codes of
+      [] -> look
+      c : 5 : _ : more | c `elem` [38, 48] -> styles look more
+      c : 2 : _ : _ : _ : more | c `elem` [38, 48] -> styles look more
+      c : more -> styles (apply look c) more
     apply (fg, bold) code
       | code == 0 = (Nothing, False)
       | code == 1 = (fg, True)

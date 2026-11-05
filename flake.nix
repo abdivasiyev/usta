@@ -32,7 +32,7 @@
     in
       (hsPkgs.mkDerivation {
         pname = "usta";
-        version = "0.1.0.0";
+        version = "0.1.0";
         src = pkgs.lib.cleanSource ./.;
         isLibrary = false;
         isExecutable = true;

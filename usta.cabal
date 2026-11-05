@@ -328,17 +328,27 @@ test-suite usta-test
   ghc-options: -threaded
   build-depends:
     aeson,
+    aeson-pretty,
     base,
     bytestring,
+    case-insensitive,
     containers,
     directory,
     filepath,
     hedgehog,
+    http-client,
+    http-types,
+    network,
     persistent,
+    servant-client,
     tasty,
     tasty-hedgehog,
     tasty-hunit,
     temporary,
     text,
     time,
-    usta
+    typed-process,
+    usta,
+    vector,
+    wai,
+    warp

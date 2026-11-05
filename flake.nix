@@ -98,19 +98,29 @@
         ];
         testHaskellDepends = with hsPkgs; [
           aeson
+          aeson-pretty
           base
           bytestring
+          case-insensitive
           containers
           directory
           filepath
           hedgehog
+          http-client
+          http-types
+          network
           persistent
+          servant-client
           tasty
           tasty-hedgehog
           tasty-hunit
           temporary
           text
           time
+          typed-process
+          vector
+          wai
+          warp
         ];
         # The keyring: Keychain Services ship with macOS's SDK.
         libraryPkgconfigDepends = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [pkgs.libsecret];

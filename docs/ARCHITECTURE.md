@@ -2,7 +2,8 @@
 
 This is the map for working on usta's code. [CONTRIBUTING.md](../CONTRIBUTING.md)
 covers setting up, the rules for pull requests and how to test;
-[DESIGN.md](DESIGN.md) is how every screen looks and behaves.
+[DESIGN.md](DESIGN.md) is how every screen looks and behaves, and
+[TESTING.md](TESTING.md) how it is tested.
 
 ## The shape of it
 
@@ -65,7 +66,8 @@ never talks to a forge from the window directly:
 | `data/` | The app icon, file-type icons, macOS `Info.plist`, Linux desktop files |
 | `nix/` | The Home Manager, NixOS and nix-darwin modules |
 | `site/` | The landing page; [SITE.md](SITE.md) says how it is published |
-| `docs/` | This file, the design, and the design's images |
+| `test/`, `test-ui/`, `bench/` | The tests, the window's tests and the benchmarks; [TESTING.md](TESTING.md) says how |
+| `docs/` | This file, the design, the tests, and the design's images |
 
 ## Conventions
 

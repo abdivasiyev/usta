@@ -99,8 +99,11 @@ issue. Once it is agreed, the code follows it.
 
 ### Checking a change
 
-usta has no test suite yet, so a change is checked by running it:
-
+- `cabal test usta-test` passes, and a change comes with tests for what it
+  does; a bug fix with the test that would have caught it. How to run and
+  write each kind is in [TESTING.md](docs/TESTING.md).
+- For a visible change, `cabal test usta-ui-test` passes; look at the
+  screenshots it leaves in `dist-newstyle/ui-shots/`.
 - `nix build` passes with no new warnings.
 - Open every screen you touched, in light and dark, at a narrow and a wide
   window, and on the states the change affects: empty, loading, failed,
@@ -134,7 +137,8 @@ Maintainers cut releases: a tag `v<version>` matching `usta.cabal` runs
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which
 builds `usta.dmg`, the AppImage, a `.deb` and an `.rpm` and attaches them
 to a new GitHub release. The landing page's download links follow the
-newest release on their own.
+newest release on their own. Before tagging, write the release's cache for
+the migration tests (see [TESTING.md](docs/TESTING.md#a-cache-for-each-release)).
 
 ## License
 

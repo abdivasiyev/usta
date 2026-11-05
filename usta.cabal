@@ -189,6 +189,7 @@ executable usta
     Usta.UI.Source
     Usta.UI.Style
     Usta.UI.Window
+    Usta.UrlEvents
 
   build-depends:
     aeson,
@@ -242,10 +243,12 @@ executable usta
   c-sources:
     cbits/appearance.c
     cbits/keyring.c
+    cbits/urls.c
 
   if os(darwin)
     frameworks:
       CoreFoundation
+      CoreServices
       Security
   else
     pkgconfig-depends: libsecret-1

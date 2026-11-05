@@ -5,8 +5,9 @@
 module Main (main) where
 
 import qualified Usta.Handoff as Handoff
+import qualified Usta.UrlEvents as UrlEvents
 import qualified GI.Gtk as Gtk
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Control.Monad (unless)
 import Control.Exception (SomeException, displayException, handle, throwIO)
@@ -125,6 +126,10 @@ running links = do
     crashed <- Log.start
     -- An error no one caught goes to the log, from any thread.
     setUncaughtExceptionHandler (\e -> Log.say "error" (T.pack (displayException e)))
+    -- A usta:// link from macOS waits until the window is there.
+    queued <- newIORef []
+    opener <- newIORef (\l -> modifyIORef' queued (<> [l]))
+    UrlEvents.listen (\l -> readIORef opener >>= ($ l))
     handle (\(e :: SomeException) -> Log.say "error" (T.pack (displayException e)) >> throwIO e) $
       runApp $ \app -> do
         built <- newIORef Nothing
@@ -136,6 +141,12 @@ running links = do
                 pure w
         (_, openLink) <- window
         forM_ links (void . openLink)
+        let fromMacOS l = do
+              Log.say "link" ("from macOS: " <> l)
+              window >>= Gtk.windowPresent . fst
+              void (openLink l)
+        readIORef queued >>= mapM_ fromMacOS
+        writeIORef opener fromMacOS
         Handoff.listen (void . openLink) (window >>= Gtk.windowPresent . fst)
     Log.stop
 

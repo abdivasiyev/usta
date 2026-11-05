@@ -963,6 +963,7 @@ data RestCommit = RestCommit
   , author :: Text
   , authoredAt :: UTCTime
   , message :: Text
+  , login :: Maybe Text
   }
 
 instance FromJSON RestCommit where
@@ -970,6 +971,7 @@ instance FromJSON RestCommit where
     c <- o .: "commit"
     a <- c .: "author"
     RestCommit <$> o .: "sha" <*> a .: "name" <*> a .: "date" <*> c .: "message"
+      <*> (o .:? "author" >>= maybe (pure Nothing) (.:? "login"))
 
 -- | The path segment "base...head".
 type BaseHead :: Type

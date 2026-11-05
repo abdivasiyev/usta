@@ -667,7 +667,7 @@ commitOf :: Api.RestCommit -> IO Cm.Commit
 commitOf c = do
   sha <- parseM c.sha
   let (subject, rest') = T.breakOn "\n" c.message
-  pure Cm.Commit {sha = sha, author = c.author, authoredAt = c.authoredAt, subject = subject, body = T.strip rest'}
+  pure Cm.Commit {sha = sha, author = c.author, authoredAt = c.authoredAt, subject = subject, body = T.strip rest', login = c.login}
 
 -- | Every branch or tag, at most 1000.
 refsOf :: Client -> RepoName -> Text -> IO [Api.RefNode]

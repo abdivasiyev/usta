@@ -597,8 +597,9 @@ instance FromJSON ApiCommit where
     author <- details .: "author"
     name <- author .: "name"
     date <- author .: "date"
+    login <- o .:? "author" >>= maybe (pure Nothing) (.:? "login")
     let (subject, rest) = T.breakOn "\n" message
-    pure (ApiCommit Commit {sha = sha, author = name, authoredAt = date, subject = T.strip subject, body = T.strip rest})
+    pure (ApiCommit Commit {sha = sha, author = name, authoredAt = date, subject = T.strip subject, body = T.strip rest, login = login})
 
 -- | One issue or pull request, with its description and side details.
 type IssueDetail :: Type

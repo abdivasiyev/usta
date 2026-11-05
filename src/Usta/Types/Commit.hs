@@ -40,5 +40,7 @@ data Commit = Commit
   , subject :: Text
   , body :: Text
     -- ^ The message below the subject; empty when there is none.
+  , login :: Maybe Text
+    -- ^ The author's account on the forge, when the forge knows it.
   }
   deriving stock (Eq, Show)

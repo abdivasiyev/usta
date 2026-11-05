@@ -113,6 +113,10 @@ open anchor create opened m = do
   cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
   void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
   createButton <- Button.new Button.defaults { Button.label = Just "Create issue", Button.variant = Button.Primary }
+  -- Enter in a field and Cmd Enter in the description create it.
+  let createIt = void (Gtk.widgetActivate createButton)
+  mapM_ (\e -> GI.on e #activate createIt) [title, labelsEntry, assigneeEntry]
+  MarkdownEditor.sendOn editor False createIt
   void $ GI.on createButton #clicked $ do
     index <- fromIntegral <$> Gtk.dropDownGetSelected repo
     titleText <- T.strip <$> Gtk.editableGetText title

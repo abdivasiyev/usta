@@ -149,6 +149,10 @@ new actions m = do
   #append bottom problem
   createButton <- Button.new Button.defaults { Button.label = Just "Create pull request", Button.variant = Button.Primary }
   #append bottom createButton
+  -- Enter in a field and Cmd Enter in the description create it.
+  let createIt = void (Gtk.widgetActivate createButton)
+  mapM_ (\e -> GI.on e #activate createIt) [titleEntry, reviewersEntry, labelsEntry]
+  MarkdownEditor.sendOn editorBox False createIt
   draftButton <- Button.new Button.defaults { Button.label = Just "Create as draft" }
   #append bottom draftButton
   #append side bottom

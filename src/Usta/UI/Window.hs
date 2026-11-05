@@ -430,6 +430,7 @@ buildWith start crashed given app = do
     , newPullRequest = \r -> openNewPullRequestIn (Just (r.host, r.name))
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
+    , visit = \(host, name) -> source.visit host name
     , loadContents = loadContents
     , files = \r opening -> RepositoryFiles.new RepositoryFiles.Actions
         { loadTree = fmap (\(from, es) -> (said from "From the local mirror" "From the forge's API", es))

@@ -21,11 +21,11 @@ module Usta.UI.Pages.Repositories
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, displayException, try)
 import Control.Monad (forM, forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -145,6 +145,9 @@ data Actions = Actions
   , pinned :: Repository -> IO Bool
   , setPinned :: Repository -> Bool -> IO ()
     -- ^ Pins it to the sidebar, or takes it off.
+  , visit :: (Text, Text) -> IO (Either Text Repository)
+    -- ^ One that is not listed, by host and name, as a link opens it; off
+    -- the main thread.
   }
 
 -- | A tab after Files, built the first time it is chosen.
@@ -162,6 +165,8 @@ data Tab = Tab
 new :: Actions -> [Repository] -> IO (Page Repository, (Text, Text) -> Maybe Text -> IO ())
 new actions repositories = do
   items <- newIORef repositories
+  -- Those opened by a link or a search, not synced: they stay listed.
+  visited <- newIORef []
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
   detail <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
@@ -254,14 +259,41 @@ new actions repositories = do
         row <- Gtk.listBoxGetRowAtIndex list (fromIntegral at)
         Gtk.listBoxSelectRow list row
   select
-  let show' wanted file = do
+  let list' synced = do
+        others <- readIORef visited
+        pure (synced <> [v | v <- others, key v `notElem` map key synced])
+      showAt wanted file = do
         shown <- readIORef items
         forM_ (lookup wanted (zip (map key shown) [0 :: Int ..])) $ \i -> do
           Gtk.listBoxGetRowAtIndex list (fromIntegral i) >>= Gtk.listBoxSelectRow list
           forM_ file $ \place -> readIORef opener >>= ($ place)
+      -- One not listed is asked of its forge first.
+      show' wanted file = do
+        shown <- readIORef items
+        if wanted `elem` map key shown then showAt wanted file else do
+          clear detail
+          GI.new Gtk.Label [#label := "Opening " <> snd wanted <> "…", #cssClasses := ["muted"], #vexpand := True] >>= #append detail
+          void $ forkIO $ do
+            found <- either (\(e :: SomeException) -> Left (T.pack (displayException e))) id <$> try (actions.visit wanted)
+            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+              case found of
+                Right r -> do
+                  modifyIORef' visited (r :)
+                  synced <- readIORef items
+                  all' <- list' (filter ((/= key r) . key) synced)
+                  writeIORef items all'
+                  refill list repositoryRow all'
+                  offerAll
+                  showAt wanted file
+                Left problem -> do
+                  clear detail
+                  GI.new Gtk.Label [ #label := "Could not open " <> snd wanted <> ": " <> problem, #wrap := True
+                                   , #cssClasses := ["muted"], #vexpand := True ] >>= #append detail
+              pure False
   pure . (, show') $ Page
     { widget = page
-    , update = \shown -> do
+    , update = \synced -> do
+        shown <- list' synced
         writeIORef items shown
         refill list repositoryRow shown
         offerAll

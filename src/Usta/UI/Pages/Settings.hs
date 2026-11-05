@@ -445,7 +445,7 @@ modal anchor title text = do
                               , #defaultWidth := 420
                               , #cssClasses := ["usta", "u-confirm"]
                               ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 12, #cssClasses := ["body"]]
   label title ["title"] >>= #append body
   message <- label text ["muted"]

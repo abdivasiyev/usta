@@ -52,7 +52,7 @@ open anchor d = do
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
   dialog <- GI.new Gtk.Window [ #title := "Run workflow", #modal := True, #defaultWidth := 460
                               , #destroyWithParent := True, #cssClasses := ["usta", "u-run-workflow"] ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   header <- GI.new Gtk.HeaderBar []
   Platform.configureHeaderBar Platform.current header
   GI.new Gtk.Label [#label := "Run workflow", #cssClasses := ["title"]] >>= \t -> GI.set header [#titleWidget := t]

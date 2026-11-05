@@ -51,7 +51,7 @@ open anchor d = do
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
   dialog <- GI.new Gtk.Window [ #title := "Fork", #modal := True, #defaultWidth := 440
                               , #destroyWithParent := True, #cssClasses := ["usta", "u-fork"] ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   header <- GI.new Gtk.HeaderBar []
   Platform.configureHeaderBar Platform.current header
   GI.new Gtk.Label [#label := "Fork " <> d.repo, #cssClasses := ["title"]] >>= \t -> GI.set header [#titleWidget := t]

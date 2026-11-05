@@ -372,7 +372,6 @@ test-suite usta-ui-test
   other-modules:
     Harness
   c-sources: test-ui/keys.c
-  pkgconfig-depends: gtk4
   ghc-options: -threaded
   build-depends:
     base,

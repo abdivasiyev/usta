@@ -128,6 +128,7 @@ executable usta
     Usta.Types.Tree
     Usta.Types.Timeline
     Usta.Types.Token
+    Usta.Types.Workflow
     Usta.UI.Components.AssignPickers
     Usta.UI.Components.Attach
     Usta.UI.Components.Avatar
@@ -152,6 +153,7 @@ executable usta
     Usta.UI.Components.PdfView
     Usta.UI.Components.Pager
     Usta.UI.Components.Progress
+    Usta.UI.Components.RunWorkflow
     Usta.UI.Components.SearchField
     Usta.UI.Components.Segmented
     Usta.UI.Components.Shortcodes
@@ -199,6 +201,9 @@ executable usta
 
   build-depends:
     aeson,
+    yaml,
+    scientific,
+    vector,
     async,
     base,
     bytestring,

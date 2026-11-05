@@ -33,6 +33,9 @@
         isExecutable = true;
         executableHaskellDepends = with hsPkgs; [
           aeson
+          yaml
+          scientific
+          vector
           async
           base
           bytestring

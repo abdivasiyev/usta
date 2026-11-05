@@ -452,6 +452,7 @@ buildWith start crashed given app = do
     { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))
     , newPullRequest = \r -> openNewPullRequestIn (Just (pullPlace r))
     , canPush = \r -> source.canPush r.host r.name
+    , clone = \r url dir -> source.cloneTo url dir r.defaultBranch r.defaultBranch
     , newRepository = \anchor -> openNewRepository anchor
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name

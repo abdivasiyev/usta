@@ -214,6 +214,15 @@ github manager host token = do
     , repoIssues = \repo listing from -> do
         found <- pageOf graph Api.graph.searchIssues Api.issueFields (listed "is:issue" repo listing) from
         (\is -> found {Lt.items = is}) <$> traverse (\i -> issueOf host (i, [])) found.items
+    , repoCounts = \repo pulls words' -> do
+        let kind = if pulls then "is:pr" else "is:issue"
+            q w = listed kind repo Lt.Listing {which = w, order = Lt.RecentlyUpdated, words = words'}
+        c <- asked graph (Api.graph.counts Api.GraphQuery
+          { query = Api.countsQuery
+          , variables = object ["opened" .= q Lt.Opened, "drafts" .= q Lt.Drafts, "merged" .= q Lt.Merged, "shut" .= q Lt.Shut, "every" .= q Lt.Every] })
+        pure $ if pulls
+          then Lt.Counts {opened = Just c.opened, drafts = Just c.drafts, merged = Just c.merged, shut = Just c.shut, every = Just c.every}
+          else Lt.Counts {opened = Just c.opened, drafts = Nothing, merged = Nothing, shut = Just c.shut, every = Just c.every}
     , runs = \repo -> do
         let (o, r) = (owner repo, shortName repo)
         Api.WorkflowRuns latest <- run rest (Api.api.runs o r Api.ListQuery {page = Just 1, perPage = Named (Just 20)})
@@ -582,7 +591,7 @@ pageOf client route fields q from = do
 
 -- | A repository's tab as a search: "is:pr repo:o/r is:merged sort:…".
 listed :: Text -> RepoName -> Lt.Listing -> Text
-listed kind repo listing = T.unwords (filter (not . T.null) [kind, "repo:" <> unparse repo, which, order])
+listed kind repo listing = T.unwords (filter (not . T.null) [kind, "repo:" <> unparse repo, which, order, T.strip listing.words])
   where
     pull = kind == "is:pr"
     which = case listing.which of

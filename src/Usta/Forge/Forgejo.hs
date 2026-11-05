@@ -33,7 +33,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time (UTCTime, addUTCTime, diffUTCTime, getCurrentTime, nominalDay)
 import qualified Network.HTTP.Client as HTTP
-import Servant.API (Header, ResponseHeader (..), getResponse, lookupResponseHeader)
+import Servant.API (ResponseHeader (..), getResponse, lookupResponseHeader)
 import Servant.Client (BaseUrl (..), ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
@@ -137,6 +137,14 @@ forgejo manager base host token = do
     , repoIssues = \repo listing from -> do
         (latest, total, next) <- repoPage client repo Api.Issues listing from
         pure Lt.Paged {items = map (issueOf host) [(i, []) | i <- latest], total = total, next = next}
+    -- Forgejo counts open (drafts too) and closed (merged too): pull
+    -- requests get only their total.
+    , repoCounts = \repo pulls words' -> if pulls
+        then (\t -> Lt.Counts Nothing Nothing Nothing Nothing t) <$> countOf client repo Api.Pulls Api.AnyState words'
+        else (\o c t -> Lt.Counts o Nothing Nothing c t)
+          <$> countOf client repo Api.Issues Api.Open words'
+          <*> countOf client repo Api.Issues Api.Closed words'
+          <*> countOf client repo Api.Issues Api.AnyState words'
     , discardPending = \repo n -> do
         login <- myLogin
         given <- run client (everyPage (\page limit -> Api.api.reviews (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
@@ -788,6 +796,18 @@ repositoriesOf client host = do
       , updatedAt = r.updatedAt
       }
 
+wordsOf :: Lt.Listing -> Maybe Text
+wordsOf listing = let w = T.strip listing.words in if T.null w then Nothing else Just w
+
+-- | How many there are in a state, from Forgejo's count of a page of one.
+countOf :: Client -> RepoName -> Api.IssueType -> Api.IssueState -> Text -> IO (Maybe Int)
+countOf client repo kind state words' = do
+  answer <- run client (Api.api.repoIssues (owner repo) (shortName repo)
+    Api.RepoIssuesQuery {kind = Named kind, state = state, sort = Nothing, q = wordsOf (Lt.Listing Lt.Every Lt.RecentlyUpdated words'), page = Just 1, limit = Just 1})
+  pure $ case lookupResponseHeader @"X-Total-Count" answer of
+    Header t -> Just t
+    _ -> Nothing
+
 -- | A page of a repository's issues or pull requests: 20 at a time, as
 -- each pull request costs more calls; the cursor is the page's number.
 repoPage :: Client -> RepoName -> Api.IssueType -> Lt.Listing -> Maybe Text -> IO ([Api.Issue], Maybe Int, Maybe Text)
@@ -804,7 +824,7 @@ repoPage client repo kind listing from = do
         Lt.Newest -> "latest"
         Lt.Oldest -> "oldest"
   answer <- run client (Api.api.repoIssues (owner repo) (shortName repo)
-    Api.RepoIssuesQuery {kind = Named kind, state = state, sort = Just sort, page = Just n, limit = Just 20})
+    Api.RepoIssuesQuery {kind = Named kind, state = state, sort = Just sort, q = wordsOf listing, page = Just n, limit = Just 20})
   let latest = getResponse answer
       total = case lookupResponseHeader @"X-Total-Count" answer of
         Header t -> Just t

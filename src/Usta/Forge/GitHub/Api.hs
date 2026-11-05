@@ -65,6 +65,8 @@ module Usta.Forge.GitHub.Api
   , ReviewNode (..)
   , ThreadNode (..)
   , NoteNode (..)
+  , Counted (..)
+  , countsQuery
   , pullStateQuery
   , pullMutation
   , refsQuery
@@ -264,6 +266,7 @@ data Graph mode = Graph
   , checks :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer Checks)
   , found :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer (Page FoundNode))
   , pullState :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer PullState)
+  , counts :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer Counted)
   }
   deriving stock (Generic)
 
@@ -1242,3 +1245,20 @@ pullStateQuery =
 pullMutation :: Text -> Text -> Text
 pullMutation name extra =
   "mutation($id: ID!) { " <> name <> "(input: {pullRequestId: $id" <> extra <> "}) { clientMutationId } }"
+
+-- | How many each of five searches finds, by their names in 'countsQuery'.
+type Counted :: Type
+data Counted = Counted {opened :: Int, drafts :: Int, merged :: Int, shut :: Int, every :: Int}
+
+instance FromJSON Counted where
+  parseJSON = withObject "Data" $ \d -> Counted
+    <$> count d "opened" <*> count d "drafts" <*> count d "merged" <*> count d "shut" <*> count d "every"
+    where
+      count d k = d .: Data.Aeson.Key.fromText k >>= (.: "issueCount")
+
+-- | Five searches' counts at once, @$opened@ to @$every@.
+countsQuery :: Text
+countsQuery =
+  "query($opened: String!, $drafts: String!, $merged: String!, $shut: String!, $every: String!) {"
+    <> T.concat [" " <> k <> ": search(query: $" <> k <> ", type: ISSUE, first: 1) { issueCount }" | k <- ["opened", "drafts", "merged", "shut", "every"]]
+    <> " }"

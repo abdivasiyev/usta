@@ -432,6 +432,8 @@ data RepoIssuesQuery = RepoIssuesQuery
   , state :: IssueState
   , sort :: Maybe Text
     -- ^ "recentupdate", "latest" or "oldest".
+  , q :: Maybe Text
+    -- ^ Words to find in the title or text.
   , page :: Maybe Int
   , limit :: Maybe Int
   }

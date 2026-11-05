@@ -31,11 +31,11 @@ import Data.Kind (Type)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
@@ -565,8 +565,7 @@ preview actions n = do
 
 openInBrowser :: Notification -> IO ()
 openInBrowser n = do
-  launcher <- Gtk.uriLauncherNew (Just (webUrl n))
-  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  Browser.open ((webUrl n))
 
 -- | A comment: who and when, marked when new, and its Markdown.
 saidCard :: Said -> IO Gtk.Box

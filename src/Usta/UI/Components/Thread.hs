@@ -26,10 +26,10 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
-import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
@@ -135,8 +135,7 @@ new s = do
                              , #tooltipText := "Forgejo resolves threads only on its website"
                              ]
   void $ GI.on forge #clicked $ do
-    launcher <- Gtk.uriLauncherNew (Just s.thread.url)
-    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+    Browser.open (s.thread.url)
   #append top forge
   hide <- GI.new Gtk.Button [#label := "Hide", #cssClasses := ["flat", "show"]]
   when (resolved' || s.outdated) $ #append top hide

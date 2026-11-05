@@ -24,10 +24,10 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
@@ -358,8 +358,7 @@ open anchor m signInWith browserSignIn onAdded = do
 
 openUri :: Text -> IO ()
 openUri uri = do
-  launcher <- Gtk.uriLauncherNew (Just uri)
-  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  Browser.open (uri)
 
 -- | "Needs scopes a, b and c. The token is kept …", scopes in code font.
 scopesMarkup :: Forge.Kind -> Text

@@ -26,6 +26,7 @@ import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
@@ -980,8 +981,7 @@ labelPicker source host repo n refresh current = LabelPicker.Picker
   , save = Quiet.quietly . source.setLabels host repo n
   , create = source.createLabel host repo
   , manage = do
-      launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/labels"))
-      Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+      Browser.open (("https://" <> host <> "/" <> repo <> "/labels"))
   , saved = refresh
   }
 
@@ -1024,8 +1024,7 @@ milestonePicker source host repo n refresh c current = AssignPickers.Milestones
   , load = source.milestones host repo
   , save = Quiet.quietly . source.setMilestone host repo n
   , manage = do
-      launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/milestones"))
-      Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+      Browser.open (("https://" <> host <> "/" <> repo <> "/milestones"))
   , saved = refresh
   , clock = c
   }
@@ -1437,8 +1436,7 @@ windowCss = mconcat
 -- | Opens @url@ in the system's browser.
 browse :: Text -> IO ()
 browse url = do
-  launcher <- Gtk.uriLauncherNew (Just url)
-  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  Browser.open (url)
 
 -- | Where a person's picture comes from on this forge.
 placeOf :: Forge.Kind -> Text -> Maybe Avatar.Place

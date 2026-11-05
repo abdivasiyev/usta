@@ -10,13 +10,17 @@ module Usta.Diagram.Route
   , Area (..)
   , around
   , labelSpots
+  , unbent
   ) where
 
 import Data.Kind (Type)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Text (Text)
 import Data.List (minimumBy)
 import Data.Ord (comparing)
 
-import Usta.Diagram.Scene (Point (..), Segment (..), Size (..))
+import Usta.Diagram.Scene (Moves, Point (..), Segment (..), Size (..))
 
 -- | The outline a line is clipped to.
 type Outline :: Type
@@ -134,3 +138,10 @@ along ps t = case ps of
       | otherwise = walk (left - d) more
       where
         d = dist a b
+
+-- | A link's bends, or a straight line between the centres when the
+-- reader dragged either end: the bends were laid out for where it was.
+unbent :: Moves -> Map Text Point -> Text -> Text -> [Point] -> [Point]
+unbent drags centers a b ps
+  | Map.member a drags || Map.member b drags, Just c0 <- Map.lookup a centers, Just c1 <- Map.lookup b centers = [c0, c1]
+  | otherwise = ps

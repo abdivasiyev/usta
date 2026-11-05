@@ -24,9 +24,14 @@ module Usta.Diagram.Scene
   , scene
   , extent
   , translate
+  , Moves
+  , dragged
+  , handle
   ) where
 
 import Data.Kind (Type)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -146,6 +151,9 @@ data Item
   | Text {at :: Point, text :: Text, font :: Font, color :: Role, anchor :: Anchor}
     -- ^ @at@ is the middle of the text's height, at its left, centre or
     -- right as 'anchor' says. Lines break at "\n".
+  | Handle {key :: Text, at :: Point, size :: Size}
+    -- ^ Not drawn: where a node the reader may drag is, by its top-left
+    -- corner, and its name in 'Moves'.
   deriving stock (Eq, Show)
 
 type Scene :: Type
@@ -175,6 +183,7 @@ extent item = case item of
   Wedge {center = c, r = a} -> [(c.x - a, c.y - a), (c.x + a, c.y + a)]
   Path {start = p, segments = ss} -> (p.x, p.y) : concatMap ends ss
   Text {at = p} -> [(p.x, p.y)]
+  Handle {at = p, size = s} -> [(p.x, p.y), (p.x + s.w, p.y + s.h)]
   where
     ends s = case s of
       LineTo p -> [(p.x, p.y)]
@@ -188,8 +197,24 @@ translate dx dy item = case item of
   Wedge {center = c, r = a, from = f0, to = f1, fill = f, edge = e} -> Wedge {center = move c, r = a, from = f0, to = f1, fill = f, edge = e}
   Path {start = p, segments = ss, line = l, begin = b, end = e} -> Path {start = move p, segments = map segment ss, line = l, begin = b, end = e}
   Text {at = p, text = t, font = f, color = c, anchor = a} -> Text {at = move p, text = t, font = f, color = c, anchor = a}
+  Handle {key = k, at = p, size = s} -> Handle {key = k, at = move p, size = s}
   where
     move p = Point {x = p.x + dx, y = p.y + dy}
     segment s = case s of
       LineTo p -> LineTo (move p)
       CurveTo a b c -> CurveTo (move a) (move b) (move c)
+
+-- | How far the reader has dragged each node from where the layout put
+-- it, by the node's name.
+type Moves :: Type
+type Moves = Map Text Point
+
+-- | A node's centre, where the reader dragged it.
+dragged :: Moves -> Text -> Point -> Point
+dragged moves key c = case Map.lookup key moves of
+  Just d -> Point (c.x + d.x) (c.y + d.y)
+  Nothing -> c
+
+-- | The handle of a node of @size@ centred on @c@.
+handle :: Text -> Point -> Size -> Item
+handle key c size = Handle {key = key, at = Point (c.x - size.w / 2) (c.y - size.h / 2), size = size}

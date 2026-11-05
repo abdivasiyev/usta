@@ -29,7 +29,9 @@ data Target
   deriving stock (Eq, Show)
 
 -- | "https://git.azizovich.uz/abdivasiyev/usta/pulls/41" and the like; a
--- missing scheme is fine, anything that is not a forge path is Nothing.
+-- missing scheme is fine, and so is usta's own, "usta://git.azizovich.uz/…",
+-- which the system hands to usta. Anything that is not a forge path is
+-- Nothing.
 parseLink :: Text -> Maybe Target
 parseLink raw = case T.splitOn "/" rest of
   host : owner : name : more | not (T.null host), not (T.null owner), not (T.null name) ->
@@ -38,7 +40,7 @@ parseLink raw = case T.splitOn "/" rest of
   where
     (beforeHash, hash) = T.breakOn "#" (T.strip raw)
     rest = T.dropWhileEnd (== '/') (dropScheme (fst (T.breakOn "?" beforeHash)))
-    dropScheme t = maybe t id (T.stripPrefix "https://" t <|> T.stripPrefix "http://" t)
+    dropScheme t = maybe t id (T.stripPrefix "https://" t <|> T.stripPrefix "http://" t <|> T.stripPrefix "usta://" t)
     stripGit n = maybe n id (T.stripSuffix ".git" n)
     lineOf = T.stripPrefix "#L" hash >>= readMaybe . T.unpack . T.takeWhile isDigit
     at host repo more = case more of

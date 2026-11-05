@@ -8,6 +8,9 @@ author: Asliddin Abdivasiyev
 maintainer: asliddin.abdivasiyev@gmail.com
 category: Development
 build-type: Simple
+extra-source-files:
+  data/file-icons/*.svg
+  data/file-icons/map.json
 
 executable usta
   main-is: Main.hs
@@ -141,6 +144,7 @@ executable usta
     Usta.UI.Components.CommentCard
     Usta.UI.Components.DiagramView
     Usta.UI.Components.Diff
+    Usta.UI.Components.FileIcon
     Usta.UI.Components.FileTools
     Usta.UI.Components.Forge
     Usta.UI.Components.Icon
@@ -203,6 +207,7 @@ executable usta
 
   build-depends:
     aeson,
+    file-embed,
     yaml,
     scientific,
     vector,

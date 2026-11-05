@@ -33,6 +33,7 @@
         isExecutable = true;
         executableHaskellDepends = with hsPkgs; [
           aeson
+          file-embed
           yaml
           scientific
           vector

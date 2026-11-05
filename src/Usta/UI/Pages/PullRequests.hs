@@ -15,8 +15,6 @@ module Usta.UI.Pages.PullRequests
   , css
   ) where
 
-import Control.Concurrent (forkIO)
-import Control.Exception (SomeException, try)
 import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -26,7 +24,6 @@ import Data.List (nub, sortOn)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
@@ -34,11 +31,13 @@ import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.Pager as Pager
 import qualified Usta.UI.Components.Segmented as Segmented
 import Usta.UI.Page (Page (..), refill)
-import Usta.UI.Format (Clock, short)
+import Usta.UI.Format (Clock, short, thousands)
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Involvement (Involvement (..))
+import qualified Usta.Types.Listing as Lt
 import Usta.Types.Parse (unparse)
 import qualified Usta.Types.PullRequest as P
 import Usta.Types.Ref (Ref (..))
@@ -317,10 +316,11 @@ showingLabel s = case s of
   ShowAll -> "All"
 
 -- | A repository's own pull requests, for its tab: @synced@ at once, those
--- that involve the user, then the repository's latest from @load@, or a
--- note when the forge cannot be reached. The state, author and review
--- filters, the filter box and the sort stay as the user left them.
-forRepository :: [PullRequest] -> IO (Either Text [PullRequest]) -> (PullRequest -> IO ()) -> IO Gtk.Box
+-- that involve the user, then the repository's from @load@ a page at a
+-- time, for the state and order chosen; the forge's total shows on the
+-- state's tab. The author and review filters and the filter box work on
+-- what is loaded.
+forRepository :: [PullRequest] -> (Lt.Listing -> Maybe Text -> IO (Either Text (Lt.Paged PullRequest))) -> (PullRequest -> IO ()) -> IO Gtk.Box
 forRepository synced load onOpen = do
   items <- newIORef synced
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
@@ -328,9 +328,13 @@ forRepository synced load onOpen = do
                          , #hexpand := True
                          , #cssClasses := ["u-pull-requests", "in-repo"]
                          ]
-  let count s shown = case length (filter (shows' s) shown) of
-        n | n > 0, s `elem` [ShowOpen, ShowDraft] -> showingLabel s <> "  " <> T.pack (show n)
+  -- The forge's total for the state shown, once it says.
+  known <- newIORef Nothing
+  let countWith k s shown = case (k, length (filter (shows' s) shown)) of
+        (Just (s', t), _) | s' == s -> showingLabel s <> "  " <> thousands t
+        (_, n) | n > 0, s `elem` [ShowOpen, ShowDraft] -> showingLabel s <> "  " <> T.pack (show n)
         _ -> showingLabel s
+      count = countWith Nothing
   (states, stateButtons) <- Segmented.new (map (`count` synced) [minBound ..]) 0
   Gtk.widgetAddCssClass states "tabs"
   authors <- Gtk.dropDownNewFromStrings ["All authors"]
@@ -349,8 +353,6 @@ forRepository synced load onOpen = do
   scroll <- GI.new Gtk.ScrolledWindow [ #child := card, #vexpand := True, #hscrollbarPolicy := Gtk.PolicyTypeNever
                                       , #propagateNaturalHeight := True, #valign := Gtk.AlignStart ]
   #append page scroll
-  note <- GI.new Gtk.Label [#label := "Loading the repository's pull requests…", #xalign := 0, #cssClasses := ["meta", "note"]]
-  #append page note
 
   showing <- newIORef ShowOpen
   shownRows <- newIORef []
@@ -372,7 +374,8 @@ forRepository synced load onOpen = do
             rows = filter wanted sorted
         writeIORef shownRows rows
         refill list repositoryRow rows
-        forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> GI.set b [#label := count st everything]
+        k <- readIORef known
+        forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> GI.set b [#label := countWith k st everything]
       fill shown = do
         writeIORef items shown
         let names = "All authors" : nub (map (.author) shown)
@@ -382,28 +385,46 @@ forRepository synced load onOpen = do
         Gtk.dropDownSetSelected authors (maybe 0 (\n -> fromIntegral (length (takeWhile (/= n) names))) before)
         draw
   fill synced
+  let listing = do
+        s <- readIORef showing
+        order <- Gtk.dropDownGetSelected sorts
+        pure Lt.Listing {which = whichOf s, order = [Lt.RecentlyUpdated, Lt.Newest, Lt.Oldest] !! min 2 (fromIntegral order)}
+      got first p = do
+        s <- readIORef showing
+        forM_ p.total $ \t -> writeIORef known (Just (s, t))
+        before <- if first then pure [] else readIORef items
+        let fresh = [pr | pr <- p.items, pr.number `notElem` map (.number) before]
+        fill (before <> fresh)
+  pager <- Pager.new scroll (\cursor -> listing >>= \l -> load l cursor) got $ \n t -> case t of
+    Just total | total > n -> "Showing " <> thousands n <> " of " <> thousands total
+    _ -> if n == 0 then "" else "All " <> thousands n <> " shown"
+  #append page pager.widget
+  -- Another state or order starts from the first page; until it comes the
+  -- synced ones show.
+  let again = do
+        writeIORef known Nothing
+        fill synced
+        pager.restart
   forM_ (zip [minBound ..] stateButtons) $ \(st, b) -> void $ GI.on b #toggled $ do
     active <- GI.get b #active
-    when active (writeIORef showing st >> draw)
-  forM_ [authors, reviews, sorts] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const draw)
+    when active (writeIORef showing st >> again)
+  forM_ [authors, reviews] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const draw)
+  void $ GI.on sorts (GI.PropertyNotify #selected) (const again)
   void $ GI.on filterBox #searchChanged draw
   void $ GI.on list #rowActivated $ \row -> do
     index <- Gtk.listBoxRowGetIndex row
     rows <- readIORef shownRows
     when (index >= 0 && fromIntegral index < length rows) $ onOpen (rows !! fromIntegral index)
 
-  void $ forkIO $ do
-    result <- try load
-    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-      case result of
-        Right (Right shown) -> fill shown >> GI.set note [#visible := False]
-        Right (Left problem) -> offline problem note
-        Left (e :: SomeException) -> offline (T.pack (show e)) note
-      pure False
+  pager.restart
   pure page
   where
-    offline problem note = GI.set note
-      [#label := "Only the ones that involve you: the forge could not list the rest. " <> problem]
+    whichOf s = case s of
+      ShowOpen -> Lt.Opened
+      ShowDraft -> Lt.Drafts
+      ShowMerged -> Lt.Merged
+      ShowClosed -> Lt.Shut
+      ShowAll -> Lt.Every
     selectedText d = do
       item <- Gtk.dropDownGetSelectedItem d
       index <- Gtk.dropDownGetSelected d

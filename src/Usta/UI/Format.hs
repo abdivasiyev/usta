@@ -8,6 +8,7 @@ module Usta.UI.Format
   , ago
   , short
   , date
+  , thousands
   ) where
 
 import Data.Kind (Type)
@@ -82,3 +83,7 @@ day c t = localDay (utcToLocalTime c.zone t)
 
 local :: Clock -> String -> UTCTime -> Text
 local c format t = T.pack (formatTime defaultTimeLocale format (utcToLocalTime c.zone t))
+
+-- | "1,373".
+thousands :: Int -> Text
+thousands n = (if n < 0 then "-" else "") <> T.intercalate "," (reverse (map T.reverse (T.chunksOf 3 (T.reverse (T.pack (show (abs n)))))))

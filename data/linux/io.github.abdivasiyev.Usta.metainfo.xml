@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.abdivasiyev.Usta</id>
+  <name>usta</name>
+  <summary>A native client for code forges</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <description>
+    <p>Pull requests, issues and repositories from Forgejo, with reviews on local git diffs, an offline cache and a keyboard for everything.</p>
+  </description>
+  <developer id="io.github.abdivasiyev">
+    <name>Asliddin Abdivasiyev</name>
+  </developer>
+  <launchable type="desktop-id">io.github.abdivasiyev.Usta.desktop</launchable>
+  <url type="homepage">https://github.com/abdivasiyev/usta</url>
+  <url type="bugtracker">https://github.com/abdivasiyev/usta/issues</url>
+  <provides>
+    <binary>usta</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-05"/>
+  </releases>
+</component>

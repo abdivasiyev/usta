@@ -10,7 +10,14 @@
     systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
     forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
-    haskellPackagesFor = pkgs: pkgs.haskell.packages.ghc912;
+    haskellPackagesFor = pkgs:
+      pkgs.haskell.packages.ghc912.override {
+        overrides = _: super: {
+          # Its tests need the mysql package, whose Setup.hs fails on
+          # GHC 9.12 on Linux; usta needs only the library.
+          esqueleto = pkgs.haskell.lib.dontCheck super.esqueleto;
+        };
+      };
 
     # Written by hand instead of callCabal2nix: that runs cabal2nix at
     # evaluation time, built with the default GHC rather than ghc912.
@@ -75,6 +82,15 @@
         # Lets the installed binary find GTK's schemas and the icon theme.
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [pkgs.wrapGAppsHook4];
         buildInputs = (old.buildInputs or []) ++ [pkgs.gtk4 pkgs.adwaita-icon-theme];
+        # On Linux the desktop entry (which claims usta:// links), the
+        # AppStream data and the icon.
+        postInstall =
+          (old.postInstall or "")
+          + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+            install -Dm644 data/linux/io.github.abdivasiyev.Usta.desktop $out/share/applications/io.github.abdivasiyev.Usta.desktop
+            install -Dm644 data/linux/io.github.abdivasiyev.Usta.metainfo.xml $out/share/metainfo/io.github.abdivasiyev.Usta.metainfo.xml
+            install -Dm644 data/usta.svg $out/share/icons/hicolor/scalable/apps/io.github.abdivasiyev.Usta.svg
+          '';
       });
   in {
     packages = forAllSystems (pkgs: {

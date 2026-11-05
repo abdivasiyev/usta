@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=usta
+GenericName=Forge client
+Comment=Pull requests, issues and repositories from your forges
+Exec=usta %u
+Icon=io.github.abdivasiyev.Usta
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;forgejo;github;gitlab;pull request;review;
+MimeType=x-scheme-handler/usta;
+StartupWMClass=io.github.abdivasiyev.Usta

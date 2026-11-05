@@ -1,0 +1,79 @@
+# Tests every push to master and every pull request: the tests that need
+# no window and what is shipped (nix flake check) on Linux and macOS, and
+# the window's tests under a display. Benchmarks run each week and keep
+# their numbers as an artifact. See docs/TESTING.md.
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # GHC 9.12's packages are built, not fetched: Linux needs the room.
+      - name: Make room on the disk
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: Build, run usta-test and check what is shipped
+        run: nix flake check -L
+
+  window:
+    if: github.event_name != 'schedule'
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Make room on the disk
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: The window's tests
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            nix shell nixpkgs#xvfb-run -c xvfb-run -a nix develop -c cabal test usta-ui-test
+          else
+            nix develop -c cabal test usta-ui-test
+          fi
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-shots-${{ matrix.os }}
+          path: dist-newstyle/ui-shots
+
+  bench:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: Benchmarks
+        run: nix develop -c cabal bench --benchmark-options='--csv bench.csv'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench
+          path: bench.csv

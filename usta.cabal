@@ -309,10 +309,12 @@ test-suite usta-test
     Usta.Types.ParseTests
   ghc-options: -threaded
   build-depends:
+    aeson,
     base,
     hedgehog,
     tasty,
     tasty-hedgehog,
     tasty-hunit,
     text,
+    time,
     usta

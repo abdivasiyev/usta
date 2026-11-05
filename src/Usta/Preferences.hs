@@ -12,16 +12,23 @@ module Usta.Preferences
   , file
   , load
   , save
+  , Managed
+  , managedFile
+  , loadManaged
+  , fixedKeys
+  , effective
+  , keeping
   ) where
 
 import Control.Exception (IOException, try)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), eitherDecodeFileStrict, encodeFile, object, withObject, (.!=), (.:?), (.=))
+import Data.Maybe (fromMaybe)
 import Data.Aeson.Types (Parser)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (NominalDiffTime)
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (XdgDirectory (XdgConfig), createDirectoryIfMissing, getXdgDirectory)
 import System.FilePath (takeDirectory, (</>))
 
 import Usta.DB (databaseFile)
@@ -122,3 +129,89 @@ save :: FilePath -> Preferences -> IO ()
 save path p = do
   createDirectoryIfMissing True (takeDirectory path)
   encodeFile path p
+
+-- | Choices fixed outside usta, in @~/.config/usta/config.json@ (Home
+-- Manager's @programs.usta.settings@ writes it): the same names as
+-- @preferences.json@, each one that is there winning over the user's.
+-- usta never writes it.
+type Managed :: Type
+data Managed = Managed
+  { interval :: Maybe Interval
+  , theme :: Maybe Theme
+  , notify :: Maybe Bool
+  , onlyInBackground :: Maybe Bool
+  , openLinks :: Maybe Bool
+  , checkUpdates :: Maybe Bool
+  }
+
+instance FromJSON Managed where
+  parseJSON = withObject "Managed" $ \o -> do
+    interval <- o .:? "interval" >>= traverse (fixedAs "interval")
+    theme <- o .:? "theme" >>= traverse (fixedAs "theme")
+    notify <- o .:? "notify"
+    onlyInBackground <- o .:? "onlyInBackground"
+    openLinks <- o .:? "openLinks"
+    checkUpdates <- o .:? "checkUpdates"
+    pure Managed {interval, theme, notify, onlyInBackground, openLinks, checkUpdates}
+    where
+      -- A name usta does not know is an error here: the user wrote it in
+      -- their configuration and should hear it is wrong.
+      fixedAs :: (Show a, Enum a, Bounded a) => Text -> Text -> Parser a
+      fixedAs key t = maybe (fail (T.unpack ("Unknown " <> key <> ": " <> t))) pure (lookup t names)
+
+nothing :: Managed
+nothing = Managed Nothing Nothing Nothing Nothing Nothing Nothing
+
+managedFile :: IO FilePath
+managedFile = (</> "config.json") <$> getXdgDirectory XdgConfig "usta"
+
+-- | Nothing fixed when the file is missing or wrong; a wrong one is logged
+-- by the caller from the 'Left'.
+loadManaged :: IO (Either Text Managed)
+loadManaged = do
+  path <- managedFile
+  found <- try (eitherDecodeFileStrict path)
+  pure $ case found of
+    Right (Right m) -> Right m
+    Right (Left e) -> Left (T.pack path <> ": " <> T.pack e)
+    Left (_ :: IOException) -> Right nothing
+
+-- | The names of the choices fixed, as Settings marks them.
+fixedKeys :: Managed -> [Text]
+fixedKeys m =
+  [k | (k, True) <- [ ("interval", has m.interval), ("theme", has m.theme), ("notify", has m.notify)
+                    , ("onlyInBackground", has m.onlyInBackground), ("openLinks", has m.openLinks)
+                    , ("checkUpdates", has m.checkUpdates) ]]
+  where
+    has :: Maybe a -> Bool
+    has = maybe False (const True)
+
+-- | The user's choices with the fixed ones over them.
+over :: Managed -> Preferences -> Preferences
+over m p = Preferences
+  { interval = fromMaybe p.interval m.interval
+  , theme = fromMaybe p.theme m.theme
+  , notify = fromMaybe p.notify m.notify
+  , onlyInBackground = fromMaybe p.onlyInBackground m.onlyInBackground
+  , openLinks = fromMaybe p.openLinks m.openLinks
+  , checkUpdates = fromMaybe p.checkUpdates m.checkUpdates
+  }
+
+-- | What usta goes by: @preferences.json@ under @config.json@.
+effective :: IO Preferences
+effective = do
+  own <- file >>= load
+  either (const own) (`over` own) <$> loadManaged
+
+-- | What to save when Settings changed @new@: the fixed choices keep the
+-- user's own from @before@, so dropping one from the configuration
+-- brings back what the user had.
+keeping :: Managed -> Preferences -> Preferences -> Preferences
+keeping m before new = Preferences
+  { interval = maybe new.interval (const before.interval) m.interval
+  , theme = maybe new.theme (const before.theme) m.theme
+  , notify = maybe new.notify (const before.notify) m.notify
+  , onlyInBackground = maybe new.onlyInBackground (const before.onlyInBackground) m.onlyInBackground
+  , openLinks = maybe new.openLinks (const before.openLinks) m.openLinks
+  , checkUpdates = maybe new.checkUpdates (const before.checkUpdates) m.checkUpdates
+  }

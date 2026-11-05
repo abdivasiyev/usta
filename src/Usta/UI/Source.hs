@@ -296,11 +296,13 @@ fromDatabase pool changes statuses sync = Source
   , pruneMirrors = do
       pruned <- try (Mirrors.defaultRoot >>= Mirrors.prune pool)
       pure (either (\(e :: IOException) -> Left (T.pack (displayException e))) Right pruned)
-  , preferences = Preferences.file >>= Preferences.load
+  , preferences = Preferences.effective
   , setPreferences = \p -> do
       path <- Preferences.file
-      before <- Preferences.load path
-      Preferences.save path p
+      own <- Preferences.load path
+      before <- Preferences.effective
+      fixed <- either (const Nothing) Just <$> Preferences.loadManaged
+      Preferences.save path (maybe p (\m -> Preferences.keeping m own p) fixed)
       -- A new interval makes every account sync at once; a theme or
       -- notification change is no reason to.
       when (before.interval /= p.interval) $ sync.setEvery (Preferences.seconds p.interval)

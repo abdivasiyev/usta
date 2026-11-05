@@ -111,7 +111,7 @@ running links = do
     saved <- run pool listAccounts
     changes <- newBus
     statuses <- newBus
-    chosen <- Preferences.file >>= Preferences.load
+    chosen <- Preferences.effective
     sync <- Sync.start Sync.Settings {pool = pool, changes = changes, statuses = statuses, every = 60} []
     sync.setEvery (Preferences.seconds chosen.interval)
     root <- Mirrors.defaultRoot
@@ -132,6 +132,8 @@ running links = do
             (Source.withAccounts pool accounts (Source.fromDatabase pool changes statuses sync)))
         start = if null saved then Window.FirstRun else Window.Ready
     crashed <- Log.start
+    -- A configuration usta cannot read fixes nothing; the log says why.
+    Preferences.loadManaged >>= either (Log.say "config") (const (pure ()))
     -- An error no one caught goes to the log, from any thread.
     setUncaughtExceptionHandler (\e -> Log.say "error" (T.pack (displayException e)))
     -- A usta:// link from macOS waits until the window is there.

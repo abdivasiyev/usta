@@ -102,6 +102,7 @@ import qualified Usta.Waiting as Waiting
 import qualified Usta.Log as Log
 import qualified Usta.UI.Pages.ReportProblem as ReportProblem
 import qualified Usta.UI.Components.Pager as Pager
+import qualified Usta.UI.Components.RunWorkflow as RunWorkflow
 import qualified Usta.UI.Components.UpdateBanner as UpdateBanner
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
 import qualified Usta.Updates as Updates
@@ -484,7 +485,23 @@ buildWith start crashed given app = do
             , title = "Actions"
             , build = do
                 c <- clock
-                RepositoryActions.new c (source.runs r.host r.name) (source.workflows r.host r.name) (source.checkLog r.host r.name) (source.jobSteps r.host r.name)
+                let github = r.forge == Forge.GitHub
+                RepositoryActions.new c RepositoryActions.Actions
+                  { runs = source.runs r.host r.name
+                  , current = source.workflows r.host r.name
+                  , logOf = source.checkLog r.host r.name
+                  , stepsOf = source.jobSteps r.host r.name
+                  , runWorkflow = Just $ \anchor started -> RunWorkflow.open anchor RunWorkflow.Dialog
+                      { clock = c, defaultBranch = r.defaultBranch
+                      , branches = fmap snd <$> source.branchList r.host r.name r.defaultBranch
+                      , workflows = source.startable r.host r.name
+                      , run = source.dispatch r.host r.name
+                      , started = started }
+                  -- Forgejo has no API to run again or cancel.
+                  , rerun = if github then Just (source.rerun r.host r.name) else Nothing
+                  , cancelRun = if github then Just (source.cancelRun r.host r.name) else Nothing
+                  , rerunJob = if github then Just (source.rerunJob r.host r.name) else Nothing
+                  }
             }
         , Repositories.Tab
             { followsBranch = True
@@ -899,6 +916,8 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         , checks = found
         , logOf = source.checkLog summary.host summary.repo
         , stepsOf = source.jobSteps summary.host summary.repo
+        , rerunJob = if summary.forge == Forge.GitHub then Just (source.rerunJob summary.host summary.repo) else Nothing
+        , rerunDone = pure ()
         }
 
 -- | The labels picker of an issue or pull request; @refresh@ reloads the
@@ -1349,7 +1368,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , UpdateBanner.css, Pager.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
+  , UpdateBanner.css, Pager.css, RunWorkflow.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, ReportProblem.css, Skeleton.css, Progress.css
   , windowCss
   ]

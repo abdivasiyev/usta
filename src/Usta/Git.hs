@@ -35,6 +35,7 @@ module Usta.Git
   , readme
   , tree
   , blob
+  , noreplyLogin
   ) where
 
 import Control.Exception (Exception, SomeException, throwIO, try)

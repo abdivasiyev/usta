@@ -14,6 +14,7 @@ import qualified Usta.GraphTests
 import qualified Usta.UI.Pages.PullRequest.ChecksTests
 import qualified Usta.UI.Components.FileIconTests
 import qualified Usta.PreferencesTests
+import qualified Usta.GitTests
 
 main :: IO ()
 main =
@@ -30,4 +31,5 @@ main =
       , Usta.UI.Pages.PullRequest.ChecksTests.tests
       , Usta.UI.Components.FileIconTests.tests
       , Usta.PreferencesTests.tests
+      , Usta.GitTests.tests
       ]

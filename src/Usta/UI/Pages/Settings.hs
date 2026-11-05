@@ -66,10 +66,14 @@ data Model = Model
     -- ^ Keys and what they do, as the shortcut strip shows them.
   , canNotify :: Bool
     -- ^ 'False' when the desktop would not show usta's notifications.
+  , version :: Text
+  , onCheckUpdates :: IO (Either Text (Maybe (Text, IO ())))
+    -- ^ Off the main thread: a newer version and what opens its release
+    -- page, or 'Nothing' when this one is the latest.
   }
 
 type Section :: Type
-data Section = Accounts | Sync | Notifications | Links | Appearance | Keyboard
+data Section = Accounts | Sync | Notifications | Links | Appearance | Updates | Keyboard
   deriving (Eq, Enum, Bounded)
 
 sectionTitle :: Section -> Text
@@ -79,6 +83,7 @@ sectionTitle s = case s of
   Notifications -> "Notifications"
   Links -> "Links"
   Appearance -> "Appearance"
+  Updates -> "Updates"
   Keyboard -> "Keyboard"
 
 -- | @onBack@ runs for Back; @onAddAccount@ for "Add account".
@@ -178,7 +183,7 @@ section s m change onAddAccount = do
           void $ GI.on interval (GI.PropertyNotify #selected) $ \_ -> do
             i <- fromIntegral <$> Gtk.dropDownGetSelected interval
             when (i < length intervals) $ change (\p -> p {interval = intervals !! i})
-          setting "Check for updates" [plain "How often usta asks your forges for new activity"]
+          setting "Sync forges" [plain "How often usta asks your forges for new activity"]
             =<< sequence [Gtk.toWidget interval]
       , do
           folder <- button "Show in folder" Button.Secondary (const m.onShowMirrors)
@@ -210,7 +215,7 @@ section s m change onAddAccount = do
       opening <- setting "Open forge links in usta"
         [plain "Links to your forges in comments, in the search or given as ", code "usta <link>", plain " open the pull request, issue or repository here; every other link goes to the browser"]
         =<< sequence [switch m.preferences.openLinks (\on p -> p {openLinks = on})]
-      others <- setting "Other links open in" [plain "The system's default browser. usta becomes the system's link handler once it is installed as an app"] []
+      others <- setting "Other links open in" [plain "The system's default browser. Installed as an app, usta also opens ", code "usta://<forge link>", plain " links from anywhere on the system"] []
       entry <- GI.new Gtk.Entry [#placeholderText := "Paste a link", #widthRequest := 320]
       trying <- setting "Try a link" [plain "Paste one to see where it would open"] =<< sequence [Gtk.toWidget entry]
       answer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #visible := False, #cssClasses := ["setting", "answer"]]
@@ -231,6 +236,23 @@ section s m change onAddAccount = do
     Appearance -> sequence
       [ setting "Theme" [] =<< sequence [themeChoice m.preferences.theme (\t -> change (\p -> p {theme = t}))]
       ]
+    Updates -> do
+      checking <- setting "Check for updates"
+        [plain "Once a day usta asks GitHub for its latest release. Nothing about you or your forges is sent"]
+        =<< sequence [switch m.preferences.checkUpdates (\on p -> p {checkUpdates = on})]
+      said <- label "" ["muted"]
+      now <- Button.new Button.defaults {Button.label = Just "Check now"}
+      opening <- Button.new Button.defaults {Button.label = Just "Open the release", Button.variant = Button.Primary}
+      GI.set opening [#visible := False]
+      void $ GI.on now #clicked $ Button.busy now ([] :: [Gtk.Widget]) "Checking\8230" m.onCheckUpdates $ \case
+        Left problem -> GI.set said [#label := "Could not check: " <> problem]
+        Right Nothing -> GI.set said [#label := "\10003 This is the latest"]
+        Right (Just (v, open)) -> do
+          GI.set said [#label := "usta " <> v <> " is out"]
+          GI.set opening [#visible := True]
+          void $ GI.on opening #clicked open
+      versionRow <- setting "Version" [code ("usta " <> m.version)] =<< sequence [Gtk.toWidget said, Gtk.toWidget now, Gtk.toWidget opening]
+      pure [checking, versionRow]
     Keyboard -> forM m.shortcuts $ \(keys, action) -> do
       keyLabel <- Shortcut.key keys >>= Gtk.toWidget
       setting (capitalize action) [] [keyLabel]
@@ -414,6 +436,8 @@ sample keys = Model
   , onClearCache = pure (Right ())
   , shortcuts = keys
   , canNotify = True
+  , version = "0.1.0"
+  , onCheckUpdates = pure (Right Nothing)
   }
   where
     account kind host auth = Account

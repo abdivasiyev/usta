@@ -10,10 +10,10 @@ module Usta.UI.Window
   , buildWith
   ) where
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception (SomeException, bracket_, try)
-import Control.Monad (forM, forM_, join, void, unless, when)
-import Data.Maybe (fromMaybe)
+import Control.Monad (forM, forM_, forever, join, void, unless, when)
+import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
@@ -100,7 +100,10 @@ import qualified Usta.Types.Link as Link
 import qualified Usta.Waiting as Waiting
 import qualified Usta.Log as Log
 import qualified Usta.UI.Pages.ReportProblem as ReportProblem
+import qualified Usta.UI.Components.UpdateBanner as UpdateBanner
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
+import qualified Usta.Updates as Updates
+import Data.Version (showVersion)
 import qualified Usta.Sync as Sync
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (find)
@@ -311,6 +314,8 @@ buildWith start crashed given app = do
               , Settings.onPreferences = \p -> do
                   applyTheme p.theme
                   source.setPreferences p
+              , Settings.version = Updates.current
+              , Settings.onCheckUpdates = fmap (\found -> listToMaybe [(T.pack (showVersion r.version), browse r.page) | Just r <- [found], Updates.newer r]) <$> Updates.latest
               }
         Settings.new backToMain (addAccountThen openSettings) model >>= showDetail
 
@@ -644,6 +649,24 @@ buildWith start crashed given app = do
     ReportProblem.banner (ReportProblem.open anchor "usta quit unexpectedly") >>= #append root
   #append root screens
   #append root footerSlot
+
+  -- At start and then once a day, unless Settings turned it off; a newer
+  -- usta shows a banner under the header, once.
+  told <- newIORef False
+  void $ forkIO $ forever $ do
+    wanted <- (.checkUpdates) <$> source.preferences
+    found <- if wanted then Updates.latest else pure (Left "off")
+    case found of
+      Right (Just r) | Updates.newer r -> void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+        already <- readIORef told
+        unless already $ do
+          writeIORef told True
+          Log.say "update" ("usta " <> T.pack (showVersion r.version) <> " is out")
+          b <- UpdateBanner.new (T.pack (showVersion r.version)) Updates.current (browse r.page)
+          Gtk.boxInsertChildAfter root b (Just activity)
+        pure False
+      _ -> pure ()
+    threadDelay (24 * 3600 * 1000000)
 
   -- GTK hides the titlebar widget in fullscreen, and ours holds search and
   -- sync. So the header lives in the content, and an empty hidden titlebar
@@ -1174,7 +1197,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
+  , UpdateBanner.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, ReportProblem.css, Skeleton.css, Progress.css
   , windowCss
   ]
@@ -1187,3 +1210,9 @@ windowCss = mconcat
   , "}"
   , "headerbar.u-header label.brand { font-weight: 700; font-size: 15px; margin-right: 12px; }"
   ]
+
+-- | Opens @url@ in the system's browser.
+browse :: Text -> IO ()
+browse url = do
+  launcher <- Gtk.uriLauncherNew (Just url)
+  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing

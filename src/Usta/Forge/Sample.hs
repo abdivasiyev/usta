@@ -74,6 +74,12 @@ new now account = do
         , F.pullRequests = fetch ref PullRequests (.pullRequests)
         , F.issues = fetch ref Issues (.issues)
         , F.repositories = fetch ref Repositories (.repositories)
+        , F.repository = \repo -> do
+            failIfTold ref
+            s <- readIORef ref
+            case [r | r <- s.repositories, r.name == repo] of
+              r : _ -> pure r
+              [] -> throwIO (F.Refused "No such repository.")
         , F.cloneUrls = \repo -> pure F.CloneUrls
             { F.https = "https://" <> unparse account.host <> "/" <> unparse repo <> ".git"
             , F.ssh = Just ("git@" <> unparse account.host <> ":" <> unparse repo <> ".git")

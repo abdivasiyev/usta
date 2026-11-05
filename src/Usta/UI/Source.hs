@@ -104,6 +104,9 @@ data Source = Source
   , pullRequests :: IO [PullRequests.PullRequest]
   , issues :: IO [Issues.Issue]
   , repositories :: IO [Repositories.Repository]
+  , visit :: Text -> Text -> IO (Either Text Repositories.Repository)
+    -- ^ Any repository on a signed-in forge, by host and full name, synced
+    -- or not: what a link or a search opens.
   , accounts :: IO [Connected]
   , onChange :: (Resource -> IO ()) -> IO ()
     -- ^ Runs the action on the GTK main thread whenever a list was saved
@@ -288,6 +291,7 @@ fromDatabase pool changes statuses sync = Source
       kindOf <- kinds
       rows <- run pool DB.repositories
       pure [Repositories.fromRepository kind r | (key, r) <- rows, Just kind <- [kindOf key]]
+  , visit = \_ _ -> pure (Left "Sign in to that forge to open its repositories.")
   , accounts = do
       rows <- run pool listAccounts
       pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login, byBrowser = a.authMethod == BrowserSignIn} | (key, a) <- rows]
@@ -417,6 +421,9 @@ samples = Source
   , pullRequests = pure PullRequests.sample
   , issues = pure Issues.sample
   , repositories = pure Repositories.sample
+  , visit = \host repo -> pure $ case [r | r <- Repositories.sample, r.host == host, r.name == repo] of
+      r : _ -> Right r
+      [] -> Left "No such repository."
   , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev", byBrowser = False} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
   , onChange = const (pure ())
   , onStatus = const (pure ())
@@ -526,6 +533,16 @@ withAccounts pool accounts source = source
              , w.stop ))
       <$> accounts.beginBrowser host client
   , remove = \key -> either (Left . describe) Right <$> accounts.remove key
+  , visit = \host repo -> do
+      kindOf <- kindsIn pool
+      found <- accountFor pool host repo
+      case found of
+        Nothing -> pure (Left ("Sign in to " <> host <> " to open its repositories."))
+        Just (key, name) -> do
+          forge <- accounts.forgeOf key
+          case (forge, kindOf key) of
+            (Just f, Just kind) -> either (Left . said) (Right . Repositories.fromRepository kind) <$> try (f.repository name)
+            _ -> pure (Left (said SignedOut))
   , setDone = \n done -> do
       items <- run pool DB.inbox
       case [i | i <- items, matches n i] of
@@ -857,6 +874,9 @@ accountFor pool host repo = do
   let keys = [key | (key, r) <- repos, unparse r.host == host, unparse r.name == repo]
         <> [key | (key, pr) <- prs, unparse pr.ref.host == host, unparse pr.ref.repo == repo]
         <> [key | (key, i) <- issues, unparse i.ref.host == host, unparse i.ref.repo == repo]
-  pure $ case (keys, parse repo) of
+  -- One not synced goes through an account on its forge.
+  signedIn <- run pool listAccounts
+  let onHost = [key | (key, a) <- signedIn, unparse a.host == host]
+  pure $ case (keys <> onHost, parse repo) of
     (key : _, Right name) -> Just (key, name)
     _ -> Nothing

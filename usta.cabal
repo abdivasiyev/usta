@@ -177,6 +177,7 @@ executable usta
     Usta.UI.Gallery
     Usta.UI.Page
     Usta.UI.Browser
+    Usta.UI.Notify
     Usta.UI.Quiet
     Usta.UI.Scroll
     Usta.UI.TextKeys
@@ -267,6 +268,7 @@ executable usta
   c-sources:
     cbits/appearance.c
     cbits/keyring.c
+    cbits/notify.c
     cbits/urls.c
 
   if os(darwin)
@@ -274,5 +276,6 @@ executable usta
       CoreFoundation
       CoreServices
       Security
+      UserNotifications
   else
     pkgconfig-depends: libsecret-1

@@ -106,6 +106,7 @@ import qualified Usta.UI.Pages.ReportProblem as ReportProblem
 import qualified Usta.UI.Components.Pager as Pager
 import qualified Usta.UI.Quiet as Quiet
 import qualified Usta.UI.Components.ForkDialog as ForkDialog
+import qualified Usta.UI.Notify as Notify
 import qualified Usta.UI.Components.NewRepository as NewRepository
 import qualified Usta.UI.Components.RunWorkflow as RunWorkflow
 import qualified Usta.UI.Components.UpdateBanner as UpdateBanner
@@ -180,7 +181,8 @@ buildWith start crashed given app = do
   -- The saved theme, before anything is drawn.
   applyTheme <- Style.themes
   source.preferences >>= applyTheme . (.theme)
-  notifying <- Platform.canNotify
+  notifying <- Notify.available
+  when notifying Notify.start
   let backToMain = Gtk.stackSetVisibleChildName screens "main"
       showDetail :: Gtk.Widget -> IO ()
       -- The new screen fades in over the old one, which goes once hidden.
@@ -402,10 +404,8 @@ buildWith start crashed given app = do
         active <- Gtk.applicationGetActiveWindow app >>= maybe (pure False) Gtk.windowIsActive
         when (notifying && chosen.notify && not (chosen.onlyInBackground && active)) $
           forM_ (Inbox.worthTelling before everything) $ \(what, n) -> do
-            note <- Gio.notificationNew what
-            Gio.notificationSetBody note (Just (n.repo <> " #" <> T.pack (show n.number) <> ": " <> n.title))
-            Gio.applicationSendNotification app
-              (Just (n.host <> "/" <> n.repo <> "#" <> T.pack (show n.number))) note
+            Notify.send app (n.host <> "/" <> n.repo <> "#" <> T.pack (show n.number)) what
+              (n.repo <> " #" <> T.pack (show n.number) <> ": " <> n.title)
       reloadInbox = do
         everything <- source.inbox
         tell everything

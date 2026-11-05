@@ -13,7 +13,7 @@ module Usta.UI.Window
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception (SomeException, bracket_, try)
 import Control.Monad (forM, forM_, forever, join, void, unless, when)
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
@@ -258,7 +258,7 @@ buildWith start crashed given app = do
               me <- maybe "" (.login) . find (\a -> a.host == h) <$> source.accounts
               pure (fmap (\x -> (x, goals, me, events)) d)
         Issue.new backLabel backToMain (source.editTitle h r n) (Issue.Watch (source.watching h r n) (source.setWatching h r n)) model (\showClosed ->
-          loadInto load $ \(d, goals, me, events) -> do
+          loadLive load $ \(d, goals, me, events) -> do
             c <- clock
             showClosed d.closed
             Issue.thread (actionsFor d goals me c) (Issue.fromDiscussion c d model {Issue.timeline = events}))
@@ -824,7 +824,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
           Just Success -> Just True
           Just Danger -> Just False
           _ -> Nothing
-    loadInto load $ \(d, commits, threads, me, (reviewers, ready, goals, events)) -> do
+    loadLive load $ \(d, commits, threads, me, (reviewers, ready, goals, events)) -> do
       c <- clock
       showState $ case (d.merged, d.closed) of
         (True, _) -> PullRequest.MergedState
@@ -1185,6 +1185,77 @@ loadInto load render = do
   Gtk.toWidget slot
   where
     notice text = GI.new Gtk.Label [#label := text, #wrap := True, #cssClasses := ["muted"], #marginTop := 24, #marginStart := 24, #marginEnd := 24] >>= Gtk.toWidget
+
+-- | 'loadInto', then the same load every 30 seconds while it is on
+-- screen: what changed on the forge is drawn again in place, at the same
+-- scroll position. While a text box in it holds unsent words, a button
+-- offers the new activity instead, so typing is not lost. It stops once
+-- the page is gone.
+loadLive :: forall a. Eq a => IO (Either Text a) -> (a -> IO Gtk.Widget) -> IO Gtk.Widget
+loadLive load render = do
+  slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+  shown <- newIORef Nothing
+  asking <- newIORef False
+  let draw a = do
+        writeIORef shown (Just a)
+        w <- render a
+        replaceChild slot w
+      -- The page's scrolling keeps its place while the content changes.
+      keepingPlace act = do
+        scroll <- scrolledAbove slot
+        before <- traverse (\sw -> Gtk.scrolledWindowGetVadjustment sw >>= Gtk.adjustmentGetValue) scroll
+        act
+        forM_ ((,) <$> scroll <*> before) $ \(sw, v) -> void $ GLib.idleAdd GLib.PRIORITY_DEFAULT_IDLE $ do
+          Gtk.scrolledWindowGetVadjustment sw >>= (`Gtk.adjustmentSetValue` v)
+          pure False
+      offer a = do
+        button <- Button.new Button.defaults {Button.label = Just "New activity · Show", Button.small = True, Button.variant = Button.Primary}
+        GI.set button [#halign := Gtk.AlignCenter, #marginTop := 8, #cssClasses := ["u-new-activity"]]
+        void $ GI.on button #clicked (keepingPlace (draw a))
+        old <- Gtk.widgetGetFirstChild slot
+        forM_ old $ \w -> Gtk.widgetHasCssClass w "u-new-activity" >>= \already -> unless already (Gtk.boxPrepend slot button)
+  inner <- loadInto load (\a -> writeIORef shown (Just a) >> render a)
+  #append slot inner
+  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 30 $ do
+    root <- Gtk.widgetGetRoot slot
+    case root of
+      Nothing -> pure False
+      Just _ -> do
+        mapped <- Gtk.widgetGetMapped slot
+        busy <- readIORef asking
+        when (mapped && not busy) $ do
+          writeIORef asking True
+          void $ forkIO $ do
+            result <- try load :: IO (Either SomeException (Either Text a))
+            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+              writeIORef asking False
+              before <- readIORef shown
+              case result of
+                Right (Right a) | Just a /= before -> do
+                  typing <- Gtk.toWidget slot >>= unsentText
+                  if typing then offer a else keepingPlace (draw a)
+                _ -> pure ()
+              pure False
+        pure True
+  Gtk.toWidget slot
+  where
+    -- Unsent words in any of its text boxes or entries.
+    unsentText w = do
+      ws <- below w
+      views <- catMaybes <$> mapM (GI.castTo Gtk.TextView) ws
+      texts <- mapM (\v -> Gtk.textViewGetBuffer v >>= \b -> GI.get b #text) views
+      pure (any (maybe False (not . T.null . T.strip)) texts)
+    below w = do
+      first <- Gtk.widgetGetFirstChild w
+      let go Nothing = pure []
+          go (Just c) = do
+            under <- below c
+            next <- Gtk.widgetGetNextSibling c
+            (c :) . (under <>) <$> go next
+      go first
+    scrolledAbove w = do
+      t <- GI.glibType @Gtk.ScrolledWindow
+      Gtk.widgetGetAncestor w t >>= traverse (GI.unsafeCastTo Gtk.ScrolledWindow)
 
 -- | Shows @widget@ as the box's only child.
 replaceChild :: Gtk.Box -> Gtk.Widget -> IO ()

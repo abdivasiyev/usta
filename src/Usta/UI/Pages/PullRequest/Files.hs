@@ -27,7 +27,8 @@ import Data.Int (Int32)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
 import Data.Kind (Type)
-import Data.Maybe (isNothing)
+import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -37,6 +38,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.Viewed as Viewed
 import qualified Usta.UI.Components.FileIcon as FileIcon
 import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Badge as Badge
@@ -263,6 +265,13 @@ new actions panels m = do
         }
 
   placedRef <- newIORef []
+  -- Files viewed before stay viewed while their diff is the same.
+  seenRef <- Viewed.load actions.draftKey >>= newIORef
+  let remember path seen = do
+        mark <- fingerprint (filter ((== path) . (.path)) m.files)
+        modifyIORef' seenRef (if seen then Map.insert path mark else Map.delete path)
+        readIORef seenRef >>= Viewed.keep actions.draftKey
+  seenBefore <- readIORef seenRef
   entries' <- forM m.files $ \f -> do
     placed <- forM [(t, at) | t <- m.threads.threads, t.path == f.path, Just at <- [place f.diffLines t]] $ \(t, (index, outdated)) -> do
       drawn <- Thread.new Thread.Shown {thread = t, outdated = outdated, showCode = False, lastReviewed = m.threads.lastReviewed, me = m.me, clock = m.clock, reply = actions.reply t, upload = actions.upload, place = m.place}
@@ -286,11 +295,13 @@ new actions panels m = do
             else ImageView.pair old new' >>= #append slot
           pure False
       (,) 0 <$> Gtk.toWidget slot
-    markBox <- viewedMark f.viewed
+    mark <- fingerprint [f]
+    let wasSeen = f.viewed || Map.lookup f.path seenBefore == Just mark
+    markBox <- viewedMark wasSeen
     -- The diff sits in a holder, so a change of options draws it again in
     -- place, with its threads and pictures and whether it was viewed.
     holder <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
-    viewedNow <- newIORef f.viewed
+    viewedNow <- newIORef wasSeen
     let parts = attached <> maybe [] pure pictures
         drawWith o = do
           Gtk.widgetGetFirstChild holder >>= mapM_ (Gtk.boxRemove holder)
@@ -298,6 +309,7 @@ new actions panels m = do
           isViewed <- readIORef viewedNow
           diff <- Diff.newWith o f {Diff.viewed = isViewed} parts (commenting f.path) $ \now -> do
             writeIORef viewedNow now
+            remember f.path now
             setViewed markBox now
             updateProgress
           #append holder diff
@@ -423,7 +435,7 @@ new actions panels m = do
   #append columns scroll
   -- Its own width, which its editor's toolbar does not widen; folds to a
   -- rail with the pending notes and threads.
-  panel <- review actions m (zip placed (map jump placed)) pendingRef pendingChanged
+  panel <- review actions m (zip placed (map jump placed)) pendingRef pendingChanged (forM_ m.files $ \f -> remember f.path True)
   -- Its fold button sits in the corner, beside "Your review".
   panelOverlay <- GI.new Gtk.Overlay [#child := panel]
   reviewPanel <- Gtk.toWidget panelOverlay >>= SidePanel.new SidePanel.Config
@@ -523,11 +535,11 @@ fileRow f markBox threads' = do
     isRemoved _ = False
 
 -- | The review panel; @listed@ are the threads, each with how to jump to
--- it.
+-- it; @reviewed@ runs once a review is submitted.
 review
   :: Actions -> Model -> [((Th.Thread, Bool, Thread.Thread), IO ())]
-  -> IORef [(Int, (LineNote, Thread.Card))] -> IORef (IO ()) -> IO Gtk.Box
-review actions m listed pendingRef pendingChanged = do
+  -> IORef [(Int, (LineNote, Thread.Card))] -> IORef (IO ()) -> IO () -> IO Gtk.Box
+review actions m listed pendingRef pendingChanged reviewed = do
   side <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 20
                          , #widthRequest := 280
@@ -652,6 +664,8 @@ review actions m listed pendingRef pendingChanged = do
             writeIORef pendingRef []
             showPending
             GI.set said [#label := "Review submitted.", #visible := True, #cssClasses := ["small", "muted"]]
+            -- Reviewed, every file counts as viewed until it changes.
+            reviewed
   void $ GI.on submit #clicked send
   MarkdownEditor.sendOn summary False send
 
@@ -985,3 +999,13 @@ css = mconcat
 -- | Takes @w@ out of where it is, so it can go into a diff drawn again.
 detach :: Gtk.Widget -> IO ()
 detach w = Gtk.widgetGetParent w >>= mapM_ (\p -> GI.castTo Gtk.Box p >>= maybe (Gtk.widgetUnparent w) (`Gtk.boxRemove` w))
+
+-- | What a file's changes are, to tell later whether they changed.
+fingerprint :: [Diff.File] -> IO Text
+fingerprint files = fromMaybe "" <$> GLib.computeChecksumForString GLib.ChecksumTypeSha1 (T.unlines [l | f <- files, l <- map lineText f.diffLines]) (-1)
+  where
+    lineText = \case
+      Diff.Added _ t -> "+" <> t
+      Diff.Removed _ t -> "-" <> t
+      Diff.Context _ _ t -> " " <> t
+      Diff.Hunk _ -> "@@"

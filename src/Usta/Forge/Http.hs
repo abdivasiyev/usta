@@ -41,7 +41,8 @@ newtype Client = Client ClientEnv
 -- | A client for the API at @base@ that sends @authorization@ (the whole
 -- header value, e.g. @token …@) with every request, read for each one, as
 -- a browser sign-in's token changes. The value is set on the request
--- only; it is not part of any error.
+-- only; it is not part of any error, and a redirect (GitHub's to a job
+-- log's storage) does not carry it to another server.
 connect :: HTTP.Manager -> BaseUrl -> IO ByteString -> Client
 connect manager base current = Client (mkClientEnv manager base)
   { makeClientRequest = \url request -> do
@@ -50,6 +51,7 @@ connect manager base current = Client (mkClientEnv manager base)
       pure built
         { HTTP.requestHeaders =
             ("Authorization", authorization) : ("User-Agent", "usta") : HTTP.requestHeaders built
+        , HTTP.shouldStripHeaderOnRedirect = (== "Authorization")
         }
   }
 

@@ -28,12 +28,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8')
 import qualified GI.Gdk as Gdk
-import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import System.FilePath (takeExtension)
 import Text.Read (readMaybe)
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.FileIcon as FileIcon
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.CodeView as CodeView
@@ -309,8 +309,7 @@ fileView actions follow anchor place e bytes = do
     _ -> pure ()
   browser <- Button.new Button.defaults { Button.label = Just "Open in browser", Button.small = True }
   void $ GI.on browser #clicked $ do
-    launcher <- Gtk.uriLauncherNew (Just (webUrl place e.path))
-    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+    Browser.open ((webUrl place e.path))
   #append header browser
   #append box header
   -- Clipped, so the file's own background keeps the card's round corners.

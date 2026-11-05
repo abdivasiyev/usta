@@ -20,11 +20,11 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Button as Button
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Markdown as Markdown
@@ -180,8 +180,7 @@ sizeOf n
 
 openUri :: Text -> IO ()
 openUri uri = do
-  launcher <- Gtk.uriLauncherNew (Just uri)
-  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  Browser.open (uri)
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]

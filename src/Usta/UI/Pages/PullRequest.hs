@@ -53,6 +53,8 @@ data Summary = Summary
   , checks :: Maybe (Tone, Text)
     -- ^ Shown next to the Checks tab, e.g. @(Success, "1/1")@.
   , branches :: (Text, Text)
+  , headOwner :: Maybe Text
+    -- ^ The owner of the fork the head branch is in.
     -- ^ The branch with the changes, and the one it would merge into.
   }
 

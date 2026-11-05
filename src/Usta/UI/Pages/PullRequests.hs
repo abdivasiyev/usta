@@ -99,7 +99,13 @@ data PullRequest = PullRequest
     -- ^ Percent done while the local mirror still fetches the branch.
   , createdAt :: UTCTime
   , updatedAt :: UTCTime
+  , from :: Maybe Text
+    -- ^ The owner of the fork the branch is in.
   }
+
+-- | The branch as the forge shows it: "owner:branch" from a fork.
+branchName :: PullRequest -> Text
+branchName pr = maybe pr.branch (\o -> o <> ":" <> pr.branch) pr.from
 
 type Tab :: Type
 data Tab = ReviewTab | CreatedTab | AssignedTab | AllTab
@@ -258,7 +264,7 @@ pullRequestRow pr = do
   let shortName = T.drop 1 (T.dropWhile (/= '/') pr.repo)
   label (shortName <> " #" <> T.pack (show pr.number)) ["meta", "mono"] >>= #append meta
   label "·" ["meta"] >>= #append meta
-  label pr.branch ["meta", "mono"] >>= #append meta
+  label (branchName pr) ["meta", "mono"] >>= #append meta
   label "·" ["meta"] >>= #append meta
   label pr.author ["meta"] >>= #append meta
   #append body meta
@@ -314,6 +320,7 @@ listed c forge pr = PullRequest
   , fetching = Nothing
   , createdAt = pr.createdAt
   , updatedAt = pr.updatedAt
+  , from = pr.headOwner
   }
   where
     checks state = case state of
@@ -500,7 +507,7 @@ repositoryRow pr = do
   #append titleLine titleLabel
   when (pr.state == P.Draft) $ Badge.new Neutral "Draft" >>= #append titleLine
   #append body titleLine
-  label ("#" <> T.pack (show pr.number) <> " · " <> pr.branch <> " → " <> pr.base <> " · " <> pr.author <> " · updated " <> pr.updated) ["meta"]
+  label ("#" <> T.pack (show pr.number) <> " · " <> branchName pr <> " → " <> pr.base <> " · " <> pr.author <> " · updated " <> pr.updated) ["meta"]
     >>= #append body
   #append row body
   checksIcon <- case pr.checks of
@@ -529,17 +536,17 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 sample :: [PullRequest]
 sample =
   [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "master" "abdivasiyev"
-      ChecksPassed ReviewRequested 1 "5m" P.Open [WaitingForMyReview] (2, 1) Nothing sampleAt sampleAt
+      ChecksPassed ReviewRequested 1 "5m" P.Open [WaitingForMyReview] (2, 1) Nothing sampleAt sampleAt Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "master" "abdivasiyev"
-      ChecksFailed ReviewRequested 0 "22m" P.Open [WaitingForMyReview] (2, 1) Nothing sampleAt sampleAt
+      ChecksFailed ReviewRequested 0 "22m" P.Open [WaitingForMyReview] (2, 1) Nothing sampleAt sampleAt Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "master" "abdivasiyev"
-      ChecksRunning NoReviewers 2 "Yesterday" P.Open [CreatedByMe] (2, 1) Nothing sampleAt sampleAt
+      ChecksRunning NoReviewers 2 "Yesterday" P.Open [CreatedByMe] (2, 1) Nothing sampleAt sampleAt Nothing
   , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "master" "abdivasiyev"
-      NoChecks NoReviewers 0 "Mon" P.Draft [CreatedByMe] (2, 1) Nothing sampleAt sampleAt
+      NoChecks NoReviewers 0 "Mon" P.Draft [CreatedByMe] (2, 1) Nothing sampleAt sampleAt Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "master" "abdivasiyev"
-      ChecksPassed Approved 3 "Mon" P.Open [CreatedByMe] (2, 1) Nothing sampleAt sampleAt
+      ChecksPassed Approved 3 "Mon" P.Open [CreatedByMe] (2, 1) Nothing sampleAt sampleAt Nothing
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 21 "refactor: move every host to den aspects" "refactor/den-aspects" "master" "abdivasiyev"
-      ChecksRunning ReviewRequested 0 "1h" P.Open [WaitingForMyReview] (212, 14) (Just 64) sampleAt sampleAt
+      ChecksRunning ReviewRequested 0 "1h" P.Open [WaitingForMyReview] (212, 14) (Just 64) sampleAt sampleAt Nothing
   ]
   where
     sampleAt = UTCTime (fromGregorian 2026 11 1) 0

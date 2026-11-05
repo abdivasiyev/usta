@@ -17,6 +17,7 @@ import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
+import qualified Data.Bifunctor as Bi
 import Data.Kind (Type)
 import Data.Text (Text)
 import System.Directory (getHomeDirectory)
@@ -224,7 +225,7 @@ buildWith start crashed given app = do
               { PullRequest.forge = p.forge, PullRequest.host = p.host, PullRequest.repo = p.repo
               , PullRequest.number = number, PullRequest.title = title, PullRequest.state = PullRequest.Open
               , PullRequest.comments = 0, PullRequest.files = 0, PullRequest.commits = 0
-              , PullRequest.checks = Nothing, PullRequest.branches = branches
+              , PullRequest.checks = Nothing, PullRequest.branches = branches, PullRequest.headOwner = Nothing
               }
         NewPullRequest.new NewPullRequest.Actions
           { branchesOf = \p -> fmap snd <$> source.branchList p.host p.repo p.defaultBranch
@@ -738,7 +739,7 @@ buildWith start crashed given app = do
                     { PullRequest.forge = a.forge, PullRequest.host = target.host, PullRequest.repo = repo, PullRequest.number = number
                     , PullRequest.title = repo <> " #" <> T.pack (show number), PullRequest.state = PullRequest.Open
                     , PullRequest.comments = 0, PullRequest.files = 0, PullRequest.commits = 0
-                    , PullRequest.checks = Nothing, PullRequest.branches = ("", "")
+                    , PullRequest.checks = Nothing, PullRequest.branches = ("", ""), PullRequest.headOwner = Nothing
                     }
               Link.IssueAt {repo, number} -> do
                 known <- source.issues
@@ -875,7 +876,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
             { place = placeOf summary.forge host
             , thread = t, outdated = False, showCode = True, lastReviewed = threads.lastReviewed
             , me = me, clock = c, reply = source.reply host repo n t, upload = Just (source.upload host repo n) }
-          model = Conversation.fromDiscussion c d commits summary.branches checks
+          model = Conversation.fromDiscussion c d commits (Bi.first (\b -> maybe b (\o -> o <> ":" <> b) summary.headOwner) summary.branches) checks
           running = fmap fst summary.checks == Just Warning
       Conversation.new (actionsFor again d goals me c) model
         { Conversation.threads = map shown threads.threads
@@ -1043,7 +1044,7 @@ notificationSummary n = PullRequest.Summary
   , PullRequest.commits = 1
   -- The tab has room for a word, not the card's "1 of 1 passed".
   , PullRequest.checks = fmap (\(tone, _) -> (tone, word tone)) n.checks
-  , PullRequest.branches = maybe ("", "") id n.branch
+  , PullRequest.branches = maybe ("", "") id n.branch, PullRequest.headOwner = Nothing
   }
   where
     word tone = case tone of
@@ -1113,7 +1114,7 @@ foundItem openPull openIssue' openRepository (forge, host, x) = case (x.kind, x.
       { PullRequest.forge = forge, PullRequest.host = host, PullRequest.repo = x.repo, PullRequest.number = n
       , PullRequest.title = x.title, PullRequest.state = if x.closed then PullRequest.Closed else PullRequest.Open
       , PullRequest.comments = 0, PullRequest.files = 0, PullRequest.commits = 0
-      , PullRequest.checks = Nothing, PullRequest.branches = ("", "")
+      , PullRequest.checks = Nothing, PullRequest.branches = ("", ""), PullRequest.headOwner = Nothing
       }
   (Search.Issue, Just n) -> CommandPalette.Item CommandPalette.Issue x.title (shortRef x.repo n <> closedNote) $
     openIssue' "Back" Issue.Model
@@ -1159,6 +1160,7 @@ summaryOf pr = PullRequest.Summary
       PullRequests.ChecksRunning -> Just (Warning, "running")
       PullRequests.NoChecks -> Nothing
   , PullRequest.branches = (pr.branch, pr.base)
+  , PullRequest.headOwner = pr.from
   }
 
 -- | The single-key shortcuts, for the footer strip and Settings.

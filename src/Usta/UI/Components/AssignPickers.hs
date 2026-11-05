@@ -289,18 +289,37 @@ assigneesSection a = do
   when (null a.current) $ do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
     label "No one" ["muted"] >>= #append row
+    -- Assigning yourself shows you at once, with a spinner by your name
+    -- until the forge took it; a refusal puts "No one" back and says why.
+    pending <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #visible := False]
+    problem <- label "" ["muted", "small"]
+    GI.set problem [#visible := False, #wrap := True]
     forM_ a.me $ \self -> do
       label "·" ["muted"] >>= #append row
       link <- GI.new Gtk.Button [#label := "Assign yourself", #cssClasses := ["link-button"]]
       void $ GI.on link #clicked $ do
-        GI.set link [#sensitive := False]
+        Avatar.person 22 a.place (unparse self) >>= #append pending
+        label (unparse self) [] >>= #append pending
+        GI.new Gtk.Spinner [#spinning := True] >>= #append pending
+        GI.set row [#visible := False]
+        GI.set pending [#visible := True]
+        GI.set problem [#visible := False]
         void $ forkIO $ do
           result <- a.save [self]
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-            either (\e -> GI.set link [#sensitive := True, #tooltipText := e]) (const a.saved) result
+            case result of
+              Right () -> a.saved
+              Left e -> do
+                let clear' = Gtk.widgetGetFirstChild pending >>= mapM_ (\w -> Gtk.boxRemove pending w >> clear')
+                clear'
+                GI.set pending [#visible := False]
+                GI.set row [#visible := True]
+                GI.set problem [#label := e, #visible := True]
             pure False
       #append row link
     #append section row
+    #append section pending
+    #append section problem
   open <- assignees a edit
   void $ GI.on edit #clicked open
   pure (section, open)

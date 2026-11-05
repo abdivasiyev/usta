@@ -40,6 +40,7 @@ import Usta.DB.Account (listAccounts, saveAccount)
 import Usta.DB.Schema.Account (AccountId)
 import Usta.Forge (Forge)
 import Usta.Forge.Http (apiUrl)
+import qualified Usta.Forge.GitHub as GitHub
 import qualified Usta.Forge.Sample as Sample
 import qualified Usta.Git.Credential as Credential
 import qualified Usta.Keyring as Keyring
@@ -129,6 +130,7 @@ running links = do
       , sync = sync
       , mirrors = mirrors
       , forgejoApi = \host -> apiUrl host "/api/v1"
+      , githubApi = GitHub.urlsOf
       }
     let details = Details.new Details.Settings {pool = pool, accounts = accounts, mirrors = mirrors}
         source = Source.withDetails pool details

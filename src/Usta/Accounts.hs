@@ -60,6 +60,8 @@ data Settings = Settings
   , mirrors :: Mirrors
   , forgejoApi :: Host -> BaseUrl
     -- ^ Where a Forgejo host's API is: @https://host/api/v1@.
+  , githubApi :: Host -> GitHub.Urls
+    -- ^ Where a GitHub host's APIs are: 'GitHub.urlsOf'.
   }
 
 type Accounts :: Type
@@ -163,7 +165,7 @@ connect settings = do
       other -> settings.sync.report Status {accountId = key, state = Failed (Refused (describe (NotYet other)))}
 
     start forges key host login token = forgejo settings.manager (settings.forgejoApi host) host token >>= running forges key login
-    startGitHub forges key host login token = github settings.manager host token >>= running forges key login
+    startGitHub forges key host login token = github settings.manager (settings.githubApi host) host token >>= running forges key login
     running forges key login forge = do
       atomicModifyIORef' forges (\m -> (Map.insert key (login, forge) m, ()))
       settings.sync.add key forge
@@ -217,7 +219,7 @@ connect settings = do
 
     signIn forges kind host token = case kind of
       Forgejo -> signInWith (whoAmI settings.manager (settings.forgejoApi host) token) (start forges)
-      GitHub -> signInWith (GitHub.whoAmI settings.manager host token) (startGitHub forges)
+      GitHub -> signInWith (GitHub.whoAmI settings.manager (settings.githubApi host) token) (startGitHub forges)
       other -> pure (Left (NotYet other))
       where
         signInWith asking begin = do

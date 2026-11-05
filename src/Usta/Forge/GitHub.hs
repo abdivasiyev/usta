@@ -12,10 +12,10 @@
 -- was updated since the last one, in any state. Repositories come only
 -- with a full sync.
 module Usta.Forge.GitHub
-  ( github
+  ( Urls (..)
+  , urlsOf
+  , github
   , whoAmI
-  , restUrl
-  , graphUrl
   ) where
 
 import Control.Exception (throwIO, try)
@@ -26,6 +26,7 @@ import Data.Int (Int64)
 import Data.Traversable (for)
 import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Aeson (ToJSON (..), Value (Null, String), object, (.=))
+import Data.Kind (Type)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
 import Data.List (sortOn)
@@ -78,6 +79,17 @@ import Usta.Types.Servant.NamedQueryParam (Named (..))
 import Usta.Types.Token (Token)
 
 -- | Where the REST API is: @api.github.com@, or a server's @/api/v3@.
+-- | Where a GitHub's two APIs are.
+type Urls :: Type
+data Urls = Urls
+  { rest :: BaseUrl
+  , graph :: BaseUrl
+  }
+
+-- | github.com's, or a GitHub Enterprise server's on @host@.
+urlsOf :: Host -> Urls
+urlsOf host = Urls {rest = restUrl host, graph = graphUrl host}
+
 restUrl :: Host -> BaseUrl
 restUrl host
   | unparse host == "github.com" = BaseUrl Https "api.github.com" 443 ""
@@ -95,12 +107,12 @@ onHost host = BaseUrl Https (T.unpack name) (fromMaybe 443 (readMaybe (T.unpack 
   where
     (name, port) = T.breakOn ":" (unparse host)
 
--- | The forge of the account @token@ signs in as, on @host@; @token@ is
--- read for each call.
-github :: HTTP.Manager -> Host -> IO Token -> IO Forge
-github manager host token = do
-  let rest = connect manager (restUrl host) (authorization <$> token)
-      graph = connect manager (graphUrl host) (authorization <$> token)
+-- | The forge of the account @token@ signs in as, on @host@, through
+-- @urls@ (normally 'urlsOf' @host@); @token@ is read for each call.
+github :: HTTP.Manager -> Urls -> Host -> IO Token -> IO Forge
+github manager urls host token = do
+  let rest = connect manager urls.rest (authorization <$> token)
+      graph = connect manager urls.graph (authorization <$> token)
       -- Every page of a REST list, 100 at a time.
       pages :: (Api.ListQuery -> ClientM [a]) -> IO [a]
       pages route = go 1
@@ -373,8 +385,8 @@ github manager host token = do
     }
 
 -- | Who @token@ signs in as.
-whoAmI :: HTTP.Manager -> Host -> Token -> IO Login
-whoAmI manager host token = (.login) <$> run (connect manager (restUrl host) (pure (authorization token))) Api.api.me
+whoAmI :: HTTP.Manager -> Urls -> Token -> IO Login
+whoAmI manager urls token = (.login) <$> run (connect manager urls.rest (pure (authorization token))) Api.api.me
 
 authorization :: Token -> ByteString
 authorization token = "Bearer " <> encodeUtf8 (unparse token)

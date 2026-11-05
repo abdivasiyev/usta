@@ -26,6 +26,7 @@ import Data.Kind (Type)
 import Data.List (nub, sortOn)
 import Data.Ord (Down (..))
 import Data.Text (Text)
+import Data.Time (UTCTime (..), fromGregorian)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
@@ -35,6 +36,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Pager as Pager
+import qualified Usta.UI.Components.Choices as Choices
 import qualified Usta.UI.Components.Segmented as Segmented
 import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Format (Clock, short, thousands)
@@ -95,6 +97,8 @@ data PullRequest = PullRequest
     -- ^ Changed files and commits.
   , fetching :: Maybe Double
     -- ^ Percent done while the local mirror still fetches the branch.
+  , createdAt :: UTCTime
+  , updatedAt :: UTCTime
   }
 
 type Tab :: Type
@@ -119,6 +123,8 @@ inTab t pr = case t of
 -- or activated with Enter.
 new :: IO () -> (PullRequest -> IO ()) -> [PullRequest] -> IO (Page PullRequest)
 new onNew onOpen prs = do
+  -- Everything listed, and the rows shown in their order.
+  everything <- newIORef prs
   items <- newIORef prs
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 14
@@ -152,10 +158,10 @@ new onNew onOpen prs = do
                             , #hexpand := True
                             , #halign := Gtk.AlignEnd
                             ]
-  forM_ [ ["All forges", "github.com", "git.azizovich.uz"]
-        , ["All repositories", "abdivasiyev/usta", "abdivasiyev/homelab", "abdivasiyev/nix"]
-        , ["Recently updated", "Newest", "Oldest"]
-        ] $ \options -> Gtk.dropDownNewFromStrings options >>= #append filters
+  forges <- Choices.new "All forges"
+  repos <- Choices.new "All repositories"
+  sorts <- Gtk.dropDownNewFromStrings ["Recently updated", "Newest", "Oldest"]
+  mapM_ (#append filters) [forges, repos, sorts]
 
   toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   #append toolbar tabs
@@ -165,7 +171,6 @@ new onNew onOpen prs = do
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeNone
                              , #cssClasses := ["u-pr-list"]
                              ]
-  refill list pullRequestRow prs
   empty <- GI.new Gtk.Label [#label := "Nothing here", #cssClasses := ["muted", "empty"]]
   Gtk.listBoxSetPlaceholder list (Just empty)
   void $ GI.on list #rowActivated $ \row -> do
@@ -186,6 +191,36 @@ new onNew onOpen prs = do
         writeIORef current tab
         Gtk.listBoxInvalidateFilter list
 
+  -- The forge and repository chosen, in the order chosen; the tabs count
+  -- what they leave.
+  let draw = do
+        all' <- readIORef everything
+        host <- Choices.chosen forges
+        repo <- Choices.chosen repos
+        order <- Gtk.dropDownGetSelected sorts
+        let kept = [pr | pr <- all', maybe True (== pr.host) host, maybe True (== pr.repo) repo]
+            sorted = case order of
+              1 -> sortOn (Down . (.createdAt)) kept
+              2 -> sortOn (.createdAt) kept
+              _ -> sortOn (Down . (.updatedAt)) kept
+        writeIORef items sorted
+        refill list pullRequestRow sorted
+        forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
+          GI.set button [#label := tabText sorted tab]
+      -- The repositories of the forge chosen.
+      offerRepos = do
+        all' <- readIORef everything
+        host <- Choices.chosen forges
+        Choices.offer repos [pr.repo | pr <- all', maybe True (== pr.host) host]
+      fill shown = do
+        writeIORef everything shown
+        Choices.offer forges (map (.host) shown)
+        offerRepos
+        draw
+  void $ GI.on forges (GI.PropertyNotify #selected) (const (offerRepos >> draw))
+  forM_ [repos, sorts] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const draw)
+  fill prs
+
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "list-card"]]
   #append card list
   scroll <- GI.new Gtk.ScrolledWindow [ #child := card
@@ -197,11 +232,7 @@ new onNew onOpen prs = do
   #append page scroll
   pure Page
     { widget = page
-    , update = \shown -> do
-        writeIORef items shown
-        refill list pullRequestRow shown
-        forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
-          GI.set button [#label := tabText shown tab]
+    , update = fill
     }
 
 pullRequestRow :: PullRequest -> IO Gtk.Box
@@ -281,6 +312,8 @@ listed c forge pr = PullRequest
   , changes = (maybe 0 unparse pr.changedFiles, maybe 0 unparse pr.commits)
     -- 0 until the details are fetched.
   , fetching = Nothing
+  , createdAt = pr.createdAt
+  , updatedAt = pr.updatedAt
   }
   where
     checks state = case state of
@@ -496,18 +529,20 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 sample :: [PullRequest]
 sample =
   [ PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 2 "feat: add gi-gtk4 dependency" "feat/gtk4-dep" "master" "abdivasiyev"
-      ChecksPassed ReviewRequested 1 "5m" P.Open [WaitingForMyReview] (2, 1) Nothing
+      ChecksPassed ReviewRequested 1 "5m" P.Open [WaitingForMyReview] (2, 1) Nothing sampleAt sampleAt
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 48 "chore: move cache priorities into nix.settings" "cache-priorities" "master" "abdivasiyev"
-      ChecksFailed ReviewRequested 0 "22m" P.Open [WaitingForMyReview] (2, 1) Nothing
+      ChecksFailed ReviewRequested 0 "22m" P.Open [WaitingForMyReview] (2, 1) Nothing sampleAt sampleAt
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 47 "feat: add binary cache health check" "cache-health" "master" "abdivasiyev"
-      ChecksRunning NoReviewers 2 "Yesterday" P.Open [CreatedByMe] (2, 1) Nothing
+      ChecksRunning NoReviewers 2 "Yesterday" P.Open [CreatedByMe] (2, 1) Nothing sampleAt sampleAt
   , PullRequest Forge.GitHub "github.com" "abdivasiyev/usta" 6 "feat: render main window with GTK4" "feat/main-window" "master" "abdivasiyev"
-      NoChecks NoReviewers 0 "Mon" P.Draft [CreatedByMe] (2, 1) Nothing
+      NoChecks NoReviewers 0 "Mon" P.Draft [CreatedByMe] (2, 1) Nothing sampleAt sampleAt
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 13 "fix: restart nix-daemon after config change" "daemon-restart" "master" "abdivasiyev"
-      ChecksPassed Approved 3 "Mon" P.Open [CreatedByMe] (2, 1) Nothing
+      ChecksPassed Approved 3 "Mon" P.Open [CreatedByMe] (2, 1) Nothing sampleAt sampleAt
   , PullRequest Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 21 "refactor: move every host to den aspects" "refactor/den-aspects" "master" "abdivasiyev"
-      ChecksRunning ReviewRequested 0 "1h" P.Open [WaitingForMyReview] (212, 14) (Just 64)
+      ChecksRunning ReviewRequested 0 "1h" P.Open [WaitingForMyReview] (212, 14) (Just 64) sampleAt sampleAt
   ]
+  where
+    sampleAt = UTCTime (fromGregorian 2026 11 1) 0
 
 css :: Text
 css = mconcat

@@ -33,7 +33,20 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "usta ${GITHUB_REF_NAME#v}"
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          # Before 1.0 a release is a beta, said in its title; it stays a
+          # regular release, since "latest" leaves pre-releases out and the
+          # downloads and the update check go by it.
+          title="usta $version"
+          case "$version" in 0.*) title="$title (beta)";; esac
+          # The notes are the version's part of CHANGELOG.md.
+          awk -v v="$version" '/^## / {on = index($0, "## " v) == 1; next} on' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" --title "$title" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$title" --generate-notes
+          fi
 
   macos:
     needs: release

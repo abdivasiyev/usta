@@ -17,6 +17,41 @@ usta opens `usta://<forge link>` links, such as
 `usta://codeberg.org/forgejo/forgejo/pulls/1`, from anywhere on the
 system. Once a day it checks for a newer release (Settings > Updates).
 
+### With Nix
+
+The flake has a Home Manager module, for macOS and Linux, and NixOS and
+nix-darwin modules. On macOS they install `usta.app` (Home Manager links
+it into `~/Applications/Home Manager Apps`), so `usta://` links and
+notifications work.
+
+```nix
+{
+  inputs.usta.url = "github:abdivasiyev/usta";
+
+  # in a Home Manager configuration
+  imports = [ inputs.usta.homeManagerModules.default ];
+  programs.usta = {
+    enable = true;
+    settings = {
+      interval = "5m";        # "1m", "2m", "5m", "15m" or "manual"
+      theme = "dark";         # "system", "light" or "dark"
+      notifications = true;
+      onlyInBackground = false;
+      openLinks = true;
+      checkUpdates = false;
+    };
+  };
+}
+```
+
+Each setting is optional. One that is set shows as "Set in Nix" in
+usta's Settings and is not changed there; the rest stay yours. Home
+Manager writes them to `~/.config/usta/config.json`.
+`nixosModules.default` and `darwinModules.default` take the same
+`programs.usta` options for every user, written to
+`/etc/xdg/usta/config.json`; a user's own Home Manager settings win
+over them. `overlays.default` adds `pkgs.usta`.
+
 ## Run
 
 With [Nix](https://nixos.org) and flakes enabled:

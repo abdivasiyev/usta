@@ -92,14 +92,65 @@
             install -Dm644 data/usta.svg $out/share/icons/hicolor/scalable/apps/io.github.abdivasiyev.Usta.svg
           '';
       });
+    # On macOS, usta.app around the nix build, for Home Manager and
+    # nix-darwin to put in Applications: macOS opens usta:// links and
+    # shows notifications only for an app. Unlike scripts/macos-app.sh's,
+    # it loads everything from /nix/store. bin/usta is there too.
+    ustaAppFor = pkgs: let
+      usta = ustaFor pkgs;
+    in
+      pkgs.stdenvNoCC.mkDerivation {
+        pname = "usta-app";
+        inherit (usta) version;
+        dontUnpack = true;
+        nativeBuildInputs = [pkgs.wrapGAppsHook4 pkgs.makeShellWrapper pkgs.librsvg pkgs.libicns];
+        buildInputs = [pkgs.gtk4 pkgs.adwaita-icon-theme pkgs.gsettings-desktop-schemas pkgs.librsvg];
+        dontWrapGApps = true;
+        installPhase = ''
+          contents=$out/Applications/usta.app/Contents
+          mkdir -p $contents/MacOS $contents/Resources $out/bin
+          # Linked, not copied: the binary runs from inside the bundle, so
+          # macOS takes it for the app.
+          ln -s ${usta}/bin/.usta-wrapped $contents/MacOS/usta-bin
+          sed "s/@VERSION@/${usta.version}/g" ${./data/macos/Info.plist} > $contents/Info.plist
+          # The icon: the logo with macOS's room around it, 824 of 1024.
+          for size in 16 32 128 256 512 1024; do
+            art=$((size * 824 / 1024)); edge=$(((size - art) / 2))
+            rsvg-convert -w $art -h $art --page-width $size --page-height $size --left $edge --top $edge \
+              ${./data/usta.svg} -o icon_$size.png
+          done
+          png2icns $contents/Resources/usta.icns icon_*.png
+          ln -s ${usta}/bin/usta $out/bin/usta
+        '';
+        postFixup = ''
+          makeShellWrapper $out/Applications/usta.app/Contents/MacOS/usta-bin $out/Applications/usta.app/Contents/MacOS/usta "''${gappsWrapperArgs[@]}"
+        '';
+        meta.mainProgram = "usta";
+      };
   in {
+    # pkgs.usta: the app on macOS, the program elsewhere.
+    overlays.default = final: _: {
+      usta =
+        if final.stdenv.hostPlatform.isDarwin
+        then ustaAppFor final
+        else ustaFor final;
+    };
+
+    homeManagerModules.default = import ./nix/home-manager.nix self;
+    nixosModules.default = import ./nix/system.nix self;
+    darwinModules.default = import ./nix/system.nix self;
+
     packages = forAllSystems (pkgs: {
       usta = ustaFor pkgs;
-      default = self.packages.${pkgs.stdenv.hostPlatform.system}.usta;
+      default =
+        if pkgs.stdenv.hostPlatform.isDarwin
+        then self.packages.${pkgs.stdenv.hostPlatform.system}.usta-app
+        else self.packages.${pkgs.stdenv.hostPlatform.system}.usta;
       # What GTK reads at run time, for scripts/macos-app.sh to put in the
       # bundle: compiled settings schemas, the SVG image loader and the
       # Adwaita icons.
       # The image loaders: gdk-pixbuf's own and librsvg's SVG one.
+      usta-app = ustaAppFor pkgs;
       bundle-data = pkgs.runCommand "usta-bundle-data" {nativeBuildInputs = [pkgs.glib.dev pkgs.librsvg];} ''
         mkdir -p $out/share/glib-2.0/schemas $out/share/icons $out/lib/gdk-pixbuf-2.0/2.10.0/loaders
         # The app icon's art, on macOS's grid: 824 of its 1024 pixels.

@@ -528,6 +528,8 @@ issueOf host (i, involvement) = do
     }
 
 -- | The repositories, recently changed first, at most 1000.
+-- | Fifty at a time: a hundred, with their counts, take GitHub ten
+-- seconds and now and then a 502, which failed the whole sync.
 repositoriesOf :: Client -> Host -> IO [R.Repository]
 repositoriesOf client host = go (1 :: Int) Nothing
   where
@@ -537,7 +539,7 @@ repositoriesOf client host = go (1 :: Int) Nothing
         , variables = object ["after" .= maybe Null String after] })
       let here = map (repositoryOf host) found.nodes
       case found.next of
-        Just cursor | n < 10 -> (here <>) <$> go (n + 1) (Just cursor)
+        Just cursor | n < 20 -> (here <>) <$> go (n + 1) (Just cursor)
         _ -> pure here
 
 repositoryOf :: Host -> Api.RepoNode -> R.Repository

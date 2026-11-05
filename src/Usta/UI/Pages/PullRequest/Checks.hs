@@ -8,6 +8,7 @@ module Usta.UI.Pages.PullRequest.Checks
   ( LogLine (..)
   , Model (..)
   , parseLog
+  , logView
   , new
   , css
   ) where
@@ -26,6 +27,7 @@ import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
+import Text.Read (readMaybe)
 
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
@@ -43,6 +45,11 @@ data LogLine
     -- ^ A line that is part of the error.
   | Note Text
     -- ^ The runner's own lines, e.g. "Job failed".
+  | Command Text
+    -- ^ A command a step runs, as GitHub shows it before its output.
+  | Group Text
+    -- ^ GitHub's "##[group]": the lines up to 'EndGroup' fold under it.
+  | EndGroup
   deriving stock (Eq, Show)
 
 type Model :: Type
@@ -174,7 +181,7 @@ checkDetail m check = do
               GI.set copy [#visible := True]
               void $ GI.on copy #clicked $ do
                 clipboard <- Gtk.widgetGetClipboard copy
-                provider <- GI.toGValue (Just (T.unlines (map body ls))) >>= Gdk.contentProviderNewForValue
+                provider <- GI.toGValue (Just (T.unlines (map body (filter (/= EndGroup) ls)))) >>= Gdk.contentProviderNewForValue
                 void (Gdk.clipboardSetContent clipboard (Just provider))
             Right (Left _) -> say unreadable
             Left (_ :: SomeException) -> say unreadable
@@ -188,17 +195,25 @@ openUri url = do
   launcher <- Gtk.uriLauncherNew (Just url)
   Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
 
--- | A job's log as Forgejo gives it: each line after its time, steps as
--- "⭐ Run Main <name>", and the runner's own lines. In a failed job, lines
--- that speak of an error are marked.
+-- | A job's log as Forgejo or GitHub gives it: each line after its time.
+-- Forgejo starts steps with "⭐ Run Main <name>"; GitHub folds lines into
+-- "##[group]" and marks "##[error]" and "##[command]" lines. In a failed
+-- job, lines that speak of an error are marked. Colors stay in the text,
+-- as ANSI codes, for 'logView' to draw.
 parseLog :: Bool -> Text -> [LogLine]
-parseLog failed raw = map (classify . untimed) (T.lines raw)
+parseLog failed raw = map (classify . untimed . T.dropWhile (== '\xFEFF')) (T.lines raw)
   where
     untimed line = case T.breakOn " " line of
       (t, rest) | isTime t -> T.drop 1 rest
       _ -> line
     isTime t = T.length t >= 20 && "Z" `T.isSuffixOf` t && T.all (\c -> isDigit c || c `elem` ("-:.TZ" :: String)) t
     classify l
+      | Just title <- T.stripPrefix "##[group]" l = Group title
+      | "##[endgroup]" `T.isPrefixOf` l = EndGroup
+      | Just e <- T.stripPrefix "##[error]" l = Failure e
+      | Just w <- T.stripPrefix "##[warning]" l = Note ("Warning: " <> w)
+      | Just c <- T.stripPrefix "##[command]" l = Command c
+      | Just n <- T.stripPrefix "##[notice]" l = Note n
       | Just step <- T.stripPrefix "⭐ Run " l = Step (dropPhase step)
       | any (`T.isPrefixOf` l) ["🏁", "Job '"] || "received task" `T.isInfixOf` l || l == "workflow prepared" = Note l
       | failed && any (`T.isInfixOf` T.toLower l) ["error", "fail", "fatal", "panic", "exception"] = Failure l
@@ -207,39 +222,124 @@ parseLog failed raw = map (classify . untimed) (T.lines raw)
       (phase, rest) | phase `elem` ["Main", "Pre", "Post"] -> T.drop 1 rest
       _ -> step
 
+-- | A line as plain text, without its colors.
 body :: LogLine -> Text
-body l = case l of
+body l = plain $ case l of
   Step t -> t
   Output t -> t
   Failure t -> t
   Note t -> t
+  Command t -> t
+  Group t -> t
+  EndGroup -> ""
+
+-- | The text without ANSI escape codes.
+plain :: Text -> Text
+plain t = T.concat (map snd (ansiPieces t))
+
+-- | Text split where ANSI SGR codes ("\ESC[36;1m") change its look: each
+-- piece with its color and whether it is bold. Other escape codes are
+-- dropped.
+ansiPieces :: Text -> [((Maybe Text, Bool), Text)]
+ansiPieces t = go (Nothing, False) (T.splitOn "\ESC[" t)
+  where
+    go _ [] = []
+    go look (first : rest) = (look, first) : concatMap' look rest
+    concatMap' _ [] = []
+    concatMap' look (chunk : more) =
+      let (codes, after) = T.span (\c -> isDigit c || c == ';') chunk
+          command = T.take 1 after
+          text = T.drop 1 after
+          look' = if command == "m" then foldl apply look (codesOf codes) else look
+       in (look', text) : concatMap' look' more
+    codesOf c = if T.null c then [0] else [n | p <- T.splitOn ";" c, Just n <- [readMaybe (T.unpack p) :: Maybe Int]]
+    apply (fg, bold) code
+      | code == 0 = (Nothing, False)
+      | code == 1 = (fg, True)
+      | code == 22 = (fg, False)
+      | code == 39 = (Nothing, bold)
+      | code >= 30 && code <= 37 = (Just (palette !! (code - 30)), bold)
+      | code >= 90 && code <= 97 = (Just (palette !! (code - 90)), bold)
+      | otherwise = (fg, bold)
+    -- Read on the log's dark background.
+    palette = ["#9AA0A9", "#F28B82", "#81C995", "#FDD663", "#8AB4F8", "#C58AF9", "#78D9EC", "#E8EAED"]
+
+-- | Pango markup for a line with ANSI colors.
+ansiMarkup :: Text -> Text
+ansiMarkup t = T.concat [styled look (escape piece) | (look, piece) <- ansiPieces t, not (T.null piece)]
+  where
+    styled (fg, bold) x = case (fg, bold) of
+      (Nothing, False) -> x
+      _ -> "<span" <> maybe "" (\c -> " foreground=\"" <> c <> "\"") fg <> (if bold then " weight=\"bold\"" else "") <> ">" <> x <> "</span>"
+    escape = T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "&" "&amp;"
 
 -- | A dark, numbered log, steps in their own color and error lines
 -- marked. Forgejo marks only some steps in a log, so none fold away.
 logView :: [LogLine] -> IO Gtk.ScrolledWindow
 logView ls = do
   lines' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-log"]]
-  forM_ (zip [1 :: Int ..] ls) $ \(n, l) -> do
-    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["log-line", kind l]]
-    GI.new Gtk.Label [ #label := T.pack (show n), #xalign := 1, #widthRequest := 48
-                     , #cssClasses := ["log-number"] ] >>= #append row
-    text <- label (marked l) ["log-text"]
-    GI.set text [#selectable := True, #hexpand := True]
-    #append row text
-    #append lines' row
+  -- A GitHub group's lines go in a box under its row, which folds it; a
+  -- group with an error in it starts open.
+  let draw n l = do
+        row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["log-line", kind l]]
+        GI.new Gtk.Label [ #label := T.pack (show n), #xalign := 1, #widthRequest := 48
+                         , #cssClasses := ["log-number"] ] >>= #append row
+        text <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #wrapMode := Pango.WrapModeWordChar, #cssClasses := ["log-text"]]
+        Gtk.labelSetMarkup text (ansiMarkup (marked l))
+        GI.set text [#selectable := True, #hexpand := True]
+        #append row text
+        pure (row, text)
+      go _ [] = pure ()
+      go n (l : rest) = case l of
+        EndGroup -> go n rest
+        Group title -> do
+          let (inside, after) = break (== EndGroup) rest
+              failing = any isFailure inside
+          (row, text) <- draw n (Group title)
+          members <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #visible := failing]
+          forM_ (zip [n + 1 ..] inside) $ \(i, x) -> draw i x >>= #append members . fst
+          let arrow open = if open then "▾ " else "▸ "
+              mark open = Gtk.labelSetMarkup text (arrow open <> ansiMarkup title)
+          mark failing
+          click <- Gtk.gestureClickNew
+          void $ GI.on click #released $ \_ _ _ -> do
+            open <- not <$> GI.get members #visible
+            GI.set members [#visible := open]
+            mark open
+          Gtk.widgetAddController row click
+          Gtk.widgetSetCursorFromName row (Just "pointer")
+          #append lines' row
+          #append lines' members
+          go (n + 1 + length inside) (drop 1 after)
+        _ -> draw n l >>= #append lines' . fst >> go (n + 1) rest
+  go (1 :: Int) ls
   GI.new Gtk.ScrolledWindow [ #child := lines'
                             , #vexpand := True
+                            , #hscrollbarPolicy := Gtk.PolicyTypeNever
                             , #cssClasses := ["log-scroll"]
                             ]
   where
+    isFailure x = case x of
+      Failure _ -> True
+      _ -> False
     kind l = case l of
       Step _ -> "step"
+      Group _ -> "step"
       Output _ -> "out"
       Failure _ -> "failure"
       Note _ -> "note"
+      Command _ -> "command"
+      EndGroup -> "out"
     marked l = case l of
       Step t -> "▸ " <> t
-      _ -> body l
+      Command t -> "$ " <> t
+      _ -> body' l
+    body' l = case l of
+      Output t -> t
+      Failure t -> t
+      Note t -> t
+      Group t -> t
+      _ -> ""
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
@@ -274,4 +374,5 @@ css = mconcat
   , "box.u-log box.log-line.step { color: #8AB4F8; }"
   , "box.u-log box.log-line.failure { background: #3A1D1D; color: #F6B4AC; }"
   , "box.u-log box.log-line.note { color: #9AA0A9; }"
+  , "box.u-log box.log-line.command { color: #78D9EC; }"
   ]

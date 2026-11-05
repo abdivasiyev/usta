@@ -53,6 +53,7 @@ module Usta.Forge.Forgejo.Api
   , RepoLabel (..)
   , Reviewers (..)
   , BaseHead (..)
+  , BaseHeadDiff (..)
   , Comparison (..)
   , NotificationQuery (..)
   , ThreadQuery (..)
@@ -336,6 +337,10 @@ data Web mode = Web
   { jobLog
       :: mode :- Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int
            :> "jobs" :> Capture "job" Int :> "attempt" :> Capture "attempt" Int :> "logs" :> Get '[RawText] Text
+  , compareDiff
+      :: mode :- Capture "owner" Text :> Capture "repo" Text :> "compare" :> Capture "basehead" BaseHeadDiff
+           :> Get '[RawText] Text
+    -- ^ The API's compare has no patch; the web page's .diff does.
   }
   deriving stock (Generic)
 
@@ -518,6 +523,13 @@ data BaseHead = BaseHead Text Text
 
 instance ToHttpApiData BaseHead where
   toUrlPiece (BaseHead base tip) = toUrlPiece (base <> "..." <> tip)
+
+-- | "base...head.diff".
+type BaseHeadDiff :: Type
+data BaseHeadDiff = BaseHeadDiff Text Text
+
+instance ToHttpApiData BaseHeadDiff where
+  toUrlPiece (BaseHeadDiff base tip) = toUrlPiece (base <> "..." <> tip <> ".diff")
 
 -- | The commits, oldest first, and the files they change.
 type Comparison :: Type

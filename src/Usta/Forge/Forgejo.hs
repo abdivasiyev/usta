@@ -218,6 +218,9 @@ forgejo manager base host token = do
     , compare = \repo into tip -> do
         c <- run client (Api.api.compare (owner repo) (shortName repo) (Api.BaseHead into tip))
         pure (map (.commit) c.commits, c.files)
+    , compareDiff = \repo into tip -> do
+        text <- run site (Api.web.compareDiff (owner repo) (shortName repo) (Api.BaseHeadDiff into tip))
+        either (throwIO . Refused) pure (parseDiff text)
     , cloneUrls = \repo -> do
         r <- run client (Api.api.repository (owner repo) (shortName repo))
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}

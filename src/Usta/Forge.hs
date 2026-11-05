@@ -168,6 +168,8 @@ data Forge = Forge
   , compare :: RepoName -> Text -> Text -> IO ([Commit], [Text])
     -- ^ What a branch has that the base branch does not: its commits,
     -- oldest first, and the paths they change.
+  , compareDiff :: RepoName -> Text -> Text -> IO [FileDiff]
+    -- ^ The same as a diff, base then branch.
   , tree :: RepoName -> Text -> IO [Entry]
     -- ^ Every folder and file on a branch, for when there is no mirror.
   , file :: RepoName -> Text -> Text -> IO ByteString

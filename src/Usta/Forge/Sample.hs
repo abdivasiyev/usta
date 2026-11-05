@@ -153,6 +153,7 @@ new now account = do
         , F.milestones = \_ -> pure []
         , F.setMilestone = \_ _ _ -> refuse
         , F.compare = \_ _ _ -> pure ([], [])
+        , F.compareDiff = \_ _ _ -> pure []
         , F.tree = \_ _ -> pure []
         , F.file = \_ _ _ -> refuse
         , F.markUnread = \thread -> do

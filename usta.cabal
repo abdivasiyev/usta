@@ -103,6 +103,7 @@ executable usta
     Usta.Types.Involvement
     Usta.Types.Insights
     Usta.Types.Link
+    Usta.Types.Listing
     Usta.Types.Issue
     Usta.Types.Label
     Usta.Types.Login
@@ -149,6 +150,7 @@ executable usta
     Usta.UI.Components.Mermaid
     Usta.UI.Components.NavItem
     Usta.UI.Components.PdfView
+    Usta.UI.Components.Pager
     Usta.UI.Components.Progress
     Usta.UI.Components.SearchField
     Usta.UI.Components.Segmented

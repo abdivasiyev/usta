@@ -27,6 +27,7 @@ import Usta.Types.Discussion (Comment, Discussion, Feeling, Merge, NewIssue, New
 import Usta.Types.ETag (ETag)
 import Usta.Types.Issue (Issue)
 import Usta.Types.Label (Definition)
+import Usta.Types.Listing (Listing, Paged)
 import Usta.Types.Login (Login)
 import Usta.Types.Milestone (Milestone)
 import Usta.Types.Notification (Notification)
@@ -112,11 +113,10 @@ data Forge = Forge
   , setWatching :: RepoName -> Number -> Watching -> IO ()
     -- ^ A forge may refuse one it cannot set, saying why.
   , timeline :: RepoName -> Number -> IO [Event]
-  , repoPullRequests :: RepoName -> IO [PullRequest]
-    -- ^ A repository's latest pull requests in any state, whoever they
-    -- involve, recently updated first.
-  , repoIssues :: RepoName -> IO [Issue]
-    -- ^ A repository's latest issues in any state, newest first.
+  , repoPullRequests :: RepoName -> Listing -> Maybe Text -> IO (Paged PullRequest)
+    -- ^ A page of a repository's pull requests, whoever they involve; the
+    -- first, or the one the last page's 'next' points at.
+  , repoIssues :: RepoName -> Listing -> Maybe Text -> IO (Paged Issue)
   , runs :: RepoName -> IO [Run]
     -- ^ A repository's latest CI runs, newest first.
     -- ^ What happened besides comments, oldest first.

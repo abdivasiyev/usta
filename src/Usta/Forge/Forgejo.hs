@@ -38,7 +38,7 @@ import Servant.Client (BaseUrl (..), ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Fork (..), Known (..), LineNote (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Fork (..), Known (..), NewRepo (..), LineNote (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import qualified Data.ByteString.Lazy as BL
@@ -99,6 +99,9 @@ forgejo manager base host token = do
         Just _ -> pure NotModified
         Nothing -> Fetched Nothing <$> repositoriesOf client host
     , repository = \repo -> repositoryOf host <$> run client (Api.api.repository (owner repo) (shortName repo))
+    , createRepository = \new -> do
+        let body = Api.NewRepoBody {name = new.name, description = new.description, private = new.private, autoInit = new.readme}
+        (.fullName) <$> run client (maybe (Api.api.createMyRepo body) (\org -> Api.api.createOrgRepo org body) new.owner)
     , forkOwners = do
         login <- myLogin
         orgs <- run client (everyPage (\page limit -> Api.api.myOrgs Api.ListQuery {page = page, limit = limit}))

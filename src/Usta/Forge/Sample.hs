@@ -79,6 +79,7 @@ new now account = do
         , F.parentOf = \_ -> pure Nothing
         , F.canPush = \_ -> pure True
         , F.fork = \_ _ -> throwIO (F.Refused "The samples cannot fork.")
+        , F.createRepository = \_ -> throwIO (F.Refused "The samples cannot create repositories.")
         , F.repository = \repo -> do
             failIfTold ref
             s <- readIORef ref

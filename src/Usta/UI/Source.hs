@@ -114,6 +114,11 @@ data Source = Source
     -- ^ The new fork's full name.
   , parentOf :: Text -> Text -> IO (Either Text (Maybe Text))
   , canPush :: Text -> Text -> IO (Either Text Bool)
+  , ownersOn :: Text -> IO (Either Text [Text])
+    -- ^ Where a repository can be made on a forge: you first, then your
+    -- organizations.
+  , createRepository :: Text -> Forge.NewRepo -> IO (Either Text Text)
+    -- ^ On a forge, by host: the new repository's full name.
   , accounts :: IO [Connected]
   , onChange :: (Resource -> IO ()) -> IO ()
     -- ^ Runs the action on the GTK main thread whenever a list was saved
@@ -303,6 +308,8 @@ fromDatabase pool changes statuses sync = Source
   , forkRepository = \_ _ _ -> pure (Left "Sign in to that forge to fork.")
   , parentOf = \_ _ -> pure (Right Nothing)
   , canPush = \_ _ -> pure (Right True)
+  , ownersOn = \_ -> pure (Left "Sign in to that forge first.")
+  , createRepository = \_ _ -> pure (Left "Sign in to that forge first.")
   , accounts = do
       rows <- run pool listAccounts
       pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login, byBrowser = a.authMethod == BrowserSignIn} | (key, a) <- rows]
@@ -439,6 +446,8 @@ samples = Source
   , forkRepository = \_ _ _ -> pure (Left "The samples cannot fork.")
   , parentOf = \_ _ -> pure (Right Nothing)
   , canPush = \_ _ -> pure (Right True)
+  , ownersOn = \_ -> pure (Right ["abdivasiyev"])
+  , createRepository = \_ _ -> pure (Left "The samples cannot create repositories.")
   , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev", byBrowser = False} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
   , onChange = const (pure ())
   , onStatus = const (pure ())
@@ -565,6 +574,8 @@ withAccounts pool accounts source = source
   , forkRepository = \host repo wanted -> onRepo host repo (\f name -> unparse <$> f.fork name wanted)
   , parentOf = \host repo -> onRepo host repo (\f name -> fmap unparse <$> f.parentOf name)
   , canPush = \host repo -> onRepo host repo (\f name -> f.canPush name)
+  , ownersOn = \host -> onHost host (.forkOwners)
+  , createRepository = \host new -> onHost host (\f -> unparse <$> f.createRepository new)
   , setDone = \n done -> do
       items <- run pool DB.inbox
       case [i | i <- items, matches n i] of
@@ -678,6 +689,15 @@ withAccounts pool accounts source = source
   , discardPending = \host repo n -> onForge host repo n (\f name number -> f.discardPending name number)
   }
   where
+    -- Through the first account signed in to the host.
+    onHost :: Text -> (Forge.Forge -> IO a) -> IO (Either Text a)
+    onHost host act = do
+      signedIn <- run pool listAccounts
+      case [key | (key, a) <- signedIn, unparse a.host == host] of
+        key : _ -> accounts.forgeOf key >>= \case
+          Nothing -> pure (Left (said SignedOut))
+          Just f -> either (Left . said) Right <$> try (act f)
+        [] -> pure (Left ("Sign in to " <> host <> " first."))
     onRepo :: Text -> Text -> (Forge.Forge -> RepoName -> IO a) -> IO (Either Text a)
     onRepo host repo act = do
       found <- accountFor pool host repo

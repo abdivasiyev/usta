@@ -27,6 +27,8 @@ env:
 
 permissions:
   contents: write
+  # The nix cache purges its old entries.
+  actions: write
 
 jobs:
   release:
@@ -72,7 +74,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: nixbuild/nix-quick-install-action@v30
+      # GHC 9.12's packages are not in nixpkgs' cache: what a run builds
+      # is kept in GitHub's, by OS, until the flake or usta.cabal changes.
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'usta.cabal') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: P7D
+          purge-primary-key: never
       - name: Import the signing certificate
         if: env.SIGNING == 'true'
         env:
@@ -122,7 +134,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: nixbuild/nix-quick-install-action@v30
+      # GHC 9.12's packages are not in nixpkgs' cache: what a run builds
+      # is kept in GitHub's, by OS, until the flake or usta.cabal changes.
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'usta.cabal') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-last-accessed: P7D
+          purge-primary-key: never
       - name: Build the AppImage, .deb and .rpm
         # The .deb and .rpm carry usta's own GTK under /nix/store: the
         # distributions' GTK is older than the 4.20 usta needs.

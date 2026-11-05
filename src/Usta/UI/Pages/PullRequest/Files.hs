@@ -198,6 +198,7 @@ new actions panels m = do
                                       , #vexpand := True
                                       ]
   adjustment <- Gtk.scrolledWindowGetVadjustment scroll
+  diffArea <- GI.new Gtk.Overlay [#child := scroll, #hexpand := True, #vexpand := True]
 
   progress <- label "" ["muted", "small"]
   GI.set progress [#vexpand := True, #valign := Gtk.AlignEnd]
@@ -378,6 +379,57 @@ new actions panels m = do
 
   forM_ (take 1 entries) setCurrent
 
+  -- The header of the file at the top stays there until the next file
+  -- comes, with its Viewed box, so a long file is marked without going
+  -- back up.
+  pinned <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal, #spacing := 10, #valign := Gtk.AlignStart
+                           , #visible := False, #marginStart := round padding, #marginEnd := round padding
+                           , #cssClasses := ["pinned-header"] ]
+  pinnedIcon <- GI.new Gtk.Box []
+  pinnedPath <- label "" ["mono", "strong"]
+  GI.set pinnedPath [#ellipsize := Pango.EllipsizeModeStart]
+  pinnedStat <- label "" ["muted", "small"]
+  pinnedCheck <- GI.new Gtk.CheckButton [#label := "Viewed", #hexpand := True, #halign := Gtk.AlignEnd]
+  mapM_ (#append pinned) =<< sequence [Gtk.toWidget pinnedIcon, Gtk.toWidget pinnedPath, Gtk.toWidget pinnedStat, Gtk.toWidget pinnedCheck]
+  Gtk.overlayAddOverlay diffArea pinned
+  pinnedOn <- newIORef Nothing
+  syncing <- newIORef False
+  let pin = do
+        top <- Gtk.adjustmentGetValue adjustment
+        spans <- forM entries $ \e -> do
+          shown <- Gtk.widgetGetVisible e.card
+          (ok, rect) <- Gtk.widgetComputeBounds e.card main
+          y <- Graphene.rectGetY rect
+          h <- Graphene.rectGetHeight rect
+          pure (e, shown && ok, realToFrac y, realToFrac h)
+        -- Past its own header, and with room for the pinned one.
+        case [e | (e, ok, y, h) <- spans, ok, y < top, y + h > top + 48] of
+          e : _ -> do
+            before <- readIORef pinnedOn
+            when (before /= Just e.file.path) $ do
+              writeIORef pinnedOn (Just e.file.path)
+              Gtk.widgetGetFirstChild pinnedIcon >>= mapM_ (Gtk.boxRemove pinnedIcon)
+              FileIcon.file 16 e.file.path >>= #append pinnedIcon
+              GI.set pinnedPath [#label := e.file.path]
+              GI.set pinnedStat [#label := Diff.stat e.file]
+            real <- viewedBox e.card
+            isViewed <- maybe (pure False) (`GI.get` #active) real
+            writeIORef syncing True
+            GI.set pinnedCheck [#active := isViewed]
+            writeIORef syncing False
+            GI.set pinned [#visible := True]
+          [] -> writeIORef pinnedOn Nothing >> GI.set pinned [#visible := False]
+  void $ GI.on adjustment #valueChanged pin
+  void $ GI.on adjustment #changed pin
+  -- Marking it here marks the file's own box, which folds the diff.
+  void $ GI.on pinnedCheck #toggled $ do
+    quiet <- readIORef syncing
+    current <- readIORef pinnedOn
+    unless quiet $ forM_ [e | e <- entries, Just e.file.path == current] $ \e -> do
+      on' <- GI.get pinnedCheck #active
+      viewedBox e.card >>= mapM_ (\b -> GI.set b [#active := on'])
+      pin
+
   -- Threads: the filter, the summary, jumping to one, and the keys.
   placed <- readIORef placedRef
   let open' = [d | (_, o, d) <- placed, not o, not d.resolved]
@@ -432,7 +484,7 @@ new actions panels m = do
   shortcut keys "<Shift>Up" (onLines (\k -> k.grow (-1)))
   shortcut keys "Escape" (onLines (.clear))
 
-  #append columns scroll
+  #append columns diffArea
   -- Its own width, which its editor's toolbar does not widen; folds to a
   -- rail with the pending notes and threads.
   panel <- review actions m (zip placed (map jump placed)) pendingRef pendingChanged (forM_ m.files $ \f -> remember f.path True)
@@ -964,6 +1016,7 @@ css = mconcat
   , "}"
   , "box.u-files button.file-row:hover { background: var(--border-subtle); }"
   , "box.u-files button.file-row.current { background: var(--nav-active); }"
+  , "box.u-files box.pinned-header { padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 0 0 8px 8px; box-shadow: 0 4px 12px rgba(27,29,33,0.10); }"
   , "box.u-files box.viewed-mark {"
   , "  min-width: 14px; min-height: 14px; border-radius: 3px; border: 1.5px solid var(--text-muted);"
   , "}"
@@ -1009,3 +1062,17 @@ fingerprint files = fromMaybe "" <$> GLib.computeChecksumForString GLib.Checksum
       Diff.Removed _ t -> "-" <> t
       Diff.Context _ _ t -> " " <> t
       Diff.Hunk _ -> "@@"
+
+-- | The Viewed box in a file's diff, wherever its header put it.
+viewedBox :: Gtk.IsWidget w => w -> IO (Maybe Gtk.CheckButton)
+viewedBox w = do
+  self <- Gtk.toWidget w
+  found <- GI.castTo Gtk.CheckButton self
+  here <- maybe (pure Nothing) (\c -> (\l -> if l == Just "Viewed" then Just c else Nothing) <$> Gtk.checkButtonGetLabel c) found
+  case here of
+    Just c -> pure (Just c)
+    Nothing -> Gtk.widgetGetFirstChild self >>= children
+  where
+    children = \case
+      Nothing -> pure Nothing
+      Just c -> viewedBox c >>= maybe (Gtk.widgetGetNextSibling c >>= children) (pure . Just)

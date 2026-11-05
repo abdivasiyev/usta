@@ -61,6 +61,8 @@ data Preferences = Preferences
   , openLinks :: Bool
     -- ^ Forge links in comments, the palette or the command line open in
     -- usta; off, they open in the browser.
+  , checkUpdates :: Bool
+    -- ^ Once a day, whether a newer usta is out.
   }
   deriving stock (Eq, Show)
 
@@ -71,6 +73,7 @@ defaults = Preferences
   , notify = True
   , onlyInBackground = False
   , openLinks = True
+  , checkUpdates = True
   }
 
 -- | Each choice is stored by a name, so reordering constructors changes
@@ -90,6 +93,7 @@ instance ToJSON Preferences where
     , "notify" .= p.notify
     , "onlyInBackground" .= p.onlyInBackground
     , "openLinks" .= p.openLinks
+    , "checkUpdates" .= p.checkUpdates
     ]
 
 instance FromJSON Preferences where
@@ -99,7 +103,8 @@ instance FromJSON Preferences where
     notify <- o .:? "notify" .!= defaults.notify
     onlyInBackground <- o .:? "onlyInBackground" .!= defaults.onlyInBackground
     openLinks <- o .:? "openLinks" .!= defaults.openLinks
-    pure Preferences {interval = interval, theme = theme, notify = notify, onlyInBackground = onlyInBackground, openLinks = openLinks}
+    checkUpdates <- o .:? "checkUpdates" .!= defaults.checkUpdates
+    pure Preferences {interval = interval, theme = theme, notify = notify, onlyInBackground = onlyInBackground, openLinks = openLinks, checkUpdates = checkUpdates}
 
 -- | @preferences.json@ in the folder that has the database.
 file :: IO FilePath

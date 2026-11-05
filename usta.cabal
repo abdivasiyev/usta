@@ -157,6 +157,7 @@ executable usta
     Usta.UI.Components.Thread
     Usta.UI.Components.TimelineRow
     Usta.UI.Components.SyncStatus
+    Usta.UI.Components.UpdateBanner
     Usta.UI.Components.WaitingChip
     Usta.UI.Format
     Usta.UI.Highlight
@@ -189,6 +190,7 @@ executable usta
     Usta.UI.Source
     Usta.UI.Style
     Usta.UI.Window
+    Usta.Updates
     Usta.UrlEvents
 
   build-depends:

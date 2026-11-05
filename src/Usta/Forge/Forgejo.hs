@@ -92,12 +92,12 @@ forgejo manager base host token = do
           writeIORef me (Just l)
           pure l
   pure Forge
-    { notifications = \known -> Fetched Nothing <$> notificationsOf client host known.since
-    , pullRequests = \known -> Fetched Nothing <$> pullRequestsOf client details running host known.since
-    , issues = \known -> Fetched Nothing <$> issuesOf client host known.since
+    { notifications = \known -> (\ns -> Fetched Nothing ns False) <$> notificationsOf client host known.since
+    , pullRequests = \known -> (\ps -> Fetched Nothing ps False) <$> pullRequestsOf client details running host known.since
+    , issues = \known -> (\is -> Fetched Nothing is False) <$> issuesOf client host known.since
     , repositories = \known -> case known.since of
         Just _ -> pure NotModified
-        Nothing -> Fetched Nothing <$> repositoriesOf client host
+        Nothing -> (\rs -> Fetched Nothing rs True) <$> repositoriesOf client host
     , repository = \repo -> repositoryOf host <$> run client (Api.api.repository (owner repo) (shortName repo))
     , createRepository = \new -> do
         let body = Api.NewRepoBody {name = new.name, description = new.description, private = new.private, autoInit = new.readme}

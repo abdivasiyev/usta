@@ -260,6 +260,9 @@ data Fetched a
         -- ^ 'Nothing' when the forge sends none; the next call fetches
         -- the whole list again.
       , items :: a
+      , whole :: Bool
+        -- ^ Every item there is: what the cache has beyond them is gone
+        -- from the forge. Lists of a time window are not whole.
       }
   deriving stock (Eq, Show)
 

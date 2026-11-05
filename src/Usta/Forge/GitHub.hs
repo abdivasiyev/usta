@@ -136,11 +136,11 @@ github manager urls host token = do
           pure l
   pure Forge
     { notifications = notificationsOf rest host
-    , pullRequests = \known -> Fetched Nothing <$> pullRequestsOf graph host known.since
-    , issues = \known -> Fetched Nothing <$> issuesOf graph host known.since
+    , pullRequests = \known -> (\ps -> Fetched Nothing ps False) <$> pullRequestsOf graph host known.since
+    , issues = \known -> (\is -> Fetched Nothing is False) <$> issuesOf graph host known.since
     , repositories = \known -> case known.since of
         Just _ -> pure NotModified
-        Nothing -> Fetched Nothing <$> repositoriesOf graph host
+        Nothing -> uncurry (Fetched Nothing) <$> repositoriesOf graph host
     , forkOwners = do
         login <- myLogin
         orgs <- pages Api.api.myOrgs
@@ -415,7 +415,7 @@ notificationsOf client host known = do
                 next <- getResponse <$> run client (page n Nothing)
                 if null next then pure got else more (n + 1) (got <> next)
       threads <- more 2 threads0
-      Fetched tag <$> traverse (fromThread host) [t | t <- threads, t.updatedAt >= month]
+      (\ns -> Fetched tag ns False) <$> traverse (fromThread host) [t | t <- threads, t.updatedAt >= month]
 
 fromThread :: Host -> Api.Thread -> IO N.Notification
 fromThread host t = do
@@ -529,10 +529,11 @@ issueOf host (i, involvement) = do
     , closedAt = i.closedAt
     }
 
--- | The repositories, recently changed first, at most 1000.
--- | Fifty at a time: a hundred, with their counts, take GitHub ten
--- seconds and now and then a 502, which failed the whole sync.
-repositoriesOf :: Client -> Host -> IO [R.Repository]
+-- | The repositories, recently changed first, at most 1000, and whether
+-- that is all of them. Fifty at a time: a hundred, with their counts,
+-- take GitHub ten seconds and now and then a 502, which failed the
+-- whole sync.
+repositoriesOf :: Client -> Host -> IO ([R.Repository], Bool)
 repositoriesOf client host = go (1 :: Int) Nothing
   where
     go n after = do
@@ -541,8 +542,9 @@ repositoriesOf client host = go (1 :: Int) Nothing
         , variables = object ["after" .= maybe Null String after] })
       let here = map (repositoryOf host) found.nodes
       case found.next of
-        Just cursor | n < 20 -> (here <>) <$> go (n + 1) (Just cursor)
-        _ -> pure here
+        Just cursor | n < 20 -> (\(more, all') -> (here <> more, all')) <$> go (n + 1) (Just cursor)
+        Just _ -> pure (here, False)
+        Nothing -> pure (here, True)
 
 repositoryOf :: Host -> Api.RepoNode -> R.Repository
 repositoryOf host r = R.Repository

@@ -194,7 +194,7 @@ fetch ref resource items known = do
   failIfTold ref
   s <- readIORef ref
   tag <- parseM ("\"sample-" <> T.pack (show (version resource s)) <> "\"")
-  pure $ if known.etag == Just tag then NotModified else Fetched {etag = Just tag, items = items s}
+  pure $ if known.etag == Just tag then NotModified else Fetched {etag = Just tag, items = items s, whole = resource == Repositories}
 
 -- | The sample takes no changes.
 refuse :: IO a

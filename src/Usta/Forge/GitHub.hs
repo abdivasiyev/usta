@@ -19,7 +19,8 @@ module Usta.Forge.GitHub
   ) where
 
 import Control.Exception (throwIO)
-import Data.Aeson (Value (Null, String), object, (.=))
+import Data.Aeson (ToJSON (..), Value (Null, String), object, (.=))
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
 import Data.Kind (Constraint, Type)
 import qualified Data.Map.Strict as Map
@@ -34,13 +35,19 @@ import Servant.API (getResponse, lookupResponseHeader, ResponseHeader (..))
 import Servant.Client (BaseUrl (..), ClientM, Scheme (Https))
 import Text.Read (readMaybe)
 
-import Usta.Forge (Failure (..), Fetched (..), Forge (..), Known (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..))
 import qualified Usta.Forge.GitHub.Api as Api
 import Usta.Forge.Http (Client, connect, run, runChanged)
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
+import qualified Usta.Types.Discussion as D
 import qualified Usta.Types.Label as L
+import qualified Usta.Types.Milestone as M
+import Usta.Types.Number (Number)
+import Usta.Types.RepoName (RepoName, owner, shortName)
+import qualified Usta.Types.Reviewer as Rv
+import qualified Usta.Types.Timeline as Tl
 import Usta.Types.Login (Login)
 import qualified Usta.Types.Notification as N
 import Usta.Types.Parse (parseM, unparse)
@@ -74,6 +81,21 @@ github :: HTTP.Manager -> Host -> IO Token -> IO Forge
 github manager host token = do
   let rest = connect manager (restUrl host) (authorization <$> token)
       graph = connect manager (graphUrl host) (authorization <$> token)
+      -- Every page of a REST list, 100 at a time.
+      pages :: (Api.ListQuery -> ClientM [a]) -> IO [a]
+      pages route = go 1
+        where
+          go n = do
+            got <- run rest (route Api.ListQuery {page = Just n, perPage = Named (Just 100)})
+            if length got < 100 || n >= 20 then pure got else (got <>) <$> go (n + 1)
+  -- Who the token signs in as, asked once.
+  me <- newIORef Nothing
+  let myLogin = readIORef me >>= \case
+        Just l -> pure l
+        Nothing -> do
+          l <- (.login) <$> run rest Api.api.me
+          writeIORef me (Just l)
+          pure l
   pure Forge
     { notifications = notificationsOf rest host
     , pullRequests = \known -> Fetched Nothing <$> pullRequestsOf graph host known.since
@@ -83,7 +105,9 @@ github manager host token = do
         Nothing -> Fetched Nothing <$> repositoriesOf graph host
     , markRead = \thread -> () <$ run rest (Api.api.markThread thread)
     , markUnread = \_ -> throwIO (Refused "GitHub cannot mark a notification unread again.")
-    , cloneUrls = soon
+    , cloneUrls = \repo -> do
+        r <- run rest (Api.api.repository (owner repo) (shortName repo))
+        pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}
     , pullDiff = soon
     , pullCommits = soon
     , threads = soon
@@ -102,23 +126,56 @@ github manager host token = do
     , recentCommits = soon
     , readme = soon
     , commitDiff = soon
-    , discussion = soon
-    , comment = soon
-    , editComment = soon
-    , deleteComment = soon
-    , editTitle = soon
-    , watching = soon
-    , setWatching = soon
-    , timeline = soon
+    , discussion = \repo n -> discussionOf graph repo n
+    , comment = \repo n text -> do
+        c <- run rest (Api.api.postComment (owner repo) (shortName repo) n (Api.Body text))
+        restComment c
+    , editComment = \repo n which text -> case which of
+        Just i -> () <$ run rest (Api.api.editComment (owner repo) (shortName repo) i (Api.Body text))
+        Nothing -> () <$ run rest (Api.api.editIssue (owner repo) (shortName repo) n (object ["body" .= text]))
+    , deleteComment = \repo i -> () <$ run rest (Api.api.deleteComment (owner repo) (shortName repo) i)
+    , editTitle = \repo n title -> () <$ run rest (Api.api.editIssue (owner repo) (shortName repo) n (object ["title" .= title]))
+    , watching = \repo n -> do
+        d <- discussionNode graph repo n Nothing
+        pure $ case d.subscription of
+          Just "SUBSCRIBED" -> D.Subscribed
+          Just "IGNORED" -> D.Muted
+          _ -> D.Participating
+    , setWatching = \repo n wanted -> do
+        d <- discussionNode graph repo n Nothing
+        let state = case wanted of
+              D.Subscribed -> "SUBSCRIBED" :: Text
+              D.Muted -> "IGNORED"
+              D.Participating -> "UNSUBSCRIBED"
+        () <$ asked graph (Api.graph.mutate Api.GraphQuery {query = Api.subscriptionMutation, variables = object ["id" .= d.nodeId, "state" .= state]})
+    , timeline = \repo n -> do
+        Api.Item nodes <- asked graph (Api.graph.timeline Api.GraphQuery {query = Api.timelineQuery, variables = itemVariables repo n Nothing})
+        eventsOf nodes
     , repoPullRequests = soon
     , repoIssues = soon
     , runs = soon
-    , react = soon
-    , setClosed = soon
+    , react = \repo n which feeling adding -> do
+        let (o, r) = (owner repo, shortName repo)
+            body = Api.ReactionBody feeling
+        login <- myLogin
+        case (which, adding) of
+          (Just i, True) -> () <$ run rest (Api.api.reactToComment o r i body)
+          (Nothing, True) -> () <$ run rest (Api.api.reactToIssue o r n body)
+          (Just i, False) -> do
+            given <- run rest (Api.api.commentReactions o r i (Just (Api.feelingName feeling)) (Just 100))
+            mapM_ (\x -> run rest (Api.api.unreactToComment o r i x.id)) [x | x <- given, x.user == Just login]
+          (Nothing, False) -> do
+            given <- run rest (Api.api.issueReactions o r n (Just (Api.feelingName feeling)) (Just 100))
+            mapM_ (\x -> run rest (Api.api.unreactToIssue o r n x.id)) [x | x <- given, x.user == Just login]
+    , setClosed = \repo n closed ->
+        () <$ run rest (Api.api.editIssue (owner repo) (shortName repo) n (object ["state" .= (if closed then "closed" else "open" :: Text)]))
     , merge = soon
     , review = soon
     , discardPending = soon
-    , createIssue = soon
+    , createIssue = \repo new -> do
+        created <- run rest (Api.api.createIssue (owner repo) (shortName repo) (object
+          ["title" .= new.title, "body" .= new.body, "labels" .= new.labels, "assignees" .= map unparse new.assignees]))
+        pure created.number
     , createPull = soon
     , branches = soon
     , branchList = soon
@@ -130,13 +187,24 @@ github manager host token = do
     , releases = soon
     , fileHistory = soon
     , history = soon
-    , labels = soon
-    , setLabels = soon
-    , createLabel = soon
-    , assignable = soon
-    , setAssignees = soon
-    , milestones = soon
-    , setMilestone = soon
+    , labels = \repo -> map (\l -> L.Definition {name = l.name, color = l.color, description = l.description})
+        <$> pages (\q -> Api.api.labels (owner repo) (shortName repo) q)
+    , setLabels = \repo n names -> () <$ run rest (Api.api.setLabels (owner repo) (shortName repo) n (Api.LabelNames names))
+    , createLabel = \repo d ->
+        () <$ run rest (Api.api.createLabel (owner repo) (shortName repo) Api.RestLabel {name = d.name, color = d.color, description = d.description})
+    , assignable = \repo -> do
+        people <- pages (\q -> Api.api.assignees (owner repo) (shortName repo) q)
+        pure [Rv.Candidate {who = Rv.Person p.login, about = "", changed = [], lastChanged = Nothing, members = Nothing} | p <- people]
+    , setAssignees = \repo n logins -> () <$ run rest (Api.api.editIssue (owner repo) (shortName repo) n (object ["assignees" .= map unparse logins]))
+    , milestones = \repo -> map milestoneOf <$> pages (\q -> Api.api.milestones (owner repo) (shortName repo) (Just "all") q)
+    , setMilestone = \repo n title -> do
+        known <- pages (\q -> Api.api.milestones (owner repo) (shortName repo) (Just "all") q)
+        target <- case title of
+          Nothing -> pure Null
+          Just t -> case [m.number | m <- known, m.title == t] of
+            found : _ -> pure (toJSON found)
+            [] -> throwIO (Refused ("The repository has no milestone " <> t <> "."))
+        () <$ run rest (Api.api.editIssue (owner repo) (shortName repo) n (object ["milestone" .= target]))
     , compare = soon
     , compareDiff = soon
     , tree = soon
@@ -230,7 +298,7 @@ searched :: Client -> (Api.GraphQuery -> ClientM (Api.Answer (Api.Page a))) -> T
 searched client route fields q = go (1 :: Int) Nothing
   where
     go n after = do
-      Api.Answer found <- run client (route Api.GraphQuery
+      found <- asked client (route Api.GraphQuery
         { query = Api.searchQuery fields
         , variables = object ["q" .= q, "after" .= maybe Null String after] })
       case found.next of
@@ -303,7 +371,7 @@ repositoriesOf :: Client -> Host -> IO [R.Repository]
 repositoriesOf client host = go (1 :: Int) Nothing
   where
     go n after = do
-      Api.Answer (Api.Repos found) <- run client (Api.graph.repositories Api.GraphQuery
+      Api.Repos found <- asked client (Api.graph.repositories Api.GraphQuery
         { query = Api.reposQuery
         , variables = object ["after" .= maybe Null String after] })
       let here = map repositoryOf found.nodes
@@ -320,3 +388,94 @@ repositoriesOf client host = go (1 :: Int) Nothing
       , openIssues = r.openIssues
       , updatedAt = r.updatedAt
       }
+
+itemVariables :: RepoName -> Number -> Maybe Text -> Value
+itemVariables repo n after =
+  object ["owner" .= owner repo, "name" .= shortName repo, "number" .= unparse n, "after" .= maybe Null String after]
+
+-- | The first page of the conversation, or the one after @after@.
+discussionNode :: Client -> RepoName -> Number -> Maybe Text -> IO Api.DiscussionNode
+discussionNode graph repo n after = do
+  asked graph (Api.graph.discussion Api.GraphQuery {query = Api.discussionQuery, variables = itemVariables repo n after})
+
+-- | The description and every comment, a page of 100 at a time.
+discussionOf :: Client -> RepoName -> Number -> IO D.Discussion
+discussionOf graph repo n = do
+  first <- discussionNode graph repo n Nothing
+  let more after = do
+        d <- discussionNode graph repo n (Just after)
+        maybe (pure d.comments.nodes) (fmap (d.comments.nodes <>) . more) d.comments.next
+  rest' <- maybe (pure []) more first.comments.next
+  opening <- commentOf first.opening
+  comments <- traverse commentOf (first.comments.nodes <> rest')
+  pure D.Discussion
+    { opening = opening
+    , comments = comments
+    , closed = first.closed
+    , merged = first.merged
+    , assignees = first.assignees
+    , labels = [L.Label {name = l.name, color = l.color} | l <- first.labels]
+    , milestone = first.milestone
+    }
+
+commentOf :: Api.CommentNode -> IO D.Comment
+commentOf c = do
+  author <- maybe (parseM "ghost") pure c.author
+  pure D.Comment
+    { author = author
+    , body = c.body
+    , createdAt = c.createdAt
+    , id = c.databaseId
+    , edited = c.edited
+    , url = c.url
+    , reactions = [D.Reaction {feeling = f, count = g.count, mine = g.mine} | g <- c.reactions, g.count > 0, Just f <- [Api.feelingOf g.content]]
+    }
+
+restComment :: Api.RestComment -> IO D.Comment
+restComment c = do
+  author <- maybe (parseM "ghost") pure c.author
+  pure D.Comment {author = author, body = c.body, createdAt = c.createdAt, id = Just c.id, edited = c.updatedAt > c.createdAt, url = c.url, reactions = []}
+
+milestoneOf :: Api.RestMilestone -> M.Milestone
+milestoneOf m = M.Milestone {title = m.title, open = m.open, due = m.due, closedAt = m.closedAt, openItems = m.openItems, closedItems = m.closedItems}
+
+-- | The timeline in usta's terms. GitHub lists each commit of a push on
+-- its own; the ones in a row are one push here.
+eventsOf :: [Api.TimelineNode] -> IO [Tl.Event]
+eventsOf nodes = do
+  ghost <- parseM "ghost"
+  let actorOf e = fromMaybe ghost e.actor
+      one e = case e.kind of
+        "LabeledEvent" -> labeled True
+        "UnlabeledEvent" -> labeled False
+        "AssignedEvent" -> Tl.Assigned True <$> e.assignee
+        "UnassignedEvent" -> Tl.Assigned False <$> e.assignee
+        "ReviewRequestedEvent" -> Tl.ReviewRequested True <$> e.reviewer
+        "ReviewRequestRemovedEvent" -> Tl.ReviewRequested False <$> e.reviewer
+        "MilestonedEvent" -> Just (Tl.Milestoned Nothing e.milestone)
+        "DemilestonedEvent" -> Just (Tl.Milestoned e.milestone Nothing)
+        "RenamedTitleEvent" -> Tl.Renamed <$> e.previous <*> e.current
+        "ClosedEvent" -> Just Tl.Closed
+        "ReopenedEvent" -> Just Tl.Reopened
+        "MergedEvent" -> Just Tl.Merged
+        "CrossReferencedEvent" -> uncurry Tl.Referenced <$> e.source
+        "AutoMergeEnabledEvent" -> Just (Tl.MergeScheduled True)
+        "AutoMergeDisabledEvent" -> Just (Tl.MergeScheduled False)
+        "HeadRefDeletedEvent" -> Just Tl.BranchDeleted
+        _ -> Nothing
+        where
+          labeled on = (\l -> Tl.Labeled on L.Label {name = l.name, color = l.color}) <$> e.label
+      go xs = case xs of
+        [] -> []
+        e : more | e.kind == "PullRequestCommit" ->
+          let (pushed, after) = span ((== "PullRequestCommit") . (.kind)) (e : more)
+              final = last pushed
+           in [Tl.Event {actor = fromMaybe ghost final.commitAuthor, at = t, what = Tl.Pushed (length pushed)} | Just t <- [final.committedAt]] <> go after
+        e : more -> [Tl.Event {actor = actorOf e, at = t, what = w} | Just t <- [e.at], Just w <- [one e]] <> go more
+  pure (go nodes)
+
+-- | A GraphQL call; what GitHub said went wrong is the 'Failure'.
+asked :: Client -> ClientM (Api.Answer a) -> IO a
+asked graph call = run graph call >>= \case
+  Api.Answer a -> pure a
+  Api.Problem message -> throwIO (Refused ("GitHub said: " <> message))

@@ -11,7 +11,11 @@ module Usta.Details
   , new
   ) where
 
-import Control.Exception (try)
+import Control.Applicative ((<|>))
+import Control.Exception (SomeException, try)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import qualified Data.Map.Strict as Map
+import System.IO.Unsafe (unsafePerformIO)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BL
 import Data.Kind (Type)
@@ -29,7 +33,7 @@ import Usta.Mirrors (Mirrors (..))
 import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Insights (Blamed, Change, Node)
 import Data.Time (UTCTime)
-import Usta.Types.Commit (Commit, Sha)
+import Usta.Types.Commit (Commit (..), Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Number (Number)
 import Usta.Types.Parse (unparse)
@@ -89,7 +93,7 @@ data Details = Details
 new :: Settings -> Details
 new settings = Details
   { pullFiles = \key repo n -> pull key repo n Git.diff (\f -> f.pullDiff repo n)
-  , pullCommits = \key repo n -> pull key repo n Git.history (\f -> f.pullCommits repo n)
+  , pullCommits = \key repo n -> pull key repo n Git.history (\f -> f.pullCommits repo n) >>= named key repo (\f -> f.pullCommits repo n)
   , commitDiff = \key repo sha -> either' key repo (\path -> Git.commitDiff path sha) (\f -> f.commitDiff repo sha)
   , recentCommits = \key repo branch ->
       either' key repo (\path -> Git.recent path branch 10) (\f -> f.recentCommits repo branch)
@@ -107,11 +111,31 @@ new settings = Details
   , fileHistory = \key repo branch file -> either' key repo (\path -> Git.fileLog path branch file 50) (\f -> f.fileHistory repo branch file)
   , graph = \key repo scope firstParent n -> mirrorOnly key repo (\path -> Git.graph path scope firstParent ((n - 1) * 100) 100)
   , history = \key repo branch n ->
-      either' key repo (\path -> Git.page path branch ((n - 1) * 50) 50) (\f -> f.history repo branch n)
+      either' key repo (\path -> Git.page path branch ((n - 1) * 50) 50) (\f -> f.history repo branch n) >>= named key repo (\f -> f.history repo branch 1)
   }
   where
     -- A pull request from the mirror needs both its base branch and its own
     -- head there.
+    -- A mirror's commits know only names; the forge's own page of the
+    -- branch says whose accounts they are, once per repository.
+    named key repo asked = \case
+      Right (FromMirror, commits) | any (\c -> c.login == Nothing) commits -> do
+        logins <- loginsOf key repo asked
+        pure (Right (FromMirror, [c {login = c.login <|> Map.lookup c.author logins} | c <- commits]))
+      other -> pure other
+    loginsOf key repo asked = do
+      known <- Map.lookup (key, repo) <$> readIORef accountNames
+      case known of
+        Just names -> pure names
+        Nothing -> do
+          forge <- settings.accounts.forgeOf key
+          found <- case forge of
+            Nothing -> pure []
+            Just f -> either (\(_ :: SomeException) -> []) id <$> try (asked f)
+          let names = Map.fromList [(c.author, l) | c <- found, Just l <- [c.login]]
+          atomicModifyIORef' accountNames (\m -> (Map.insert (key, repo) names m, ()))
+          pure names
+
     pull :: AccountId -> RepoName -> Number -> (FilePath -> Sha -> Sha -> IO a) -> (Forge -> IO a) -> IO (Either Text (From, a))
     pull key repo n fromMirror fromForge = do
       base <- baseOf key repo n
@@ -162,3 +186,10 @@ new settings = Details
       case result of
         Left (Git.GitError message) -> ioError (userError (T.unpack message))
         Right answer -> pure answer
+
+
+-- | Author names to the accounts they are, by account and repository,
+-- for the run.
+accountNames :: IORef (Map.Map (AccountId, RepoName) (Map.Map Text Text))
+accountNames = unsafePerformIO (newIORef Map.empty)
+{-# NOINLINE accountNames #-}

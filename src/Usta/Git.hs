@@ -304,7 +304,7 @@ revs = T.unpack . unparse
 -- | Fields end in a unit separator and commits in a record separator,
 -- which messages do not contain.
 format :: String
-format = "--format=%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e"
+format = "--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e"
 
 -- | Git writes "Z" for UTC and the author's offset, such as "+05:00",
 -- otherwise; each parser takes only one of the two.
@@ -313,11 +313,21 @@ utcOf date = case iso8601ParseM date of
   Just utc -> pure utc
   Nothing -> zonedTimeToUTC <$> iso8601ParseM date
 
+-- | The account a forge's private address stands for: GitHub's
+-- "12345+login@users.noreply.github.com" or "login@users.noreply.github.com",
+-- Forgejo's "login@noreply.<host>".
+noreplyLogin :: Text -> Maybe Text
+noreplyLogin email = case T.breakOn "@" (T.toLower email) of
+  (local, domain)
+    | domain == "@users.noreply.github.com" -> Just (T.takeWhileEnd (/= '+') local)
+    | "@noreply." `T.isPrefixOf` domain, not (T.null local) -> Just local
+    | otherwise -> Nothing
+
 commits :: Text -> IO [Commit]
 commits out = traverse one (filter (not . T.null . T.strip) (T.splitOn "\x1e" out))
   where
     one record = case T.splitOn "\x1f" (T.dropWhile (== '\n') record) of
-      [sha, author, date, subject, body] -> do
+      [sha, author, email, date, subject, body] -> do
         hash <- parseM sha
         time <- utcOf (T.unpack date)
         pure Commit
@@ -326,5 +336,6 @@ commits out = traverse one (filter (not . T.null . T.strip) (T.splitOn "\x1e" ou
           , authoredAt = time
           , subject = subject
           , body = T.strip body
+          , login = noreplyLogin email
           }
       _ -> throwIO (GitError "git printed a commit usta cannot read")

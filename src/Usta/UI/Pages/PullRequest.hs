@@ -18,9 +18,9 @@ import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
@@ -139,8 +139,7 @@ header s backLabel onBack rename watch checkOut = do
   #append bar checkOutButton
   browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
   void $ GI.on browser #clicked $ do
-    launcher <- Gtk.uriLauncherNew (Just url)
-    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+    Browser.open (url)
   #append bar browser
   Issue.centred bar
   pure (bar, showState)

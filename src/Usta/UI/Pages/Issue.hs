@@ -31,11 +31,11 @@ import Data.List (sortOn)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Avatar as Avatar
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
@@ -386,8 +386,7 @@ header m backLabel onBack rename watch = do
   watchButton watch >>= #append bar
   browser <- Button.new Button.defaults { Button.label = Just "Open in browser" }
   void $ GI.on browser #clicked $ do
-    launcher <- Gtk.uriLauncherNew (Just url)
-    Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+    Browser.open (url)
   #append bar browser
   centred bar
   pure (bar, showClosed)

@@ -24,7 +24,6 @@ import qualified Data.Text.IO as T
 import Data.Text.Encoding (decodeUtf8Lenient, encodeUtf8)
 import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
 import Data.Version (showVersion)
-import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 import Network.HTTP.Types (urlEncode)
@@ -35,6 +34,7 @@ import System.Process.Typed (proc, readProcessStdout_)
 import qualified Data.ByteString.Lazy as BL
 
 import Paths_usta (version)
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.Log as Log
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Platform as Platform
@@ -129,8 +129,7 @@ open anchor title = do
     GI.set note [#label := if (withLog && not inline) || (on' 2 && crash /= Nothing)
                              then "Too long for a link: saved to Downloads to drag into the issue."
                              else ""]
-    launcher <- Gtk.uriLauncherNew (Just url)
-    Gtk.uriLauncherLaunch launcher parent (Nothing :: Maybe Gio.Cancellable) Nothing
+    Browser.open (url)
   #present dialog
   where
     startsWith (x : _) y = x == y

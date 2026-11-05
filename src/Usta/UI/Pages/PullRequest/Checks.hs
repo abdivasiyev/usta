@@ -23,12 +23,12 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gdk as Gdk
-import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 import Text.Read (readMaybe)
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
@@ -231,8 +231,7 @@ checkDetail m check = do
 
 openUri :: Text -> IO ()
 openUri url = do
-  launcher <- Gtk.uriLauncherNew (Just url)
-  Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
+  Browser.open (url)
 
 -- | A job's log as Forgejo or GitHub gives it: each line after its time.
 -- Forgejo starts steps with "⭐ Run Main <name>"; GitHub folds lines into

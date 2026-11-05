@@ -115,6 +115,7 @@
           persistent
           servant-client
           tasty
+          tasty-golden
           tasty-hedgehog
           tasty-hunit
           temporary

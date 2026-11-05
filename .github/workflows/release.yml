@@ -14,6 +14,16 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Builds a tag's files again, as when a build failed: its release is
+  # kept, and the files are replaced.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag, e.g. v0.1.0"
+        required: true
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -23,18 +33,20 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: The tag matches usta.cabal
         run: |
           version=$(sed -n 's/^version: *//p' usta.cabal)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME, but usta.cabal says $version" >&2
+          if [ "v$version" != "$TAG" ]; then
+            echo "Tag $TAG, but usta.cabal says $version" >&2
             exit 1
           fi
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${TAG#v}
           # Before 1.0 a release is a beta, said in its title; it stays a
           # regular release, since "latest" leaves pre-releases out and the
           # downloads and the update check go by it.
@@ -42,10 +54,12 @@ jobs:
           case "$version" in 0.*) title="$title (beta)";; esac
           # The notes are the version's part of CHANGELOG.md.
           awk -v v="$version" '/^## / {on = index($0, "## " v) == 1; next} on' CHANGELOG.md > notes.md
-          if [ -s notes.md ]; then
-            gh release create "$GITHUB_REF_NAME" --title "$title" --notes-file notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG has a release already; its files are built again."
+          elif [ -s notes.md ]; then
+            gh release create "$TAG" --title "$title" --notes-file notes.md
           else
-            gh release create "$GITHUB_REF_NAME" --title "$title" --generate-notes
+            gh release create "$TAG" --title "$title" --generate-notes
           fi
 
   macos:
@@ -56,6 +70,8 @@ jobs:
       NOTARIZING: ${{ secrets.APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: DeterminateSystems/nix-installer-action@v16
       - name: Import the signing certificate
         if: env.SIGNING == 'true'
@@ -89,7 +105,7 @@ jobs:
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/usta.dmg --clobber
+        run: gh release upload "$TAG" dist/usta.dmg --clobber
 
   linux:
     needs: release
@@ -104,6 +120,8 @@ jobs:
           sudo docker image prune --all --force
           df -h /
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: DeterminateSystems/nix-installer-action@v16
       - name: Build the AppImage, .deb and .rpm
         # The .deb and .rpm carry usta's own GTK under /nix/store: the
@@ -112,10 +130,10 @@ jobs:
           nix bundle --bundler github:ralismark/nix-appimage .#usta -o usta.AppImage
           cp -L usta.AppImage usta-x86_64.AppImage
           nix bundle --bundler github:NixOS/bundlers#toDEB .#usta -o deb
-          cp -L deb/*.deb "usta_${GITHUB_REF_NAME#v}_amd64.deb"
+          cp -L deb/*.deb "usta_${TAG#v}_amd64.deb"
           nix bundle --bundler github:NixOS/bundlers#toRPM .#usta -o rpm
-          cp -L rpm/*.rpm "usta-${GITHUB_REF_NAME#v}.x86_64.rpm"
+          cp -L rpm/*.rpm "usta-${TAG#v}.x86_64.rpm"
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" usta-x86_64.AppImage ./*.deb ./*.rpm --clobber
+        run: gh release upload "$TAG" usta-x86_64.AppImage ./*.deb ./*.rpm --clobber

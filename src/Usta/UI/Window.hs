@@ -102,6 +102,7 @@ import qualified Usta.Waiting as Waiting
 import qualified Usta.Log as Log
 import qualified Usta.UI.Pages.ReportProblem as ReportProblem
 import qualified Usta.UI.Components.Pager as Pager
+import qualified Usta.UI.Quiet as Quiet
 import qualified Usta.UI.Components.RunWorkflow as RunWorkflow
 import qualified Usta.UI.Components.UpdateBanner as UpdateBanner
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
@@ -153,7 +154,8 @@ buildWith start crashed given app = do
         (do atomicModifyIORef' waiting (\n -> (n + 1, ()))
             onMain $ void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 300 $ do
               busy <- (> 0) <$> readIORef waiting
-              when busy $ GI.set activity [#visible := True]
+              quiet <- Quiet.hushed
+              when (busy && not quiet) $ GI.set activity [#visible := True]
               pure False)
         (do atomicModifyIORef' waiting (\n -> (n - 1, ()))
             onMain $ do
@@ -669,11 +671,15 @@ buildWith start crashed given app = do
 
   root <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
   #append root header
-  #append root activity
   when crashed $ do
     anchor <- Gtk.toWidget root
     ReportProblem.banner (ReportProblem.open anchor "usta quit unexpectedly") >>= #append root
-  #append root screens
+  -- The activity bar lies over the page's top edge rather than above it:
+  -- showing it moves nothing.
+  stage <- GI.new Gtk.Overlay [#child := screens, #vexpand := True]
+  GI.set activity [#valign := Gtk.AlignStart, #canTarget := False]
+  Gtk.overlayAddOverlay stage activity
+  #append root stage
   #append root footerSlot
 
   -- At start and then once a day, unless Settings turned it off; a newer
@@ -689,7 +695,7 @@ buildWith start crashed given app = do
           writeIORef told True
           Log.say "update" ("usta " <> T.pack (showVersion r.version) <> " is out")
           b <- UpdateBanner.new (T.pack (showVersion r.version)) Updates.current (browse r.page)
-          Gtk.boxInsertChildAfter root b (Just activity)
+          Gtk.boxInsertChildAfter root b (Just header)
         pure False
       _ -> pure ()
     threadDelay (24 * 3600 * 1000000)
@@ -947,7 +953,7 @@ labelPicker source host repo n refresh current = LabelPicker.Picker
   { repo = repo
   , current = current
   , load = source.labels host repo
-  , save = source.setLabels host repo n
+  , save = Quiet.quietly . source.setLabels host repo n
   , create = source.createLabel host repo
   , manage = do
       launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/labels"))
@@ -983,7 +989,7 @@ assignPicker source place host repo n refresh me current = AssignPickers.Assigne
   , current = current
   , me = either (const Nothing) Just (parse me)
   , load = source.assignable host repo
-  , save = source.setAssignees host repo n
+  , save = Quiet.quietly . source.setAssignees host repo n
   , saved = refresh
   }
 
@@ -992,7 +998,7 @@ milestonePicker :: Source -> Text -> Text -> Int -> IO () -> Clock -> Maybe Text
 milestonePicker source host repo n refresh c current = AssignPickers.Milestones
   { current = current
   , load = source.milestones host repo
-  , save = source.setMilestone host repo n
+  , save = Quiet.quietly . source.setMilestone host repo n
   , manage = do
       launcher <- Gtk.uriLauncherNew (Just ("https://" <> host <> "/" <> repo <> "/milestones"))
       Gtk.uriLauncherLaunch launcher (Nothing :: Maybe Gtk.Window) (Nothing :: Maybe Gio.Cancellable) Nothing
@@ -1288,7 +1294,8 @@ loadLive load render = do
       fetch forced = do
         writeIORef asking True
         void $ forkIO $ do
-          result <- try load :: IO (Either SomeException (Either Text a))
+          -- The page stays as it is meanwhile: no activity bar for it.
+          result <- try (Quiet.quietly load) :: IO (Either SomeException (Either Text a))
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
             writeIORef asking False
             before <- readIORef shown

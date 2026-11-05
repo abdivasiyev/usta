@@ -16,6 +16,14 @@ git subtree push --prefix site origin gh-pages
 
 The page is live a minute or so later.
 
+If the site answers 404 after Pages' settings changed (its source branch
+or folder), Pages may still serve its last build from the old source.
+Ask for a new build of `gh-pages`:
+
+```sh
+gh api -X POST repos/abdivasiyev/usta/pages/builds
+```
+
 ## The download links
 
 The download buttons go to

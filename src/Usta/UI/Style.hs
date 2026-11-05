@@ -20,6 +20,9 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Text (Text)
 import Foreign.C.Types (CInt (..))
+import Foreign.Ptr (intPtrToPtr, nullPtr)
+import qualified GI.GObject as GObject
+import qualified GI.Gdk as Gdk
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
@@ -50,12 +53,19 @@ toneClass tone = case tone of
   Merged -> "tone-merged"
 
 -- | Loads the tokens followed by every component's CSS for the display
--- the widget is on.
+-- the widget is on, once: each window used to add them again, and a
+-- closed window's stayed.
 install :: Gtk.Widget -> [Text] -> IO ()
 install widget components = do
+  display <- Gtk.widgetGetDisplay widget
+  already <- GObject.objectGetData display "usta-css"
+  when (already == nullPtr) $ installOn display components
+
+installOn :: Gdk.Display -> [Text] -> IO ()
+installOn display components = do
+  GObject.objectSetData display "usta-css" (intPtrToPtr 1)
   provider <- new Gtk.CssProvider []
   Gtk.cssProviderLoadFromString provider (mconcat (tokens : components))
-  display <- Gtk.widgetGetDisplay widget
   Gtk.styleContextAddProviderForDisplay display provider
     (fromIntegral Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
@@ -89,18 +99,18 @@ setTheme theme = do
       now <- get s #gtkInterfaceColorScheme
       unless (now == scheme) $ set s [#gtkInterfaceColorScheme := scheme]
 
--- | 'setTheme' for a window: while the choice is 'System', macOS's
--- appearance is read again every two seconds, so switching it applies
--- without restarting usta.
-themes :: IO (Theme -> IO ())
+-- | 'setTheme' for a window, and what stops it when the window goes:
+-- while the choice is 'System', macOS's appearance is read again every
+-- two seconds, so switching it applies without restarting usta.
+themes :: IO (Theme -> IO (), IO ())
 themes = do
   chosen <- newIORef System
-  when (Platform.current == Platform.MacOS) $
-    void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 2 $ do
+  watch <- if Platform.current /= Platform.MacOS then pure Nothing else
+    fmap Just $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 2 $ do
       theme <- readIORef chosen
       when (theme == System) (setTheme System)
       pure True
-  pure (\theme -> writeIORef chosen theme >> setTheme theme)
+  pure (\theme -> writeIORef chosen theme >> setTheme theme, mapM_ (void . GLib.sourceRemove) watch)
 
 tokens :: Text
 tokens = mconcat

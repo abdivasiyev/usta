@@ -179,7 +179,7 @@ buildWith start crashed given app = do
   states <- newIORef []
   shownDetails <- newIORef (0 :: Int)
   -- The saved theme, before anything is drawn.
-  applyTheme <- Style.themes
+  (applyTheme, stopThemes) <- Style.themes
   source.preferences >>= applyTheme . (.theme)
   notifying <- Notify.available
   when notifying Notify.start
@@ -844,6 +844,7 @@ buildWith start crashed given app = do
                                          , #cssClasses := ["usta"]
                                          ]
   Gtk.toWidget window >>= \w -> Style.install w styles
+  void $ GI.on window #destroy stopThemes
   #present window
   -- GTK focuses the first entry; start with nothing focused so single-key
   -- shortcuts (j, k, e) work instead of typing into the search field.

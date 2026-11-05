@@ -12,7 +12,7 @@ module Usta.Diagram.Entity
 import Data.Kind (Type)
 import Data.List (nub)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Traversable (for)
@@ -126,11 +126,15 @@ draw measure d = do
       centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
       sizes = Map.fromList [(e.name, z) | (e, z, _) <- sized]
       routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
-      links = concat (snd (foldl' take' (routes, []) (zip d.relationships labels)))
+      taken = snd (foldl' take' (routes, []) (zip d.relationships labels))
       take' (left', acc) (r, l) = case Map.lookup (r.left, r.right) left' of
-        Just (ps : more) -> (Map.insert (r.left, r.right) more left', acc <> [link r l ps])
+        Just (ps : more) -> (Map.insert (r.left, r.right) more left', acc <> [(r, l, ps)])
         _ -> (left', acc)
-      link r l ps = fromMaybe [] $ do
+      drawn = catMaybes [link r l ps | ((r, l, _), ps) <- zip taken (Route.spread [(r.left, r.right, ps) | (r, _, ps) <- taken])]
+      keepOff = [Route.around c z | (e, z, _) <- sized, Just c <- [Map.lookup e.name centers]]
+      spots = Route.labelSpots keepOff [(path, size) | (path, _, size, _) <- drawn]
+      links = concat [line' <> maybe [] labelOf spot | ((_, line', _, labelOf), spot) <- zip drawn spots]
+      link r l ps = do
         c0 <- Map.lookup r.left centers
         z0 <- Map.lookup r.left sizes
         c1 <- Map.lookup r.right centers
@@ -139,12 +143,12 @@ draw measure d = do
             a = Route.clip Route.Boxy c0 z0 (case inner of { x : _ -> x; [] -> c1 }) 0
             b = Route.clip Route.Boxy c1 z1 (if null inner then c0 else last inner) 0
             path = a : inner <> [b]
-            mid = Route.middle path
-        pure $
-          Path {start = a, segments = Route.smooth path, line = (if r.identifying then id else dashed) (pen Line 1.3), begin = r.leftEnd, end = r.rightEnd}
-            : if T.null r.label then [] else
-                [ Rect {at = Point (mid.x - l.w / 2 - 4) (mid.y - l.h / 2 - 1), size = Size (l.w + 8) (l.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
-                , Text {at = mid, text = r.label, font = regular 11, color = Muted, anchor = Middle} ]
+        pure
+          ( path
+          , [Path {start = a, segments = Route.smooth path, line = (if r.identifying then id else dashed) (pen Line 1.3), begin = r.leftEnd, end = r.rightEnd}]
+          , if T.null r.label then Nothing else Just l
+          , \mid -> [ Rect {at = Point (mid.x - l.w / 2 - 4) (mid.y - l.h / 2 - 1), size = Size (l.w + 8) (l.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
+                    , Text {at = mid, text = r.label, font = regular 11, color = Muted, anchor = Middle} ] )
       boxes = concat [entityBox p e z ws | (e, z, ws) <- sized, Just p <- [Map.lookup e.name centers]]
   pure (scene 12 (links <> boxes))
 

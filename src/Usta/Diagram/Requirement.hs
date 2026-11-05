@@ -12,7 +12,7 @@ module Usta.Diagram.Requirement
 import Data.Char (toUpper)
 import Data.Kind (Type)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Traversable (for)
@@ -109,11 +109,15 @@ draw measure diagram = do
       centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
       sizes = Map.fromList [(n.name, s) | (n, s, _) <- sized]
       routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
-      linkItems = concat (snd (foldl' takeRoute (routes, []) (zip diagram.relations labels)))
+      taken = snd (foldl' takeRoute (routes, []) (zip diagram.relations labels))
       takeRoute (left, acc) (r, l) = case Map.lookup (r.from, r.to) left of
-        Just (ps : more) -> (Map.insert (r.from, r.to) more left, acc <> [link r l ps])
+        Just (ps : more) -> (Map.insert (r.from, r.to) more left, acc <> [(r, l, ps)])
         _ -> (left, acc)
-      link r l ps = fromMaybe [] $ do
+      drawn = catMaybes [link r l ps | ((r, l, _), ps) <- zip taken (Route.spread [(r.from, r.to, ps) | (r, _, ps) <- taken])]
+      keepOff = [Route.around c s | (n, s, _) <- sized, Just c <- [Map.lookup n.name centers]]
+      spots = Route.labelSpots keepOff [(path, Just size) | (path, _, size, _) <- drawn]
+      linkItems = concat [line' <> maybe [] labelOf spot | ((_, line', _, labelOf), spot) <- zip drawn spots]
+      link r l ps = do
         c0 <- Map.lookup r.from centers
         s0 <- Map.lookup r.from sizes
         c1 <- Map.lookup r.to centers
@@ -122,12 +126,13 @@ draw measure diagram = do
             a = Route.clip Route.Boxy c0 s0 (headOr c1 inner) 1
             b = Route.clip Route.Boxy c1 s1 (lastOr c0 inner) 1
             path = a : inner <> [b]
-            m = Route.middle path
             contains = r.kind == "contains"
         pure
-          [ Path {start = a, segments = Route.smooth path, line = (if contains then id else dashed) (pen Line 1.3), begin = if contains then Dot else NoHead, end = Arrow}
-          , Rect {at = Point (m.x - l.w / 2 - 4) (m.y - l.h / 2 - 1), size = Size (l.w + 8) (l.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
-          , Text {at = m, text = shown r, font = regular 11, color = Muted, anchor = Middle} ]
+          ( path
+          , [Path {start = a, segments = Route.smooth path, line = (if contains then id else dashed) (pen Line 1.3), begin = if contains then Dot else NoHead, end = Arrow}]
+          , l
+          , \m -> [ Rect {at = Point (m.x - l.w / 2 - 4) (m.y - l.h / 2 - 1), size = Size (l.w + 8) (l.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
+                  , Text {at = m, text = shown r, font = regular 11, color = Muted, anchor = Middle} ] )
       nodeItems = concat [maybe [] (\c -> box c n s rows) (Map.lookup n.name centers) | (n, s, rows) <- sized]
   pure (scene 12 (linkItems <> nodeItems))
   where

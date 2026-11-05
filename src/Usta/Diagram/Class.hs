@@ -12,7 +12,7 @@ module Usta.Diagram.Class
 import Data.Kind (Type)
 import Data.List (nub)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Traversable (for)
@@ -171,11 +171,15 @@ draw measure diagram = do
       centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
       sizes = Map.fromList [(c.name, s) | (c, s, _, _, _) <- sized]
       routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
-      linkItems = concat (snd (foldl' takeRoute (routes, []) (zip diagram.relations labels)))
+      taken = snd (foldl' takeRoute (routes, []) (zip diagram.relations labels))
       takeRoute (left', acc) (r, l) = case Map.lookup (r.left, r.right) left' of
-        Just (ps : more) -> (Map.insert (r.left, r.right) more left', acc <> [link' r l ps])
+        Just (ps : more) -> (Map.insert (r.left, r.right) more left', acc <> [(r, l, ps)])
         _ -> (left', acc)
-      link' r l ps = fromMaybe [] $ do
+      drawn = catMaybes [link' r l ps | ((r, l, _), ps) <- zip taken (Route.spread [(r.left, r.right, ps) | (r, _, ps) <- taken])]
+      keepOff = [Route.around c s | (cl, s, _, _, _) <- sized, Just c <- [Map.lookup cl.name centers]]
+      spots = Route.labelSpots keepOff [(path, size) | (path, _, size, _) <- drawn]
+      linkItems = concat [line' <> maybe [] labelOf spot | ((_, line', _, labelOf), spot) <- zip drawn spots]
+      link' r l ps = do
         c0 <- Map.lookup r.left centers
         s0 <- Map.lookup r.left sizes
         c1 <- Map.lookup r.right centers
@@ -187,11 +191,13 @@ draw measure diagram = do
             towardA = headOr b (drop 1 path)
             towardB = lastOr a (init path)
             near p q = let dx = q.x - p.x; dy = q.y - p.y; len = max 1 (sqrt (dx * dx + dy * dy)) in Point (p.x + dx / len * 16 + dy / len * 10) (p.y + dy / len * 16 - dx / len * 10)
-        pure $
-          [Path {start = a, segments = Route.smooth path, line = (if r.dotted then dashed else id) (pen Line 1.3), begin = r.leftHead, end = r.rightHead}]
-            <> [Text {at = near a towardA, text = t, font = regular 11, color = Muted, anchor = Middle} | Just t <- [r.leftCount]]
-            <> [Text {at = near b towardB, text = t, font = regular 11, color = Muted, anchor = Middle} | Just t <- [r.rightCount]]
-            <> concat [labelAt (Route.middle path) t s | (Just t, Just s) <- [(r.label, l)]]
+        pure
+          ( path
+          , [Path {start = a, segments = Route.smooth path, line = (if r.dotted then dashed else id) (pen Line 1.3), begin = r.leftHead, end = r.rightHead}]
+              <> [Text {at = near a towardA, text = t, font = regular 11, color = Muted, anchor = Middle} | Just t <- [r.leftCount]]
+              <> [Text {at = near b towardB, text = t, font = regular 11, color = Muted, anchor = Middle} | Just t <- [r.rightCount]]
+          , r.label >> l
+          , \m -> concat [labelAt m t s | (Just t, Just s) <- [(r.label, l)]] )
       labelAt p t s =
         [ Rect {at = Point (p.x - s.w / 2 - 4) (p.y - s.h / 2 - 1), size = Size (s.w + 8) (s.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
         , Text {at = p, text = t, font = regular 11, color = Muted, anchor = Middle} ]

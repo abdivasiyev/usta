@@ -145,6 +145,8 @@ data Actions = Actions
   , pinned :: Repository -> IO Bool
   , setPinned :: Repository -> Bool -> IO ()
     -- ^ Pins it to the sidebar, or takes it off.
+  , fork :: Repository -> Gtk.Widget -> IO ()
+    -- ^ Opens the Fork dialog over the button.
   , visit :: (Text, Text) -> IO (Either Text Repository)
     -- ^ One that is not listed, by host and name, as a link opens it; off
     -- the main thread.
@@ -470,7 +472,9 @@ overview actions r realDefault follow = do
     actions.setPinned r on
     GI.set pin [#label := if on then "📌 Pinned" else "📌 Pin"]
     (if on then Gtk.widgetAddCssClass else Gtk.widgetRemoveCssClass) pin "on"
-  forM_ ([star, pin] <> mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
+  forkButton <- Button.new Button.defaults {Button.label = Just "⑂ Fork", Button.tooltip = Just "Fork it to you or an organization"}
+  void $ GI.on forkButton #clicked $ Gtk.toWidget forkButton >>= actions.fork r
+  forM_ ([star, pin, forkButton] <> mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
     GI.set b [#valign := Gtk.AlignStart]
     #append header b
   #append pane header

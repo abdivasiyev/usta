@@ -103,6 +103,7 @@ import qualified Usta.Log as Log
 import qualified Usta.UI.Pages.ReportProblem as ReportProblem
 import qualified Usta.UI.Components.Pager as Pager
 import qualified Usta.UI.Quiet as Quiet
+import qualified Usta.UI.Components.ForkDialog as ForkDialog
 import qualified Usta.UI.Components.RunWorkflow as RunWorkflow
 import qualified Usta.UI.Components.UpdateBanner as UpdateBanner
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
@@ -425,12 +426,19 @@ buildWith start crashed given app = do
             , readme = file
             }
   redrawSidebar <- newIORef (pure ())
+  -- The page shows the fork it made, once it exists.
+  showFork <- newIORef (\_ _ -> pure ())
   (repositoryPage, showRepository) <- source.repositories >>= Repositories.new Repositories.Actions
     { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))
     , newPullRequest = \r -> openNewPullRequestIn (Just (r.host, r.name))
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
     , visit = \(host, name) -> source.visit host name
+    , fork = \r anchor -> ForkDialog.open anchor ForkDialog.Dialog
+        { repo = r.name, defaultBranch = r.defaultBranch, branchOnly = r.forge == Forge.GitHub
+        , options = source.forkOptions r.host r.name
+        , create = \owner name only -> source.forkRepository r.host r.name Forge.Fork {owner = owner, name = name, defaultBranchOnly = only}
+        , opened = \name -> readIORef showFork >>= \go -> go (r.host, name) Nothing }
     , loadContents = loadContents
     , files = \r opening -> RepositoryFiles.new RepositoryFiles.Actions
         { loadTree = fmap (\(from, es) -> (said from "From the local mirror" "From the forge's API", es))
@@ -533,6 +541,7 @@ buildWith start crashed given app = do
             }
         ]
     }
+  writeIORef showFork showRepository
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
   source.onMirrorStatus (source.repositories >>= repositoryPage.update)
   pages <- GI.new Gtk.Stack [ #hexpand := True
@@ -1396,7 +1405,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , UpdateBanner.css, Pager.css, RunWorkflow.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
+  , UpdateBanner.css, Pager.css, RunWorkflow.css, ForkDialog.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, ReportProblem.css, Skeleton.css, Progress.css
   , windowCss
   ]

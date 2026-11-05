@@ -59,6 +59,7 @@ import qualified Usta.Types.Release as Rel
 import qualified Usta.Types.Search as S
 import qualified Usta.Types.Tree as Tr
 import qualified Usta.Types.Label as L
+import qualified Usta.Types.Listing as Lt
 import qualified Usta.Types.Milestone as M
 import Usta.Types.Number (Number)
 import Usta.Types.RepoName (RepoName, owner, shortName)
@@ -207,12 +208,12 @@ github manager host token = do
     , timeline = \repo n -> do
         Api.Item nodes <- asked graph (Api.graph.timeline Api.GraphQuery {query = Api.timelineQuery, variables = itemVariables repo n Nothing})
         eventsOf nodes
-    , repoPullRequests = \repo -> do
-        found <- searchedOnce graph Api.graph.searchPulls Api.pullFields ("is:pr sort:updated-desc repo:" <> unparse repo)
-        traverse (\p -> pullOf host (p, [])) found
-    , repoIssues = \repo -> do
-        found <- searchedOnce graph Api.graph.searchIssues Api.issueFields ("is:issue sort:created-desc repo:" <> unparse repo)
-        traverse (\i -> issueOf host (i, [])) found
+    , repoPullRequests = \repo listing from -> do
+        found <- pageOf graph Api.graph.searchPulls Api.pullFields (listed "is:pr" repo listing) from
+        (\ps -> found {Lt.items = ps}) <$> traverse (\p -> pullOf host (p, [])) found.items
+    , repoIssues = \repo listing from -> do
+        found <- pageOf graph Api.graph.searchIssues Api.issueFields (listed "is:issue" repo listing) from
+        (\is -> found {Lt.items = is}) <$> traverse (\i -> issueOf host (i, [])) found.items
     , runs = \repo -> do
         let (o, r) = (owner repo, shortName repo)
         Api.WorkflowRuns latest <- run rest (Api.api.runs o r Api.ListQuery {page = Just 1, perPage = Named (Just 20)})
@@ -572,10 +573,28 @@ asked graph call = run graph call >>= \case
   Api.Answer a -> pure a
   Api.Problem message -> throwIO (Refused ("GitHub said: " <> message))
 
--- | The first page of a search, for a repository's tabs.
-searchedOnce :: Client -> (Api.GraphQuery -> ClientM (Api.Answer (Api.Page a))) -> Text -> Text -> IO [a]
-searchedOnce client route fields q = (.nodes) <$> asked client (route Api.GraphQuery
-  {query = Api.searchQuery fields, variables = object ["q" .= q, "after" .= Null]})
+-- | One page of a search, with GitHub's count of all it finds.
+pageOf :: Client -> (Api.GraphQuery -> ClientM (Api.Answer (Api.Page a))) -> Text -> Text -> Maybe Text -> IO (Lt.Paged a)
+pageOf client route fields q from = do
+  found <- asked client (route Api.GraphQuery
+    {query = Api.searchQuery fields, variables = object ["q" .= q, "after" .= maybe Null String from]})
+  pure Lt.Paged {items = found.nodes, total = Just found.total, next = found.next}
+
+-- | A repository's tab as a search: "is:pr repo:o/r is:merged sort:…".
+listed :: Text -> RepoName -> Lt.Listing -> Text
+listed kind repo listing = T.unwords (filter (not . T.null) [kind, "repo:" <> unparse repo, which, order])
+  where
+    pull = kind == "is:pr"
+    which = case listing.which of
+      Lt.Opened -> if pull then "is:open draft:false" else "is:open"
+      Lt.Drafts -> "is:open draft:true"
+      Lt.Merged -> "is:merged"
+      Lt.Shut -> if pull then "is:closed is:unmerged" else "is:closed"
+      Lt.Every -> ""
+    order = case listing.order of
+      Lt.RecentlyUpdated -> "sort:updated-desc"
+      Lt.Newest -> "sort:created-desc"
+      Lt.Oldest -> "sort:created-asc"
 
 diffOf :: Text -> IO [FileDiff]
 diffOf text = either (throwIO . Refused) pure (parseDiff text)

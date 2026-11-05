@@ -134,7 +134,8 @@ data Routes mode = Routes
       :: mode :- "repos" :> "search" :> QueryParam "q" Text :> QueryParam "limit" Int :> Get '[JSON] FoundRepositories
   , repoIssues
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues"
-           :> RecordQueryParam RepoIssuesQuery :> Get '[JSON] [Issue]
+           :> RecordQueryParam RepoIssuesQuery :> Get '[JSON] (Headers '[Header "X-Total-Count" Int] [Issue])
+    -- ^ With how many there are in all.
   , pullRequest
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "index" Number
            :> Get '[JSON] PullRequest
@@ -424,12 +425,13 @@ data CommitsQuery = CommitsQuery
 
 instance ToQuery CommitsQuery
 
--- | One repository's issues or pull requests, most recently updated
--- first.
+-- | One repository's issues or pull requests, a page of them.
 type RepoIssuesQuery :: Type
 data RepoIssuesQuery = RepoIssuesQuery
   { kind :: Named "type" IssueType
   , state :: IssueState
+  , sort :: Maybe Text
+    -- ^ "recentupdate", "latest" or "oldest".
   , page :: Maybe Int
   , limit :: Maybe Int
   }
@@ -1147,6 +1149,8 @@ data PullRequest = PullRequest
   , base :: Branch
   , draft :: Bool
   , merged :: Bool
+  , closed :: Bool
+    -- ^ Closed, merged or not.
   , changedFiles :: Maybe Count
   , requestedReviewers :: [User]
   , requestedTeams :: [Team]
@@ -1163,6 +1167,7 @@ instance FromJSON PullRequest where
     <*> o .: "base"
     <*> o .:? "draft" .!= False
     <*> o .:? "merged" .!= False
+    <*> ((== ("closed" :: Text)) <$> o .:? "state" .!= "open")
     <*> o .:? "changed_files"
     <*> o .:? "requested_reviewers" .!= []
     <*> o .:? "requested_reviewers_teams" .!= []

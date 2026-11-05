@@ -33,6 +33,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time (UTCTime, addUTCTime, diffUTCTime, getCurrentTime, nominalDay)
 import qualified Network.HTTP.Client as HTTP
+import Servant.API (Header, ResponseHeader (..), getResponse, lookupResponseHeader)
 import Servant.Client (BaseUrl (..), ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
@@ -54,6 +55,7 @@ import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
 import qualified Usta.Types.Label as L
+import qualified Usta.Types.Listing as Lt
 import Usta.Types.Milestone (Milestone (..))
 import Usta.Types.Login (Login)
 import qualified Usta.Types.Notification as N
@@ -120,16 +122,21 @@ forgejo manager base host token = do
         Just i -> () <$ run client (Api.api.editComment (owner repo) (shortName repo) i Api.BodyEdit {body = text})
         Nothing -> () <$ run client (Api.api.editBody (owner repo) (shortName repo) n Api.BodyEdit {body = text})
     , deleteComment = \repo i -> () <$ run client (Api.api.deleteComment (owner repo) (shortName repo) i)
-    , repoPullRequests = \repo -> do
-        latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
-          Api.RepoIssuesQuery {kind = Named Api.Pulls, state = Api.AnyState, page = Just 1, limit = Just 30})
-        -- The forge lists them newest first; the tab wants recently
-        -- updated first.
-        sortOn (Down . (.updatedAt)) <$> traverse (\i -> pullRequestOf client details host (i, [])) latest
-    , repoIssues = \repo -> do
-        latest <- run client (Api.api.repoIssues (owner repo) (shortName repo)
-          Api.RepoIssuesQuery {kind = Named Api.Issues, state = Api.AnyState, page = Just 1, limit = Just 50})
-        pure (map (issueOf host) [(i, []) | i <- latest])
+    , repoPullRequests = \repo listing from -> do
+        (latest, total, next) <- repoPage client repo Api.Pulls listing from
+        found <- traverse (\i -> pullRequestOf client details host (i, [])) latest
+        -- Forgejo lists open and drafts together, and merged and closed:
+        -- each page keeps the ones asked for, and only "all" has a total.
+        let keep pr = case listing.which of
+              Lt.Opened -> pr.state == P.Open
+              Lt.Drafts -> pr.state == P.Draft
+              Lt.Merged -> pr.state == P.Merged
+              Lt.Shut -> pr.state == P.Closed
+              Lt.Every -> True
+        pure Lt.Paged {items = filter keep found, total = if listing.which == Lt.Every then total else Nothing, next = next}
+    , repoIssues = \repo listing from -> do
+        (latest, total, next) <- repoPage client repo Api.Issues listing from
+        pure Lt.Paged {items = map (issueOf host) [(i, []) | i <- latest], total = total, next = next}
     , discardPending = \repo n -> do
         login <- myLogin
         given <- run client (everyPage (\page limit -> Api.api.reviews (owner repo) (shortName repo) n Api.ListQuery {page = page, limit = limit}))
@@ -530,6 +537,7 @@ threadsOf said = mapMaybe thread (Map.elems grouped)
 stateOf :: Api.PullRequest -> P.State
 stateOf pull
   | pull.merged = P.Merged
+  | pull.closed = P.Closed
   | pull.draft = P.Draft
   | otherwise = P.Open
 
@@ -779,3 +787,26 @@ repositoriesOf client host = do
       , openIssues = r.openIssues
       , updatedAt = r.updatedAt
       }
+
+-- | A page of a repository's issues or pull requests: 20 at a time, as
+-- each pull request costs more calls; the cursor is the page's number.
+repoPage :: Client -> RepoName -> Api.IssueType -> Lt.Listing -> Maybe Text -> IO ([Api.Issue], Maybe Int, Maybe Text)
+repoPage client repo kind listing from = do
+  let n = fromMaybe 1 (from >>= readMaybe . T.unpack) :: Int
+      state = case listing.which of
+        Lt.Opened -> Api.Open
+        Lt.Drafts -> Api.Open
+        Lt.Merged -> Api.Closed
+        Lt.Shut -> Api.Closed
+        Lt.Every -> Api.AnyState
+      sort = case listing.order of
+        Lt.RecentlyUpdated -> "recentupdate"
+        Lt.Newest -> "latest"
+        Lt.Oldest -> "oldest"
+  answer <- run client (Api.api.repoIssues (owner repo) (shortName repo)
+    Api.RepoIssuesQuery {kind = Named kind, state = state, sort = Just sort, page = Just n, limit = Just 20})
+  let latest = getResponse answer
+      total = case lookupResponseHeader @"X-Total-Count" answer of
+        Header t -> Just t
+        _ -> Nothing
+  pure (latest, total, if length latest < 20 then Nothing else Just (T.pack (show (n + 1))))

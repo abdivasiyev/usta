@@ -9,7 +9,7 @@ module Main (main) where
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (catch)
-import Control.Monad (forM_, void)
+import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import qualified Data.Text as T
 import qualified GI.Gdk as Gdk
@@ -62,6 +62,9 @@ tests app =
         eventually "the search opening" 2000 (visibleWithClass "u-palette-backdrop" w)
     , testCase "on macOS the search's shortcut is Command K" $
         if Platform.current == Platform.MacOS then UIPlatform.keys "<Primary>k" @?= "<Meta>k" else pure ()
+    , dependentTestGroup "dialogs open over their window"
+        AllFinish
+        [ testCase (T.unpack title) (dialogOverWindow app button title) | (button, title) <- [("+ New", "New repository"), ("⑂ Fork…", "Fork"), ("Clone…", "Clone")] ]
     , testCase "Enter sends a comment, and Shift Enter starts a line" editorSends
     , testCase "Emacs keys in a text field" emacsKeys
     , testCase "the repositories' forge filter narrows the list" $ withWindow app Source.samples $ \w -> do
@@ -130,3 +133,21 @@ pageShows app page = forM_ [(Light, "light"), (Dark, "dark")] $ \(theme, name) -
 -- | The sample data, in one theme whatever the system's.
 themed :: Theme -> Source.Source
 themed theme = Source.samples {Source.preferences = pure Preferences.defaults {Preferences.theme = theme}}
+
+-- | The button on the repository page opens its dialog on top of the
+-- window, modal to it.
+dialogOverWindow :: Gtk.Application -> T.Text -> T.Text -> IO ()
+dialogOverWindow app button title = withWindow app Source.samples $ \w -> do
+  onMain (showPage w Repositories)
+  pause 600
+  -- The repository's other actions are under its "⋯" menu.
+  when (button /= "+ New") $ onMain (openMenu w "More") >>= assertBool "no menu"
+  pause 300
+  onMain (click w button) >>= assertBool ("no " <> T.unpack button)
+  eventually ("the " <> T.unpack title <> " dialog") 3000 ((/= Nothing) <$> dialogTitled title)
+  Just dialog <- onMain (dialogTitled title)
+  parent <- onMain (Gtk.windowGetTransientFor dialog)
+  mine <- onMain (Gtk.toWindow w)
+  assertBool "not over the window" (parent == Just mine)
+  onMain (Gtk.windowGetModal dialog) >>= assertBool "not modal"
+  onMain (Gtk.windowDestroy dialog)

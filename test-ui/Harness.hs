@@ -19,6 +19,9 @@ module Harness
   , screenshot
   , withWindow
   , showPage
+  , click
+  , openMenu
+  , dialogTitled
   ) where
 
 import Control.Concurrent (threadDelay)
@@ -186,3 +189,33 @@ showPage w page = do
   forM_ stacks $ \s -> do
     child <- Gtk.stackGetChildByName s (pageName page)
     when (maybe False (const True) child) $ Gtk.stackSetVisibleChildName s (pageName page)
+
+-- | Clicks the button under @w@ that reads @text@, shown or not (as one
+-- in a closed menu); 'False' when there is none.
+click :: Gtk.IsWidget w => w -> Text -> IO Bool
+click w text = do
+  buttons <- descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Button)
+  found <- filterM (\b -> (== Just text) <$> Gtk.buttonGetLabel b) buttons
+  case found of
+    b : _ -> Gtk.widgetActivate b
+    [] -> pure False
+
+-- | The open window titled @title@, if there is one.
+dialogTitled :: Text -> IO (Maybe Gtk.Window)
+dialogTitled title = do
+  model <- Gtk.windowGetToplevels
+  n <- Gio.listModelGetNItems model
+  windows <- catMaybes <$> forM (takeWhile (< n) [0 ..]) (\i -> Gio.listModelGetItem model i >>= maybe (pure Nothing) (GI.castTo Gtk.Window))
+  found <- filterM (\x -> (== Just title) <$> Gtk.windowGetTitle x) windows
+  pure (case found of
+    x : _ -> Just x
+    [] -> Nothing)
+
+-- | Opens the menu button under @w@ whose tooltip is @tip@.
+openMenu :: Gtk.IsWidget w => w -> Text -> IO Bool
+openMenu w tip = do
+  menus <- widgetsOf Gtk.MenuButton w
+  found <- filterM (\m -> (== Just tip) <$> Gtk.widgetGetTooltipText m) menus
+  case found of
+    m : _ -> Gtk.menuButtonPopup m >> pure True
+    [] -> pure False

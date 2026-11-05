@@ -548,6 +548,9 @@ pullRequestOf client cache host (i, involvement) = do
     , title = i.title
     , author = i.user.login
     , headBranch = d.pull.head.ref
+    , headOwner = case d.pull.head.repo of
+        Just fork | fork.fullName /= i.repository.fullName -> Just (owner fork.fullName)
+        _ -> Nothing
     , baseBranch = d.pull.base.ref
     , state = stateOf d.pull
     , checks = checksOf combined

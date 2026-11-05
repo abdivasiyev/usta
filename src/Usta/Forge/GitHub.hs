@@ -465,6 +465,9 @@ pullOf host (p, involvement) = do
     , title = p.title
     , author = author
     , headBranch = p.headBranch
+    , headOwner = case p.headRepo of
+        Just other | other /= p.repo -> Just (owner other)
+        _ -> Nothing
     , baseBranch = p.baseBranch
     , state = case p.state of
         "MERGED" -> P.Merged

@@ -1213,10 +1213,12 @@ type Branch :: Type
 data Branch = Branch
   { ref :: Text
   , sha :: Text
+  , repo :: Maybe RepositoryRef
+    -- ^ Where the branch is: a fork's, for a pull request from one.
   }
 
 instance FromJSON Branch where
-  parseJSON = withObject "Branch" $ \o -> Branch <$> o .: "ref" <*> o .: "sha"
+  parseJSON = withObject "Branch" $ \o -> Branch <$> o .: "ref" <*> o .: "sha" <*> o .:? "repo"
 
 -- | @state@ is "APPROVED", "REQUEST_CHANGES", "COMMENT", "PENDING" or
 -- "REQUEST_REVIEW"; @stale@ when commits came after it.

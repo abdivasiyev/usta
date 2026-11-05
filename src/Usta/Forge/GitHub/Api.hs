@@ -444,6 +444,8 @@ data PullNode = PullNode
     -- ^ 'Nothing' for a deleted user ("ghost").
   , repo :: RepoName
   , headBranch :: Text
+  , headRepo :: Maybe RepoName
+    -- ^ 'Nothing' when the fork is gone.
   , baseBranch :: Text
   , state :: Text
     -- ^ "OPEN", "CLOSED" or "MERGED".
@@ -474,6 +476,7 @@ instance FromJSON PullNode where
       <*> authorOf o
       <*> (o .: "repository" >>= (.: "nameWithOwner"))
       <*> o .: "headRefName"
+      <*> (o .:? "headRepository" >>= maybe (pure Nothing) (.:? "nameWithOwner"))
       <*> o .: "baseRefName"
       <*> o .: "state"
       <*> o .: "isDraft"
@@ -555,7 +558,7 @@ searchQuery fields =
 
 pullFields :: Text
 pullFields =
-  "... on PullRequest { number title author { login } repository { nameWithOwner } headRefName baseRefName"
+  "... on PullRequest { number title author { login } repository { nameWithOwner } headRefName headRepository { nameWithOwner } baseRefName"
     <> " state isDraft reviewDecision reviewRequests { totalCount } comments { totalCount } changedFiles"
     <> " commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state } } } } createdAt updatedAt }"
 

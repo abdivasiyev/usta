@@ -35,6 +35,8 @@ type Dialog :: Type
 data Dialog = Dialog
   { clock :: Clock
   , defaultBranch :: Text
+  , branch :: Text
+    -- ^ Chosen at first: the default, or a pull request's.
   , branches :: IO (Either Text [Branch])
   , workflows :: Text -> IO (Either Text [Workflow])
     -- ^ Those of a branch; off the main thread.
@@ -79,7 +81,7 @@ open anchor d = do
   #append content footer
   GI.set dialog [#child := content]
 
-  branch <- newIORef d.defaultBranch
+  branch <- newIORef d.branch
   found <- newIORef []
   -- What reads each input's value, by its name.
   readers <- newIORef []

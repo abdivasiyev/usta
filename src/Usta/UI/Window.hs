@@ -492,7 +492,7 @@ buildWith start crashed given app = do
                   , logOf = source.checkLog r.host r.name
                   , stepsOf = source.jobSteps r.host r.name
                   , runWorkflow = Just $ \anchor started -> RunWorkflow.open anchor RunWorkflow.Dialog
-                      { clock = c, defaultBranch = r.defaultBranch
+                      { clock = c, defaultBranch = r.defaultBranch, branch = r.defaultBranch
                       , branches = fmap snd <$> source.branchList r.host r.name r.defaultBranch
                       , workflows = source.startable r.host r.name
                       , run = source.dispatch r.host r.name
@@ -909,8 +909,26 @@ tabContent source panels reopen fetch summary showState tab = case tab of
             Right sha -> fmap (map Files.fromFileDiff . snd) <$> source.commitDiff summary.host summary.repo sha
       Commits.new (said from "history from the local mirror" "history from the forge's API") changesOf
         (map (Commits.fromCommit c) commits)
-  PullRequest.Checks ->
-    loadInto (source.checks summary.host summary.repo summary.number) $ \found ->
+  PullRequest.Checks -> do
+    -- Run workflow, on the pull request's branch.
+    page <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
+    bar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #halign := Gtk.AlignEnd, #marginTop := 10, #marginEnd := 16]
+    runButton <- Button.new Button.defaults {Button.label = Just "▶ Run workflow", Button.small = True}
+    #append bar runButton
+    #append page bar
+    void $ GI.on runButton #clicked $ do
+      anchor <- Gtk.toWidget runButton
+      c <- clock
+      repos <- source.repositories
+      let (headBranch, baseBranch) = summary.branches
+          defaultBranch = maybe baseBranch (.defaultBranch) (find (\r -> r.host == summary.host && r.name == summary.repo) repos)
+      RunWorkflow.open anchor RunWorkflow.Dialog
+        { clock = c, defaultBranch = defaultBranch, branch = headBranch
+        , branches = fmap snd <$> source.branchList summary.host summary.repo defaultBranch
+        , workflows = source.startable summary.host summary.repo
+        , run = source.dispatch summary.host summary.repo
+        , started = reopen }
+    checks <- loadInto (source.checks summary.host summary.repo summary.number) $ \found ->
       Checks.new Checks.Model
         { provider = if summary.forge == Forge.Forgejo then "Forgejo Actions" else "Checks"
         , checks = found
@@ -919,6 +937,8 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         , rerunJob = if summary.forge == Forge.GitHub then Just (source.rerunJob summary.host summary.repo) else Nothing
         , rerunDone = pure ()
         }
+    #append page checks
+    Gtk.toWidget page
 
 -- | The labels picker of an issue or pull request; @refresh@ reloads the
 -- page after a change.

@@ -19,7 +19,7 @@ import Data.Time (UTCTime)
 import Usta.Types.Branch (Branch, Tag)
 import Usta.Types.Release (Release)
 import Usta.Types.Search (Found)
-import Usta.Types.Check (Check, Job, Run)
+import Usta.Types.Check (Check, Job, Run, State)
 import Usta.Types.Commit (Commit, Sha)
 import Usta.Types.Diff (FileDiff)
 import Usta.Types.Tree (Entry)
@@ -76,6 +76,9 @@ data Forge = Forge
     -- ^ The checks on a pull request's latest commit.
   , checkLog :: RepoName -> Job -> IO Text
     -- ^ A CI job's log, as it printed it.
+  , jobSteps :: RepoName -> Job -> IO (State, [(Text, State)])
+    -- ^ A job's state and each of its steps', while it runs and its log
+    -- is not out yet.
   , reviewers :: RepoName -> Number -> IO [Reviewer]
     -- ^ Who reviewed a pull request or is asked to, and where each stands.
   , requestReview :: RepoName -> Number -> [Who] -> IO ()

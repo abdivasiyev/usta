@@ -255,6 +255,7 @@ forgejo manager base host token = do
         combined <- run client (Api.api.status (owner repo) (shortName repo) pull.head.sha)
         pure (map (checkOf host) combined.statuses)
     -- The first attempt's: the status links the job, not its attempts.
+    , jobSteps = \_ _ -> throwIO (Refused "Forgejo does not list a job's steps.")
     , checkLog = \repo job -> run site (Api.web.jobLog (owner repo) (shortName repo) job.run job.index 1)
     , reviewers = \repo n -> do
         pull <- run client (Api.api.pullRequest (owner repo) (shortName repo) n)

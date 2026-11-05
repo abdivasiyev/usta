@@ -60,6 +60,7 @@ import Usta.OAuth (Waiting (..))
 import qualified Usta.Types.Insights as Insights
 import Data.Time (UTCTime)
 import Usta.Types.Check (Check, Job, Run)
+import qualified Usta.Types.Check as Ck
 import Usta.Types.Label (Definition)
 import Usta.Types.Login (Login)
 import Usta.Types.Milestone (Milestone)
@@ -201,6 +202,7 @@ data Source = Source
   , repoIssues :: Text -> Text -> Listing -> Maybe Text -> IO (Either Text (Paged I.Issue))
   , repoCounts :: Text -> Text -> Bool -> Text -> IO (Either Text Counts)
   , runs :: Text -> Text -> IO (Either Text [Run])
+  , jobSteps :: Text -> Text -> Job -> IO (Either Text (Ck.State, [(Text, Ck.State)]))
     -- ^ A repository's latest CI runs, from the forge.
   , branchList :: Text -> Text -> Text -> IO (Either Text (From, [Branch]))
     -- ^ By host, repository and default branch.
@@ -326,6 +328,7 @@ fromDatabase pool changes statuses sync = Source
   , threads = \_ _ _ -> pure (Left unavailable)
   , checks = \_ _ _ -> pure (Left unavailable)
   , checkLog = \_ _ _ -> pure (Left unavailable)
+  , jobSteps = \_ _ _ -> pure (Left unavailable)
   , reviewers = \_ _ _ -> pure (Left unavailable)
   , requestReview = \_ _ _ _ -> pure (Left unavailable)
   , unrequestReview = \_ _ _ _ -> pure (Left unavailable)
@@ -427,6 +430,7 @@ samples = Source
   , threads = \_ _ _ -> pure (Left unavailable)
   , checks = \_ _ _ -> pure (Left unavailable)
   , checkLog = \_ _ _ -> pure (Left unavailable)
+  , jobSteps = \_ _ _ -> pure (Left unavailable)
   , reviewers = \_ _ _ -> pure (Left unavailable)
   , requestReview = \_ _ _ _ -> pure (Left unavailable)
   , unrequestReview = \_ _ _ _ -> pure (Left unavailable)
@@ -529,6 +533,7 @@ withAccounts pool accounts source = source
   , threads = \host repo n -> onForge host repo n (\f name number -> f.threads name number)
   , checks = \host repo n -> onForge host repo n (\f name number -> f.checks name number)
   , checkLog = \host repo job -> onRepo host repo (\f name -> f.checkLog name job)
+  , jobSteps = \host repo job -> onRepo host repo (\f name -> f.jobSteps name job)
   , reviewers = \host repo n -> onForge host repo n (\f name number -> f.reviewers name number)
   , requestReview = \host repo n whos -> changing (onForge host repo n (\f name number -> f.requestReview name number whos))
   , unrequestReview = \host repo n who -> changing (onForge host repo n (\f name number -> f.unrequestReview name number who))
@@ -720,6 +725,7 @@ tracking track s = s
   , threads = \h r n -> track (s.threads h r n)
   , checks = \h r n -> track (s.checks h r n)
   , checkLog = \h r j -> track (s.checkLog h r j)
+  , jobSteps = \h r j -> track (s.jobSteps h r j)
   , reviewers = \h r n -> track (s.reviewers h r n)
   , requestReview = \h r n w -> track (s.requestReview h r n w)
   , unrequestReview = \h r n w -> track (s.unrequestReview h r n w)

@@ -233,6 +233,8 @@ buildWith start crashed given app = do
               changes <- source.compareDiff p.host p.repo into from
               pure $ (\(cs, _) fs -> ([(T.take 7 (unparse c.sha), c.subject) | c <- cs], map Files.fromFileDiff fs))
                 <$> commits <*> changes
+          , forksOf = \p -> fmap snd <$> source.forkOptions p.host p.repo
+          , parentOf = \p -> source.parentOf p.host p.repo
           , create = \p -> source.createPull p.host p.repo
           , opened = opened
           , cancel = backToMain

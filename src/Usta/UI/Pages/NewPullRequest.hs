@@ -18,6 +18,8 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import Data.List (nub)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.GLib as GLib
@@ -63,6 +65,10 @@ data Actions = Actions
   , compareOf :: Place -> Text -> Text -> IO (Either Text ([(Text, Text)], [Diff.File]))
     -- ^ Into and from: the commits (short hash and subject) and the
     -- changes the pull request would have.
+  , forksOf :: Place -> IO (Either Text [Text])
+    -- ^ Your forks of the repository, by full name.
+  , parentOf :: Place -> IO (Either Text (Maybe Text))
+    -- ^ The repository a fork was made from.
   , create :: Place -> NewPull -> IO (Either Text Int)
   , opened :: Place -> Int -> Text -> (Text, Text) -> IO ()
     -- ^ With the new pull request's number, title and branches (head
@@ -105,14 +111,25 @@ new actions m = do
   repoField <- Gtk.toWidget repo >>= field "Repository"
   GI.set repoField [#hexpand := True]
   #append row repoField
-  -- Each picker is drawn again when a branch is chosen in it.
-  intoSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
-  Gtk.toWidget intoSlot >>= field "Into" >>= #append row
+  -- Each side is a repository and a branch: into the repository or the
+  -- one it was forked from, from it or a fork of yours. The repository
+  -- shows only when there is a choice. Each picker is drawn again when a
+  -- branch is chosen in it.
+  let branchSide = do
+        repos <- Gtk.dropDownNewFromStrings []
+        GI.set repos [#visible := False, #cssClasses := ["mono", "side-repo"]]
+        slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+        both <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 6]
+        #append both repos
+        #append both slot
+        pure (repos, slot, both)
+  (intoRepos, intoSlot, intoSide) <- branchSide
+  Gtk.toWidget intoSide >>= field "Into" >>= #append row
   arrow <- label "←" ["muted", "arrow"]
   GI.set arrow [#valign := Gtk.AlignEnd]
   #append row arrow
-  fromSlot <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
-  Gtk.toWidget fromSlot >>= field "From" >>= #append row
+  (fromRepos, fromSlot, fromSide) <- branchSide
+  Gtk.toWidget fromSide >>= field "From" >>= #append row
   #append main row
   status <- label "" ["small", "muted"]
   GI.set status [#visible := False]
@@ -163,11 +180,33 @@ new actions m = do
   let placeAt i = if i >= 0 && i < length m.places then Just (m.places !! i) else Nothing
   into <- newIORef (Nothing :: Maybe Text)
   from <- newIORef (Nothing :: Maybe Text)
-  -- The branches of the repository chosen, fetched once for both pickers.
-  known <- newIORef (pure (Left "Loading branches\8230") :: IO (Either Text [Branch]))
+  -- Each side's repository choices, and the one chosen.
+  intoChoices <- newIORef []
+  fromChoices <- newIORef []
+  -- Each side's branches, fetched once a repository is chosen.
+  knownInto <- newIORef (pure (Left "Loading branches\8230") :: IO (Either Text [Branch]))
+  knownFrom <- newIORef (pure (Left "Loading branches\8230") :: IO (Either Text [Branch]))
   c <- clock
   previewRef <- newIORef (pure ())
-  let picker slot ref place = do
+  -- Only the latest fetch of branches is shown.
+  fetches <- newIORef (0 :: Int)
+  let chosenIn d choices = do
+        i <- fromIntegral <$> Gtk.dropDownGetSelected d
+        names <- readIORef choices
+        pure (if i < length names then Just (names !! i) else Nothing)
+      -- The place each side is in: the chosen one, on another repository.
+      sides = do
+        index <- fromIntegral <$> Gtk.dropDownGetSelected repo
+        case placeAt index of
+          Nothing -> pure Nothing
+          Just place -> do
+            i <- fromMaybe place.repo <$> chosenIn intoRepos intoChoices
+            f <- fromMaybe place.repo <$> chosenIn fromRepos fromChoices
+            pure (Just (place {repo = i}, place {repo = f}))
+      -- The branch with the changes as the forge names it: "owner:branch"
+      -- from another repository.
+      headOf intoPlace fromPlace t = if fromPlace.repo == intoPlace.repo then t else T.takeWhile (/= '/') fromPlace.repo <> ":" <> t
+      picker slot ref known place = do
         old <- Gtk.widgetGetFirstChild slot
         forM_ old (Gtk.boxRemove slot)
         shown <- readIORef ref
@@ -175,35 +214,67 @@ new actions m = do
         b <- BranchPicker.new BranchPicker.Picker
           { shown = maybe "Choose a branch" id shown, defaultBranch = place.defaultBranch, clock = c
           , branches = fetch, tags = Nothing
-          , choose = \name -> writeIORef ref (Just name) >> picker slot ref place >> join (readIORef previewRef)
+          , choose = \name -> writeIORef ref (Just name) >> picker slot ref known place >> join (readIORef previewRef)
           , note = "" }
         #append slot b
-      pickers place = picker intoSlot into place >> picker fromSlot from place
+      pickers = sides >>= mapM_ (\(intoPlace, fromPlace) ->
+        picker intoSlot into knownInto intoPlace >> picker fromSlot from knownFrom fromPlace)
       selected = readIORef
+      offer d choices names = do
+        writeIORef choices names
+        model <- Gtk.stringListNew (Just names)
+        Gtk.dropDownSetModel d (Just model)
+        GI.set d [#visible := length names > 1]
+      -- The branches of both sides; one fetch when they are one repository.
+      branches = sides >>= mapM_ (\(intoPlace, fromPlace) -> do
+        writeIORef into Nothing >> writeIORef from Nothing
+        mapM_ (\k -> writeIORef k (pure (Left "Loading branches\8230"))) [knownInto, knownFrom]
+        pickers
+        say status "Loading branches\8230"
+        mine <- (+ 1) <$> readIORef fetches
+        writeIORef fetches mine
+        void $ forkIO $ do
+          foundInto <- actions.branchesOf intoPlace
+          foundFrom <- if fromPlace.repo == intoPlace.repo then pure foundInto else actions.branchesOf fromPlace
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+           latest <- readIORef fetches
+           when (latest == mine) $ do
+            writeIORef knownInto (pure foundInto)
+            writeIORef knownFrom (pure foundFrom)
+            case (foundInto, foundFrom) of
+              (Right intoBranches, Right fromBranches) -> do
+                let base = if any ((== intoPlace.defaultBranch) . (.name)) intoBranches then Just intoPlace.defaultBranch else take 1 (map (.name) intoBranches) `orFirst` Nothing
+                    same = fromPlace.repo == intoPlace.repo
+                    others = [b.name | b <- fromBranches, not same || Just b.name /= base]
+                    -- A branch other than the default, as the one with the changes.
+                    tip = [n | n <- others, n /= fromPlace.defaultBranch] `orFirst` (take 1 others `orFirst` Nothing)
+                writeIORef into base
+                writeIORef from tip
+                pickers
+                say status (if null others then "The repository has one branch: push another to open a pull request." else "")
+                join (readIORef previewRef)
+              (Left text, _) -> say status text
+              (_, Left text) -> say status text
+           pure False)
+      -- A fork goes into the one it was made from, from itself; any other
+      -- into itself, from itself or a fork of yours.
       load = do
         index <- fromIntegral <$> Gtk.dropDownGetSelected repo
         forM_ (placeAt index) $ \place -> do
-          writeIORef into Nothing >> writeIORef from Nothing
-          writeIORef known (pure (Left "Loading branches\8230"))
-          pickers place
-          say status "Loading branches\8230"
+          offer intoRepos intoChoices [place.repo]
+          offer fromRepos fromChoices [place.repo]
+          branches
           void $ forkIO $ do
-            found <- actions.branchesOf place
+            parent <- either (const Nothing) id <$> actions.parentOf place
+            let target = fromMaybe place.repo parent
+            forks <- either (const []) id <$> actions.forksOf place {repo = target}
             void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-              writeIORef known (pure found)
-              case found of
-                Right shown -> do
-                  let others = [b.name | b <- shown, b.name /= place.defaultBranch]
-                  writeIORef into (Just place.defaultBranch)
-                  -- The first other branch, as the one with the changes.
-                  writeIORef from (take 1 others `orFirst` Nothing)
-                  pickers place
-                  say status (if null others then "The repository has one branch: push another to open a pull request." else "")
-                  join (readIORef previewRef)
-                Left text -> say status text
+              offer intoRepos intoChoices (nub [target, place.repo])
+              offer fromRepos fromChoices (nub ([place.repo, target] <> forks))
+              when (target /= place.repo || not (null forks)) branches
               pure False
       submit draft = do
-        index <- fromIntegral <$> Gtk.dropDownGetSelected repo
+        found <- sides
         base <- selected into
         tip <- selected from
         titleText <- T.strip <$> Gtk.editableGetText titleEntry
@@ -211,16 +282,16 @@ new actions m = do
         reviewersText <- Gtk.editableGetText reviewersEntry
         labelsText <- Gtk.editableGetText labelsEntry
         let reviewers = traverse parse (names' reviewersText)
-        case (placeAt index, base, tip, reviewers) of
+        case (found, base, tip, reviewers) of
           _ | T.null titleText -> GI.set problem [#label := "Give the pull request a title."]
-          (Just place, Just b, Just t, Right who)
-            | b == t -> GI.set problem [#label := "Choose two different branches."]
+          (Just (place, fromPlace), Just b, Just t, Right who)
+            | b == t && fromPlace.repo == place.repo -> GI.set problem [#label := "Choose two different branches."]
             | otherwise -> do
                 GI.set problem [#label := ""]
                 let pull = NewPull
                       { title = titleText
                       , body = bodyText
-                      , from = t
+                      , from = headOf place fromPlace t
                       , into = b
                       , labels = names' labelsText
                       , reviewers = who
@@ -228,13 +299,13 @@ new actions m = do
                       }
                     (pressed, other) = if draft then (draftButton, createButton) else (createButton, draftButton)
                 Button.busy pressed [other] "Creating…" (actions.create place pull) $
-                  either (\text -> GI.set problem [#label := text]) (\number -> actions.opened place number titleText (t, b))
+                  either (\text -> GI.set problem [#label := text]) (\number -> actions.opened place number titleText (headOf place fromPlace t, b))
           (_, _, _, Left _) -> GI.set problem [#label := "A reviewer is not a user name."]
           _ -> GI.set problem [#label := "Choose the repository and both branches."]
   -- Each change of branch asks again; only the latest answer is shown.
   asked <- newIORef (0 :: Int)
   let preview = do
-        index <- fromIntegral <$> Gtk.dropDownGetSelected repo
+        found <- sides
         base <- selected into
         tip <- selected from
         turn <- (+ 1) <$> readIORef asked
@@ -243,14 +314,14 @@ new actions m = do
               old <- Gtk.widgetGetFirstChild contentsSlot
               forM_ old (Gtk.boxRemove contentsSlot)
               forM_ widget (#append contentsSlot)
-        case (placeAt index, base, tip) of
-          (Just place, Just b, Just t) | b /= t -> do
+        case (found, base, tip) of
+          (Just (place, fromPlace), Just b, Just t) | b /= t || fromPlace.repo /= place.repo -> do
             Skeleton.block 88 >>= replace . Just
             void $ forkIO $ do
-              found <- actions.compareOf place b t
+              compared <- actions.compareOf place b (headOf place fromPlace t)
               void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
                 latest <- readIORef asked
-                when (latest == turn) $ case found of
+                when (latest == turn) $ case compared of
                   Right (commits, changes) -> contents scroll b t commits changes >>= Gtk.toWidget >>= replace . Just
                   Left text -> label text ["small", "muted"] >>= Gtk.toWidget >>= replace . Just
                 pure False
@@ -258,6 +329,7 @@ new actions m = do
   writeIORef previewRef preview
   Gtk.dropDownSetSelected repo (fromIntegral m.chosen)
   void $ GI.on repo (GI.PropertyNotify #selected) (const load)
+  forM_ [intoRepos, fromRepos] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const branches)
   load
   void $ GI.on createButton #clicked (submit False)
   void $ GI.on draftButton #clicked (submit True)

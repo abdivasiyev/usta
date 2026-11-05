@@ -34,6 +34,7 @@ import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.Choices as Choices
 import qualified Usta.UI.Components.BranchPicker as BranchPicker
 import Usta.UI.Format (clock)
 import qualified Usta.UI.Components.Button as Button
@@ -200,19 +201,40 @@ new actions repositories = do
     , SearchField.shortcut = Nothing
     , SearchField.width = -1
     }
+  -- The forge and the owner, a user or an organization, narrow the list
+  -- with the words; the owners are those on the forge chosen.
+  forges <- Choices.new "All forges"
+  owners <- Choices.new "All owners"
   query <- newIORef ""
   Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
     q <- readIORef query
+    host <- Choices.chosen forges
+    owner <- Choices.chosen owners
     index <- Gtk.listBoxRowGetIndex row
     shown <- readIORef items
-    pure (matches q (shown !! fromIntegral index))
+    let r = shown !! fromIntegral index
+    pure (matches q r && maybe True (== r.host) host && maybe True (== ownerOf r) owner)
   void $ GI.on entry #searchChanged $ do
     text <- Gtk.editableGetText entry
     writeIORef query (T.toLower text)
     Gtk.listBoxInvalidateFilter list
+  let offerOwners = do
+        shown <- readIORef items
+        host <- Choices.chosen forges
+        Choices.offer owners [ownerOf r | r <- shown, maybe True (== r.host) host]
+      offerAll = do
+        shown <- readIORef items
+        Choices.offer forges (map (.host) shown)
+        offerOwners
+  void $ GI.on forges (GI.PropertyNotify #selected) (const (offerOwners >> Gtk.listBoxInvalidateFilter list))
+  void $ GI.on owners (GI.PropertyNotify #selected) (const (Gtk.listBoxInvalidateFilter list))
+  offerAll
 
-  searchBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["search-bar"]]
+  searchBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["search-bar"]]
   #append searchBar search
+  choices <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #homogeneous := True]
+  mapM_ (#append choices) [forges, owners]
+  #append searchBar choices
 
   listScroll <- GI.new Gtk.ScrolledWindow [ #child := list
                                           , #vexpand := True
@@ -242,6 +264,7 @@ new actions repositories = do
     , update = \shown -> do
         writeIORef items shown
         refill list repositoryRow shown
+        offerAll
         when (null shown) $ clear detail >> writeIORef selectedKey Nothing
         select
     }
@@ -337,6 +360,10 @@ clear :: Gtk.Box -> IO ()
 clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
 
 -- | Case-insensitive match on the name or host; @q@ is already lowercase.
+-- | "abdivasiyev" of "abdivasiyev/usta".
+ownerOf :: Repository -> Text
+ownerOf r = T.takeWhile (/= '/') r.name
+
 matches :: Text -> Repository -> Bool
 matches q r = q `T.isInfixOf` T.toLower r.name || q `T.isInfixOf` T.toLower r.host
 
@@ -735,6 +762,7 @@ css = mconcat
   , "button.u-button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }"
   , "box.u-repo-pane { background: var(--surface); border-right: 1px solid var(--border); }"
   , "box.u-repo-pane box.search-bar { padding: 12px; }"
+  , "box.u-repo-pane box.search-bar dropdown > button { min-height: 30px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface); background-image: none; box-shadow: none; font-size: 12px; }"
   , "list.u-repo-list { background: var(--surface); }"
   , "list.u-repo-list row {"
   , "  padding: 12px 16px; border-bottom: 1px solid var(--border-subtle);"

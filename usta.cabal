@@ -74,6 +74,8 @@ executable usta
     Usta.Forge
     Usta.Forge.Forgejo
     Usta.Forge.Forgejo.Api
+    Usta.Forge.GitHub
+    Usta.Forge.GitHub.Api
     Usta.Forge.Http
     Usta.Forge.Sample
     Usta.Git

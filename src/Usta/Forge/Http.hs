@@ -7,6 +7,7 @@ module Usta.Forge.Http
   , connect
   , apiUrl
   , run
+  , runChanged
   ) where
 
 import Control.Exception (throwIO)
@@ -66,6 +67,14 @@ apiUrl host path = BaseUrl
 -- | Runs a call, throwing 'Failure' when it fails.
 run :: Client -> ClientM a -> IO a
 run (Client env) call = runClientM call env >>= either (throwIO . failure) pure
+
+-- | A conditional call: 'Nothing' when the forge answers 304, not
+-- modified, to an @If-None-Match@ or @If-Modified-Since@.
+runChanged :: Client -> ClientM a -> IO (Maybe a)
+runChanged (Client env) call = runClientM call env >>= \case
+  Right a -> pure (Just a)
+  Left (FailureResponse _ response) | statusCode response.responseStatusCode == 304 -> pure Nothing
+  Left e -> throwIO (failure e)
 
 -- | Bodies are left out on purpose: they can echo what was sent.
 failure :: ClientError -> Failure

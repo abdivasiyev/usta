@@ -2,7 +2,7 @@
 -- everything that runs without a window.
 module Main (main) where
 
-import System.Environment (setEnv)
+import System.Environment (getEnv, setEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty (defaultMain, testGroup)
@@ -25,11 +25,14 @@ import qualified Usta.UI.HighlightTests
 import qualified Usta.SyncTests
 import qualified Usta.CacheTests
 import qualified Usta.LocalFilesTests
+import qualified Usta.Contract.ForgeTests
 
 -- | The tests run with a home of their own: what usta keeps beside its
 -- cache (drafts, viewed files, the log) never touches the real one.
 main :: IO ()
 main = withSystemTempDirectory "usta-test" $ \home -> do
+  -- Recording GitHub's answers runs gh, which needs the user's own.
+  getEnv "HOME" >>= setEnv "USTA_REAL_HOME"
   setEnv "HOME" home
   setEnv "XDG_DATA_HOME" (home </> "data")
   setEnv "XDG_CONFIG_HOME" (home </> "config")
@@ -55,4 +58,5 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
       , Usta.SyncTests.tests
       , Usta.CacheTests.tests
       , Usta.LocalFilesTests.tests
+      , Usta.Contract.ForgeTests.tests
       ]

@@ -308,6 +308,8 @@ test-suite usta-test
   hs-source-dirs: test
   other-modules:
     Usta.CacheTests
+    Usta.Contract.ForgeTests
+    Usta.Contract.Replay
     Usta.DiagramTests
     Usta.GitTests
     Usta.GraphTests

@@ -123,14 +123,15 @@ frontMatter ls = case dropWhile (T.null . T.strip) ls of
   where
     unquote t = T.dropAround (`elem` ("\"'" :: String)) t
 
-draw :: Monad m => Measure m -> Diagram -> m Scene
-draw measure d = do
+-- | @drags@ moves the nodes of the diagrams that have nodes and links.
+draw :: Monad m => Moves -> Measure m -> Diagram -> m Scene
+draw drags measure d = do
   body <- case d.kind of
-    Flowchart chart -> Flowchart.draw measure chart
+    Flowchart chart -> Flowchart.draw drags measure chart
     Sequence s -> Sequence.draw measure s
-    Class c -> Class.draw measure c
-    State s -> State.draw measure s
-    Entity e -> Entity.draw measure e
+    Class c -> Class.draw drags measure c
+    State s -> State.draw drags measure s
+    Entity e -> Entity.draw drags measure e
     Pie p -> Pie.draw measure p
     Quadrant q -> Quadrant.draw measure q
     Gantt g -> Gantt.draw measure g
@@ -144,7 +145,7 @@ draw measure d = do
     Kanban k -> Kanban.draw measure k
     Packet p -> Packet.draw measure p
     Treemap t -> Treemap.draw measure t
-    Requirement r -> Requirement.draw measure r
+    Requirement r -> Requirement.draw drags measure r
     C4 c -> C4.draw measure c
     Block b -> Block.draw measure b
     Architecture x -> Architecture.draw measure x

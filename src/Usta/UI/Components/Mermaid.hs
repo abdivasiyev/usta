@@ -14,18 +14,38 @@ module Usta.UI.Components.Mermaid
 import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.List (findIndex)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
+import System.IO.Unsafe (unsafePerformIO)
 
 import Usta.UI.Components.CommandPalette (shortcut)
 
 import qualified Usta.Diagram as Diagram
+import Usta.Diagram.Scene (Moves)
 import qualified Usta.UI.Components.DiagramView as DiagramView
+
+-- | Where the reader dragged each diagram's nodes, by its source, while
+-- usta runs: the same diagram shows them there inline and fullscreen.
+dragged :: IORef (Map Text (IORef Moves))
+dragged = unsafePerformIO (newIORef Map.empty)
+{-# NOINLINE dragged #-}
+
+dragsOf :: Text -> IO (IORef Moves)
+dragsOf source = do
+  known <- readIORef dragged
+  case Map.lookup source known of
+    Just r -> pure r
+    Nothing -> do
+      r <- newIORef Map.empty
+      modifyIORef' dragged (Map.insert source r)
+      pure r
 
 -- | A diagram in a document: the heading above it and its source.
 type Diagram :: Type
@@ -65,7 +85,8 @@ new siblings source = do
       let document = if null siblings then [Diagram {title = "Diagram", source}] else siblings
           at = fromMaybe 0 (findIndex (\x -> x.source == source) document)
           large = fullscreen figure document at
-      DiagramView.new DiagramView.Config {large = False, fullscreen = Just large} (\measure -> Diagram.draw measure d)
+      drags <- dragsOf source
+      DiagramView.new DiagramView.Config {large = False, fullscreen = Just large, drags = drags} (\moves measure -> Diagram.draw moves measure d)
         >>= #append diagram
   Gtk.toWidget figure
 
@@ -110,7 +131,9 @@ fullscreen from diagrams start = do
         Gtk.widgetGetFirstChild body >>= mapM_ (Gtk.boxRemove body)
         view <- case Diagram.parse d.source of
           Left reason -> GI.new Gtk.Label [#label := reason, #wrap := True, #cssClasses := ["problem"]] >>= Gtk.toWidget
-          Right parsed -> DiagramView.new DiagramView.Config {large = True, fullscreen = Nothing} (\measure -> Diagram.draw measure parsed)
+          Right parsed -> do
+            drags <- dragsOf d.source
+            DiagramView.new DiagramView.Config {large = True, fullscreen = Nothing, drags = drags} (\moves measure -> Diagram.draw moves measure parsed)
         #append body view
         -- The view takes focus, so its zoom keys work at once.
         Gtk.widgetGetFirstChild view >>= mapM_ Gtk.widgetGrabFocus

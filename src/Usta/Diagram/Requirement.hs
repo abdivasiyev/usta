@@ -82,8 +82,8 @@ parse source = go (drop 1 lines') Down [] []
       | otherwise = Nothing
     unquote = T.dropAround (== '"')
 
-draw :: Monad m => Measure m -> Requirements -> m Scene
-draw measure diagram = do
+draw :: Monad m => Moves -> Measure m -> Requirements -> m Scene
+draw drags measure diagram = do
   sized <- for diagram.nodes $ \n -> do
     rows <- concat <$> for n.fields (\(k, v) -> wrap measure (regular 12) 240 (k <> ": " <> v))
     widths <- for (n.name : rows) (fmap (.w) . measure (bold 13))
@@ -106,9 +106,9 @@ draw measure diagram = do
         Up -> Point p.x (bottom - p.y)
         Across -> Point p.y p.x
         Back -> Point (bottom - p.y) p.x
-      centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
+      centers = Map.mapWithKey (dragged drags) (Map.fromList [(p.key, place p.center) | p <- result.placed])
       sizes = Map.fromList [(n.name, s) | (n, s, _) <- sized]
-      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
+      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [Route.unbent drags centers r.from r.to (map place r.points)]) | r <- result.routed]
       taken = snd (foldl' takeRoute (routes, []) (zip diagram.relations labels))
       takeRoute (left, acc) (r, l) = case Map.lookup (r.from, r.to) left of
         Just (ps : more) -> (Map.insert (r.from, r.to) more left, acc <> [(r, l, ps)])
@@ -134,7 +134,7 @@ draw measure diagram = do
           , \m -> [ Rect {at = Point (m.x - l.w / 2 - 4) (m.y - l.h / 2 - 1), size = Size (l.w + 8) (l.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
                   , Text {at = m, text = shown r, font = regular 11, color = Muted, anchor = Middle} ] )
       nodeItems = concat [maybe [] (\c -> box c n s rows) (Map.lookup n.name centers) | (n, s, rows) <- sized]
-  pure (scene 12 (linkItems <> nodeItems))
+  pure (scene 12 (linkItems <> nodeItems <> [handle n.name c s | (n, s, _) <- sized, Just c <- [Map.lookup n.name centers]]))
   where
     shown r = "<<" <> r.kind <> ">>"
     headOr d xs = case xs of

@@ -13,7 +13,9 @@ module Usta.UI.Components.DiagramView
 import Control.Monad (forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.List (sortOn)
+import qualified Data.Map.Strict as Map
 import Data.Kind (Type)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
@@ -39,7 +41,7 @@ import qualified Usta.UI.Highlight as Highlight
 -- The view zooms and pans inside its own size, so a page around it keeps
 -- its scrolling: Ctrl + scroll and pinch zoom around the pointer, dragging
 -- pans, and the tools in its corner show on hover or focus.
-new :: Config -> (Measure IO -> IO Scene) -> IO Gtk.Widget
+new :: Config -> (Moves -> Measure IO -> IO Scene) -> IO Gtk.Widget
 new cfg layout = do
   area <- GI.new Gtk.DrawingArea [#hexpand := True, #vexpand := cfg.large, #focusable := True]
   let measure font text = do
@@ -47,28 +49,32 @@ new cfg layout = do
         Pango.fontDescriptionFromString (describe font) >>= Pango.layoutSetFontDescription l . Just
         (w', h') <- Pango.layoutGetPixelSize l
         pure Size {w = fromIntegral w', h = fromIntegral h'}
-  laid <- layout measure
-  -- Text reaches as far as it is wide; the canvas grows (and the items
-  -- move right or down) so none of it is cut off.
-  corners <- for laid.items $ \item -> case item of
-    Text {at = p, text = t, font = f, anchor = a} -> do
-      s <- measure f t
-      let x0 = case a of
-            Start -> p.x
-            Middle -> p.x - s.w / 2
-            End -> p.x - s.w
-      pure [(x0, p.y - s.h / 2), (x0 + s.w, p.y + s.h / 2)]
-    _ -> pure (extent item)
-  let points = concat corners
-      dx = max 0 (negate (minimum (0 : map fst points)) + 4)
-      dy = max 0 (negate (minimum (0 : map snd points)) + 4)
-      width = max laid.size.w (maximum (0 : map fst points) + dx + 4)
-      height = max laid.size.h (maximum (0 : map snd points) + dy + 4)
-      drawn = Scene {size = Size width height, items = map (translate dx dy) laid.items}
+      -- Laid out again whenever a node is dragged.
+      arrange drags = do
+        laid <- layout drags measure
+        -- Text reaches as far as it is wide; the canvas grows (and the
+        -- items move right or down) so none of it is cut off.
+        corners <- for laid.items $ \item -> case item of
+          Text {at = p, text = t, font = f, anchor = a} -> do
+            s <- measure f t
+            let x0 = case a of
+                  Start -> p.x
+                  Middle -> p.x - s.w / 2
+                  End -> p.x - s.w
+            pure [(x0, p.y - s.h / 2), (x0 + s.w, p.y + s.h / 2)]
+          _ -> pure (extent item)
+        let points = concat corners
+            dx = max 0 (negate (minimum (0 : map fst points)) + 4)
+            dy = max 0 (negate (minimum (0 : map snd points)) + 4)
+            width = max laid.size.w (maximum (0 : map fst points) + dx + 4)
+            height = max laid.size.h (maximum (0 : map snd points) + dy + 4)
+        pure Scene {size = Size width height, items = map (translate dx dy) laid.items}
+  shown <- readIORef cfg.drags >>= arrange >>= newIORef
+  let fitContent = unless cfg.large $ readIORef shown >>= \drawn ->
+        GI.set area [#contentWidth := ceiling drawn.size.w, #contentHeight := ceiling drawn.size.h]
   -- In a page the view is as large as the scene; large, it takes the room
   -- it is given.
-  unless cfg.large $
-    GI.set area [#contentWidth := ceiling drawn.size.w, #contentHeight := ceiling drawn.size.h]
+  fitContent
   -- Nothing until the reader zooms or pans: until then the scene sits in
   -- the middle, at its own size or, large, fitted, whatever the size.
   let start = if cfg.large then fitted else actual
@@ -78,12 +84,26 @@ new cfg layout = do
         w <- Gtk.widgetGetWidth area
         h <- Gtk.widgetGetHeight area
         pure (fromIntegral w, fromIntegral h)
-      current = readIORef camera >>= maybe (uncurry (start drawn.size) <$> sizeOf) pure
+      current = do
+        drawn <- readIORef shown
+        readIORef camera >>= maybe (uncurry (start drawn.size) <$> sizeOf) pure
+  -- The node under the pointer, or the one being dragged.
+  pointed <- newIORef (Nothing :: Maybe Text)
   Gtk.drawingAreaSetDrawFunc area $ Just $ \_ context w h -> do
     palette <- Highlight.currentPalette
+    drawn <- readIORef shown
     c <- fromMaybe (start drawn.size (fromIntegral w) (fromIntegral h)) <$> readIORef camera
     renderWithContext (Cairo.translate c.dx c.dy >> Cairo.scale c.zoom c.zoom) context
     forM_ drawn.items $ \item -> paint area palette context item
+    marked <- readIORef pointed
+    forM_ [i | i@Handle {key = k} <- drawn.items, Just k == marked] $ \i -> do
+      let (r, g, b) = colorOf palette (Series 0)
+      renderWithContext (do
+        Cairo.newPath
+        rounded (Point (i.at.x - 2) (i.at.y - 2)) (Size (i.size.w + 4) (i.size.h + 4)) 5
+        Cairo.setSourceRGB r g b
+        Cairo.setLineWidth 2
+        Cairo.stroke) context
   Highlight.follow area (const (Gtk.widgetQueueDraw area))
 
   overlay <- GI.new Gtk.Overlay [#child := area, #cssClasses := ["u-diagram"]]
@@ -102,7 +122,11 @@ new cfg layout = do
     button <- Icon.new 16 Icon.Fullscreen >>= Gtk.toWidget >>= \g -> tool g "Fullscreen (F)"
     void $ GI.on button #clicked open
     #append tools button
-  minimap <- if cfg.large then Just <$> mapOf area drawn current else pure Nothing
+  -- Shown once a node is moved: puts them all back.
+  resetButton <- glyph "↺" >>= \g -> tool g "Reset layout (R)"
+  readIORef cfg.drags >>= \d -> GI.set resetButton [#visible := not (Map.null d)]
+  Gtk.boxPrepend tools resetButton
+  minimap <- if cfg.large then Just <$> mapOf area (readIORef shown) current else pure Nothing
   -- Until the reader zooms, the percentage follows the size the view gets.
   void $ GI.on area #resize $ \_ _ -> do
     untouched <- isNothing <$> readIORef camera
@@ -120,14 +144,27 @@ new cfg layout = do
         (w, h) <- sizeOf
         at <- fromMaybe (w / 2, h / 2) <$> readIORef pointer
         current >>= place . zoomAround factor at
-      fit = sizeOf >>= place . uncurry (fitted drawn.size)
-      reset = sizeOf >>= place . uncurry (actual drawn.size)
+      fit = readIORef shown >>= \drawn -> sizeOf >>= place . uncurry (fitted drawn.size)
+      reset = readIORef shown >>= \drawn -> sizeOf >>= place . uncurry (actual drawn.size)
+      relayout = do
+        readIORef cfg.drags >>= arrange >>= writeIORef shown
+        mapM_ Gtk.widgetQueueDraw minimap
+      resetLayout = do
+        writeIORef cfg.drags Map.empty
+        relayout
+        fitContent
+        writeIORef camera Nothing
+        GI.set resetButton [#visible := False]
+        current >>= \c -> GI.set percent [#label := percentOf c]
+        Gtk.widgetQueueDraw area
   void $ GI.on zoomOut #clicked (zoomBy (1 / step))
   void $ GI.on zoomIn #clicked (zoomBy step)
   void $ GI.on percent #clicked reset
   void $ GI.on fitButton #clicked fit
+  void $ GI.on resetButton #clicked resetLayout
 
   -- The tools show while the pointer is over the diagram or it has focus.
+  dragging <- newIORef False
   hovered <- newIORef False
   focused <- newIORef False
   let showTools = unless cfg.large $ do
@@ -135,8 +172,26 @@ new cfg layout = do
         GI.set tools [#visible := on']
   motion <- GI.new Gtk.EventControllerMotion []
   void $ GI.on motion #enter $ \_ _ -> writeIORef hovered True >> showTools
-  void $ GI.on motion #leave $ writeIORef hovered False >> writeIORef pointer Nothing >> showTools
-  void $ GI.on motion #motion $ \x y -> writeIORef pointer (Just (x, y))
+  void $ GI.on motion #leave $ do
+    writeIORef hovered False >> writeIORef pointer Nothing >> showTools
+    busy <- readIORef dragging
+    unless busy $ writeIORef pointed Nothing >> Gtk.widgetQueueDraw area
+  -- Nodes that can be dragged show the grab cursor and an outline.
+  let handleAt x y = do
+        c <- current
+        drawn <- readIORef shown
+        pure (under drawn ((x - c.dx) / c.zoom) ((y - c.dy) / c.zoom))
+  void $ GI.on motion #motion $ \x y -> do
+    writeIORef pointer (Just (x, y))
+    busy <- readIORef dragging
+    unless busy $ do
+      found <- handleAt x y
+      before <- readIORef pointed
+      let key' = (\i -> i.key) <$> found
+      when (key' /= before) $ do
+        writeIORef pointed key'
+        Gtk.widgetSetCursorFromName area (if isNothing key' then Nothing else Just "grab")
+        Gtk.widgetQueueDraw area
   Gtk.widgetAddController overlay motion
   focus <- GI.new Gtk.EventControllerFocus []
   void $ GI.on focus #enter $ writeIORef focused True >> showTools
@@ -161,20 +216,54 @@ new cfg layout = do
     (c, at) <- readIORef pinchStart
     place (zoomAround scale at c)
   Gtk.widgetAddController area pinch
+  -- Dragging a node moves it; dragging anywhere else pans.
   drag <- GI.new Gtk.GestureDrag []
   dragStart <- newIORef (Camera 1 0 0)
-  void $ GI.on drag #dragBegin $ \_ _ -> do
+  grabbed <- newIORef Nothing
+  void $ GI.on drag #dragBegin $ \x y -> do
     void (Gtk.widgetGrabFocus area)
-    current >>= writeIORef dragStart
+    c <- current
+    writeIORef dragStart c
+    found <- handleAt x y
+    drags <- readIORef cfg.drags
+    writeIORef grabbed $ (\i -> (i.key, Map.findWithDefault (Point 0 0) i.key drags, onScreen c i)) <$> found
+    forM_ found $ \i -> do
+      writeIORef dragging True
+      writeIORef pointed (Just i.key)
+      Gtk.widgetSetCursorFromName area (Just "grabbing")
   void $ GI.on drag #dragUpdate $ \ox oy -> do
     c <- readIORef dragStart
-    unless (ox == 0 && oy == 0) $ place c {dx = c.dx + ox, dy = c.dy + oy}
+    readIORef grabbed >>= \case
+      Nothing -> unless (ox == 0 && oy == 0) $ place c {dx = c.dx + ox, dy = c.dy + oy}
+      Just (key, was, (sx, sy)) -> do
+        modifyIORef' cfg.drags (Map.insert key (Point (was.x + ox / c.zoom) (was.y + oy / c.zoom)))
+        relayout
+        GI.set resetButton [#visible := True]
+        -- The scene may grow or shrink around the node: the camera keeps
+        -- the node under the pointer.
+        drawn <- readIORef shown
+        case [onScreen (Camera c.zoom 0 0) i | i@Handle {key = k} <- drawn.items, k == key] of
+          (nx, ny) : _ -> place c {dx = sx + ox - nx, dy = sy + oy - ny}
+          [] -> Gtk.widgetQueueDraw area
+  void $ GI.on drag #dragEnd $ \_ _ -> do
+    held <- readIORef grabbed
+    writeIORef grabbed Nothing
+    writeIORef dragging False
+    forM_ held $ \_ -> do
+      Gtk.widgetSetCursorFromName area (Just "grab")
+      -- In a page, the view takes the size the moved diagram needs.
+      unless cfg.large $ do
+        c <- current
+        fitContent
+        writeIORef camera (Just c)
+        Gtk.widgetQueueDraw area
   Gtk.widgetAddController area drag
 
   keys <- GI.new Gtk.ShortcutController []
   forM_ ["<Primary>plus", "<Primary>equal", "<Primary>KP_Add"] $ \k -> shortcut keys k (zoomBy step)
   forM_ ["<Primary>minus", "<Primary>KP_Subtract"] $ \k -> shortcut keys k (zoomBy (1 / step))
   shortcut keys "<Primary>0" fit
+  shortcut keys "r" resetLayout
   forM_ cfg.fullscreen $ shortcut keys "f"
   Gtk.widgetAddController overlay keys
   Gtk.toWidget overlay
@@ -187,15 +276,19 @@ data Config = Config
     -- map of the whole scene in the corner.
   , fullscreen :: Maybe (IO ())
     -- ^ Shows the diagram large; offered as a tool and the F key.
+  , drags :: IORef Moves
+    -- ^ Where the reader dragged the nodes; kept by the caller, so a
+    -- second view of the diagram shows them there too.
   }
 
 -- | The whole scene small, with the part the view shows outlined.
-mapOf :: Gtk.DrawingArea -> Scene -> IO Camera -> IO Gtk.Widget
-mapOf view whole current = do
+mapOf :: Gtk.DrawingArea -> IO Scene -> IO Camera -> IO Gtk.Widget
+mapOf view scene' current = do
   m <- GI.new Gtk.DrawingArea [ #contentWidth := 140, #contentHeight := 90, #canTarget := False
                               , #halign := Gtk.AlignEnd, #valign := Gtk.AlignEnd, #cssClasses := ["minimap"] ]
   Gtk.drawingAreaSetDrawFunc m $ Just $ \_ context w h -> do
     palette <- Highlight.currentPalette
+    whole <- scene'
     c <- current
     vw <- fromIntegral <$> Gtk.widgetGetWidth view
     vh <- fromIntegral <$> Gtk.widgetGetHeight view
@@ -219,6 +312,19 @@ mapOf view whole current = do
       Cairo.stroke) context
   Highlight.follow m (const (Gtk.widgetQueueDraw m))
   Gtk.toWidget m
+
+-- | The smallest node handle over a scene point, so a node inside
+-- another is found before it.
+under :: Scene -> Double -> Double -> Maybe Item
+under drawn x y = case sortOn (\i -> i.size.w * i.size.h) hits of
+  i : _ -> Just i
+  [] -> Nothing
+  where
+    hits = [i | i@Handle {} <- drawn.items, x >= i.at.x, x <= i.at.x + i.size.w, y >= i.at.y, y <= i.at.y + i.size.h]
+
+-- | Where a handle's centre is in the view.
+onScreen :: Camera -> Item -> (Double, Double)
+onScreen c i = (c.dx + c.zoom * (i.at.x + i.size.w / 2), c.dy + c.zoom * (i.at.y + i.size.h / 2))
 
 percentOf :: Camera -> Text
 percentOf c = T.pack (show (round (c.zoom * 100) :: Int)) <> "%"
@@ -260,6 +366,7 @@ describe font =
 
 paint :: Gtk.DrawingArea -> Highlight.Palette -> GICairo.Context -> Item -> IO ()
 paint area palette context item = case item of
+  Handle {} -> pure ()
   Rect {at = p, size = s, radius = rad, fill = f, edge = e} -> shape f e (rounded p s rad)
   Polygon {points = ps, fill = f, edge = e} -> shape f e $ case ps of
     first : rest -> Cairo.moveTo first.x first.y >> mapM_ (\q -> Cairo.lineTo q.x q.y) rest >> Cairo.closePath

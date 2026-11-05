@@ -100,11 +100,14 @@
           aeson
           aeson-pretty
           base
+          base64-bytestring
           bytestring
           case-insensitive
           containers
+          cryptohash-sha256
           directory
           filepath
+          gi-glib
           hedgehog
           http-client
           http-types

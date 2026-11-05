@@ -104,6 +104,7 @@
           directory
           filepath
           hedgehog
+          persistent
           tasty
           tasty-hedgehog
           tasty-hunit

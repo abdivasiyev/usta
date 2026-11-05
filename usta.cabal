@@ -175,6 +175,7 @@ executable usta
     Usta.UI.Highlight
     Usta.UI.Gallery
     Usta.UI.Page
+    Usta.UI.Browser
     Usta.UI.Quiet
     Usta.UI.Scroll
     Usta.UI.TextKeys

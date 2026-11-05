@@ -9,6 +9,7 @@ module Usta.Mermaid
   , Shape (..)
   , Node (..)
   , Stroke (..)
+  , End (..)
   , Edge (..)
   , Group (..)
   , Flowchart (..)
@@ -44,13 +45,22 @@ type Stroke :: Type
 data Stroke = Solid | Dotted | Thick
   deriving stock (Eq, Show)
 
+-- | What an edge ends in at a node: "-->" an arrow, "--o" a circle,
+-- "--x" a cross; "<-->" has one at both ends.
+type End :: Type
+data End = Open | Pointed | Round | Crossed
+  deriving stock (Eq, Show)
+
 type Edge :: Type
 data Edge = Edge
   { from :: Text
   , to :: Text
   , label :: Maybe Text
   , stroke :: Stroke
-  , arrow :: Bool
+  , start :: End
+    -- ^ At @from@.
+  , finish :: End
+    -- ^ At @to@.
   }
   deriving stock (Eq, Show)
 
@@ -75,11 +85,11 @@ data Flowchart = Flowchart
 
 -- | A flowchart, or why usta does not draw this diagram.
 parse :: Text -> Either Text Flowchart
-parse source = case filter (not . T.null) (map clean (T.lines source)) of
+parse source = case filter (not . T.null) (concatMap (map T.strip . T.splitOn ";" . clean) (T.lines source)) of
   [] -> Left "The diagram is empty."
-  header : rest -> do
+  -- The header may share its line with statements: "graph TD; A-->B".
+  header : lines' -> do
     direction <- headerOf header
-    let lines' = concatMap (map T.strip . T.splitOn ";") rest
     statements <- traverse statement lines'
     let defined = concat [ns | (ns, _) <- statements]
         edges = concat [es | (_, es) <- statements]
@@ -149,7 +159,7 @@ chain text = do
           (link, after) <- connector (T.stripStart rest)
           (next, more) <- group (T.stripStart after)
           (ns, es) <- go next more
-          let made = [Edge {from = a.name, to = b.name, label = link.label, stroke = link.stroke, arrow = link.arrow} | a <- previous, b <- next]
+          let made = [Edge {from = a.name, to = b.name, label = link.label, stroke = link.stroke, start = link.start, finish = link.finish} | a <- previous, b <- next]
           pure (previous <> ns, made <> es)
 
 -- | Nodes joined by "&".
@@ -185,12 +195,29 @@ node text
     unquote t = maybe t (T.dropWhileEnd (== '"')) (T.stripPrefix "\"" t)
 
 type Link :: Type
-data Link = Link {label :: Maybe Text, stroke :: Stroke, arrow :: Bool}
+data Link = Link {label :: Maybe Text, stroke :: Stroke, start :: End, finish :: End}
 
--- | "-->", "---", "-.->", "==>", with "|text|" after, or the text inside:
--- "-- text -->", "== text ==>", "-. text .->".
+-- | "-->", "---", "-.->", "==>", "--o", "--x", with "|text|" after, or
+-- the text inside: "-- text -->", "== text ==>", "-. text .->". "<", "o"
+-- or "x" before one ends it at its first node too: "<-->", "o--o".
 connector :: Text -> Either Text (Link, Text)
-connector text
+connector text = case T.uncons text of
+  Just (c, more) | c `elem` ("<ox" :: String), any (`T.isPrefixOf` more) ["--", "==", "-."] -> do
+    (link, rest) <- oneWay more
+    pure (Link {label = link.label, stroke = link.stroke, start = endOf c, finish = link.finish}, rest)
+  _ -> oneWay text
+
+endOf :: Char -> End
+endOf c = case c of
+  '>' -> Pointed
+  '<' -> Pointed
+  'o' -> Round
+  'x' -> Crossed
+  _ -> Open
+
+-- | A connector that ends only at its second node.
+oneWay :: Text -> Either Text (Link, Text)
+oneWay text
   | any (`T.isPrefixOf` text) ["--", "==", "-."] =
       let (symbols, rest) = T.span (`elem` ("-.=>ox" :: String)) text
        in if symbols `elem` ["--", "==", "-."] && maybe False (isSpace . fst) (T.uncons rest)
@@ -201,7 +228,8 @@ connector text
     linkOf symbols =
       Link { label = Nothing
            , stroke = if T.any (== '.') symbols then Dotted else if T.any (== '=') symbols then Thick else Solid
-           , arrow = ">" `T.isSuffixOf` symbols
+           , start = Open
+           , finish = maybe Open (endOf . snd) (T.unsnoc symbols)
            }
     withPipe link rest = case T.uncons rest of
       Just ('|', more) -> let (l, after) = T.breakOn "|" more in (labelled (T.strip l) link, T.drop 1 after)
@@ -220,4 +248,4 @@ connector text
 
 -- | A link with its text; quotes around the text are not part of it.
 labelled :: Text -> Link -> Link
-labelled l link = Link {label = Just (T.dropAround (== '"') l), stroke = link.stroke, arrow = link.arrow}
+labelled l link = Link {label = Just (T.dropAround (== '"') l), stroke = link.stroke, start = link.start, finish = link.finish}

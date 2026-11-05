@@ -8,6 +8,7 @@ module Usta.Diagram.Flowchart
   , boxFor
   , shape
   , edgeOf
+  , headOf
   , penOf
   , nodeFont
   , labelFont
@@ -21,8 +22,8 @@ import Data.Traversable (for)
 import qualified Usta.Diagram.Route as Route
 import Usta.Diagram.Layered (Box (..), Layout (..), Link (..), Placed (..), Routed (..), layered, spacing)
 import Usta.Diagram.Scene hiding (Head (..))
-import Usta.Diagram.Scene (Head (Arrow, NoHead))
-import Usta.Mermaid (Direction (..), Edge (..), Flowchart (..), Group (..), Node (..), Shape (..), Stroke (..))
+import Usta.Diagram.Scene (Head (Arrow, Cross, Dot, NoHead))
+import Usta.Mermaid (Direction (..), Edge (..), End (..), Flowchart (..), Group (..), Node (..), Shape (..), Stroke (..))
 
 -- | A node with its text's size and its own.
 type Sized :: Type
@@ -65,8 +66,8 @@ draw drags measure chart = do
       clipped e ps = case ps of
         first : _ | Just (c0, s0) <- shapeAt e.from, Just (c1, s1) <- shapeAt e.to ->
           let inner = drop 1 (take (length ps - 1) ps)
-              start = edgeOf c0 s0 (headOr (last' c1 ps) inner) 0
-              finish = edgeOf c1 s1 (lastOr first inner) (if e.arrow then 2 else 0)
+              start = edgeOf c0 s0 (headOr (last' c1 ps) inner) (room e.start)
+              finish = edgeOf c1 s1 (lastOr first inner) (room e.finish)
            in Just (start : inner <> [finish])
         _ -> Nothing
       loops = [(e, label, c, s) | (e, label) <- zip chart.edges labels, e.from == e.to, Just (c, s) <- [shapeAt e.from]]
@@ -76,7 +77,7 @@ draw drags measure chart = do
              <> [Route.around (loopSpot c s) z | (_, Just z, c, s) <- loops]
       spots = Route.labelSpots keepOff [(path, if isJust e.label then label else Nothing) | (e, label, path) <- wires]
       edgeItems =
-        concat [ Path {start = headOr (Point 0 0) path, segments = Route.smooth path, line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead}
+        concat [ Path {start = headOr (Point 0 0) path, segments = Route.smooth path, line = penOf e.stroke, begin = headOf e.start, end = headOf e.finish}
                    : maybe [] (\p -> maybe [] (labelAt p) ((,) <$> e.label <*> label)) spot
                | ((e, label, path), spot) <- zip wires spots ]
           <> concatMap loop loops
@@ -84,7 +85,7 @@ draw drags measure chart = do
         let side = c.x + s.box.w / 2
             a = Point {x = side, y = c.y - 8}
             b = Point {x = side, y = c.y + 8}
-         in [ Path {start = a, segments = [CurveTo (Point (side + 34) (c.y - 30)) (Point (side + 34) (c.y + 30)) b], line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead} ]
+         in [ Path {start = a, segments = [CurveTo (Point (side + 34) (c.y - 30)) (Point (side + 34) (c.y + 30)) b], line = penOf e.stroke, begin = headOf e.start, end = headOf e.finish} ]
               <> maybe [] (labelAt (loopSpot c s)) ((,) <$> e.label <*> label)
       labelAt p (t, size') =
         [ Rect {at = Point (p.x - size'.w / 2 - 4) (p.y - size'.h / 2 - 1), size = Size (size'.w + 8) (size'.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
@@ -176,3 +177,15 @@ penOf stroke = case stroke of
   Dotted -> dashed (pen Line 1.4)
   Thick -> pen Line 2.6
 
+
+-- | How an edge's end is drawn.
+headOf :: End -> Head
+headOf end = case end of
+  Open -> NoHead
+  Pointed -> Arrow
+  Round -> Dot
+  Crossed -> Cross
+
+-- | The gap an end leaves at its node, for its head.
+room :: End -> Double
+room end = if end == Open then 0 else 2

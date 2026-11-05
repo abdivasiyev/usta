@@ -17,10 +17,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Traversable (for)
 
-import Usta.Diagram.Flowchart (Sized (..), boxFor, edgeOf, labelFont, nodeFont, penOf, shape)
+import Usta.Diagram.Flowchart (Sized (..), boxFor, edgeOf, headOf, labelFont, nodeFont, penOf, shape)
 import qualified Usta.Diagram.Route as Route
 import Usta.Diagram.Scene hiding (Head (..))
-import Usta.Diagram.Scene (Head (Arrow, NoHead))
 import Usta.Mermaid (Edge (..), Node (..), Shape (..), chain, node)
 
 -- | Which way a block arrow points.
@@ -226,7 +225,7 @@ draw measure diagram = do
             m = Route.middle [a, b]
         label <- for (fmap (T.dropAround (== '"')) e.label) (\t -> (t,) <$> measure labelFont t)
         pure $
-          [Path {start = a, segments = [LineTo b], line = penOf e.stroke, begin = NoHead, end = if e.arrow then Arrow else NoHead}]
+          [Path {start = a, segments = [LineTo b], line = penOf e.stroke, begin = headOf e.start, end = headOf e.finish}]
             <> concat
               [ [ Rect {at = Point (m.x - s.w / 2 - 4) (m.y - s.h / 2 - 1), size = Size (s.w + 8) (s.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
                 , Text {at = m, text = t, font = labelFont, color = Muted, anchor = Middle} ]

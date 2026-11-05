@@ -150,6 +150,8 @@ data Actions = Actions
     -- request, which then opens from the fork.
   , canPush :: Repository -> IO (Either Text Bool)
     -- ^ Off the main thread.
+  , newRepository :: Gtk.Widget -> IO ()
+    -- ^ Opens the New repository dialog over the button.
   , visit :: (Text, Text) -> IO (Either Text Repository)
     -- ^ One that is not listed, by host and name, as a link opens it; off
     -- the main thread.
@@ -241,7 +243,13 @@ new actions repositories = do
   offerAll
 
   searchBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["search-bar"]]
-  #append searchBar search
+  searchRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  GI.set search [#hexpand := True]
+  #append searchRow search
+  newButton <- Button.new Button.defaults {Button.label = Just "+ New", Button.small = True, Button.tooltip = Just "New repository"}
+  void $ GI.on newButton #clicked $ Gtk.toWidget newButton >>= actions.newRepository
+  #append searchRow newButton
+  #append searchBar searchRow
   choices <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #homogeneous := True]
   mapM_ (#append choices) [forges, owners]
   #append searchBar choices
@@ -486,9 +494,14 @@ overview actions r realDefault follow = do
     (if on then Gtk.widgetAddCssClass else Gtk.widgetRemoveCssClass) pin "on"
   forkButton <- Button.new Button.defaults {Button.label = Just "⑂ Fork", Button.tooltip = Just "Fork it to you or an organization"}
   void $ GI.on forkButton #clicked $ Gtk.toWidget forkButton >>= actions.fork False r
+  -- The buttons wrap onto more rows when the page is narrow.
+  buttons <- GI.new Gtk.FlowBox [ #selectionMode := Gtk.SelectionModeNone, #columnSpacing := 8, #rowSpacing := 8
+                                , #maxChildrenPerLine := 8, #halign := Gtk.AlignEnd, #valign := Gtk.AlignStart
+                                , #homogeneous := False, #cssClasses := ["repo-buttons"] ]
   forM_ ([star, pin, forkButton] <> mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
-    GI.set b [#valign := Gtk.AlignStart]
-    #append header b
+    GI.set b [#valign := Gtk.AlignStart, #halign := Gtk.AlignEnd]
+    Gtk.flowBoxAppend buttons b
+  #append header buttons
   #append pane header
 
   stats <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
@@ -809,6 +822,7 @@ css = mconcat
   , "window.u-mirror button.decline label.name { font-weight: 500; }"
   , "button.u-button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }"
   , "box.u-repo-pane { background: var(--surface); border-right: 1px solid var(--border); }"
+  , "flowbox.repo-buttons > flowboxchild { padding: 0; }"
   , "box.u-repo-pane box.search-bar { padding: 12px; }"
   , "box.u-repo-pane box.search-bar dropdown > button { min-height: 30px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface); background-image: none; box-shadow: none; font-size: 12px; }"
   , "list.u-repo-list { background: var(--surface); }"

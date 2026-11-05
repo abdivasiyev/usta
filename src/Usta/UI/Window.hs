@@ -106,6 +106,7 @@ import qualified Usta.UI.Pages.ReportProblem as ReportProblem
 import qualified Usta.UI.Components.Pager as Pager
 import qualified Usta.UI.Quiet as Quiet
 import qualified Usta.UI.Components.ForkDialog as ForkDialog
+import qualified Usta.UI.Components.NewRepository as NewRepository
 import qualified Usta.UI.Components.RunWorkflow as RunWorkflow
 import qualified Usta.UI.Components.UpdateBanner as UpdateBanner
 import qualified Usta.UI.Components.WaitingChip as WaitingChip
@@ -434,10 +435,24 @@ buildWith start crashed given app = do
   redrawSidebar <- newIORef (pure ())
   -- The page shows the fork it made, once it exists.
   showFork <- newIORef (\_ _ -> pure ())
+  toRepositories <- newIORef (pure ())
+  -- A new repository opens in the list, on its page.
+  let openNewRepository anchor = do
+        hosts <- map (.host) <$> source.accounts
+        NewRepository.open anchor NewRepository.Dialog
+          { forges = hosts
+          , owners = source.ownersOn
+          , create = \host owner name about private readme -> source.createRepository host Forge.NewRepo
+              {owner = owner, name = name, description = about, private = private, readme = readme}
+          , opened = \host name -> do
+              join (readIORef toRepositories)
+              readIORef showFork >>= \go -> go (host, name) Nothing
+          }
   (repositoryPage, showRepository) <- source.repositories >>= Repositories.new Repositories.Actions
     { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))
     , newPullRequest = \r -> openNewPullRequestIn (Just (pullPlace r))
     , canPush = \r -> source.canPush r.host r.name
+    , newRepository = \anchor -> openNewRepository anchor
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
     , visit = \(host, name) -> source.visit host name
@@ -780,6 +795,7 @@ buildWith start crashed given app = do
               [ command "Sync now" (keys "R") source.syncNow
               , command "New pull request" (keys "Shift P") openNewPullRequest
               , command "New issue" (keys "Shift I") openNewIssue
+              , command "New repository" "" (Gtk.toWidget screens >>= openNewRepository)
               , command "Add forge account" "" openAddAccount
               , command "Open settings" (keys ",") openSettings
               , command "Report a problem" "" (Gtk.toWidget screens >>= \w -> ReportProblem.open w "")
@@ -802,6 +818,7 @@ buildWith start crashed given app = do
           , CommandPalette.search = \words' -> map (foundItem openPullRequest openIssue (\at -> showPage Sidebar.Repositories >> showRepository at Nothing)) <$> source.searchForges words'
           }
   Markdown.openLinksWith openLink
+  writeIORef toRepositories (showPage Sidebar.Repositories)
   rootWidget <- Gtk.toWidget root
   (withPalette, openPalette) <- CommandPalette.new rootWidget paletteModel
   writeIORef paletteOpener openPalette
@@ -1419,7 +1436,7 @@ styles =
   [ Avatar.css, Badge.css, Button.css, Card.css, Forge.css, Icon.css, NavItem.css
   , SearchField.css, Segmented.css, Shortcut.css, Sidebar.css, Inbox.css, PullRequests.css
   , PullRequest.css, Conversation.css, Diff.css, Files.css, Checks.css, Commits.css
-  , UpdateBanner.css, Pager.css, RunWorkflow.css, ForkDialog.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
+  , UpdateBanner.css, Pager.css, RunWorkflow.css, ForkDialog.css, NewRepository.css, NewPullRequest.css, Issues.css, Issue.css, MarkdownEditor.css, CodeView.css, RepositoryFiles.css, ImageView.css, PdfView.css, Markdown.css, Mermaid.css, Thread.css, LabelPicker.css, AssignPickers.css, CommentCard.css, TimelineRow.css, RepositoryActions.css, SidePanel.css, BranchPicker.css, RepositoryCommits.css, RepositoryInsights.css, RepositoryReleases.css, FileTools.css
   , NewIssue.css, Repositories.css, Settings.css, CommandPalette.css, AddAccount.css, Welcome.css, SyncStatus.css, WaitingChip.css, ReportProblem.css, Skeleton.css, Progress.css
   , windowCss
   ]

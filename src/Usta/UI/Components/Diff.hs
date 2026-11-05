@@ -574,8 +574,9 @@ lineRow line = do
   gutter old >>= #append row
   gutter new' >>= #append row
   label sign ["sign"] >>= #append row
+  -- A long line wraps in place of scrolling the diff sideways.
   text <- label "" ["code"]
-  GI.set text [#hexpand := True, #selectable := True]
+  GI.set text [#hexpand := True, #selectable := True, #wrap := True, #wrapMode := Pango.WrapModeWordChar]
   #append row text
   pure (row, text)
   where
@@ -590,13 +591,14 @@ gutter :: Text -> IO Gtk.Label
 gutter n = do
   l <- GI.new Gtk.Label [ #label := n
                         , #xalign := 1
+                        , #valign := Gtk.AlignStart
                         , #widthRequest := (44 :: Int32)
                         , #cssClasses := ["gutter"]
                         ]
   pure l
 
 label :: Text -> [Text] -> IO Gtk.Label
-label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
+label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #valign := Gtk.AlignStart, #cssClasses := classes]
 
 css :: Text
 css = mconcat

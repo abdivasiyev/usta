@@ -22,7 +22,12 @@
     # Written by hand instead of callCabal2nix: that runs cabal2nix at
     # evaluation time, built with the default GHC rather than ghc912.
     # Keep the dependencies in sync with usta.cabal.
+    # The icon themes for the wrapper's XDG_DATA_DIRS.
+    iconThemesFor = pkgs: ''
+      gappsWrapperArgs+=(--prefix XDG_DATA_DIRS : "${pkgs.adwaita-icon-theme}/share" --prefix XDG_DATA_DIRS : "${pkgs.hicolor-icon-theme}/share")
+    '';
     ustaFor = pkgs: let
+      iconThemes = iconThemesFor pkgs;
       hsPkgs = haskellPackagesFor pkgs;
     in
       (hsPkgs.mkDerivation {
@@ -86,6 +91,9 @@
         # Lets the installed binary find GTK's schemas and the icon theme.
         nativeBuildInputs = (old.nativeBuildInputs or []) ++ [pkgs.wrapGAppsHook4];
         buildInputs = (old.buildInputs or []) ++ [pkgs.gtk4 pkgs.adwaita-icon-theme];
+        # wrapGAppsHook adds schemas, not icon themes: without these the
+        # icons GTK does not carry itself show as missing.
+        preFixup = (old.preFixup or "") + iconThemes;
         # On Linux the desktop entry (which claims usta:// links), the
         # AppStream data and the icon.
         postInstall =
@@ -102,6 +110,7 @@
     # it loads everything from /nix/store. bin/usta is there too.
     ustaAppFor = pkgs: let
       usta = ustaFor pkgs;
+      iconThemes = iconThemesFor pkgs;
     in
       pkgs.stdenvNoCC.mkDerivation {
         pname = "usta-app";
@@ -110,6 +119,7 @@
         nativeBuildInputs = [pkgs.wrapGAppsHook4 pkgs.makeShellWrapper pkgs.librsvg pkgs.libicns];
         buildInputs = [pkgs.gtk4 pkgs.adwaita-icon-theme pkgs.gsettings-desktop-schemas pkgs.librsvg];
         dontWrapGApps = true;
+        preFixup = iconThemes;
         installPhase = ''
           contents=$out/Applications/usta.app/Contents
           mkdir -p $contents/MacOS $contents/Resources $out/bin

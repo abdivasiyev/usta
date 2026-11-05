@@ -97,7 +97,7 @@ reach kind = case kind of
 -- | The token scopes each forge needs for what usta shows.
 scopes :: Forge.Kind -> [Text]
 scopes kind = case kind of
-  Forge.GitHub -> ["repo", "read:user", "notifications"]
+  Forge.GitHub -> ["repo", "read:org", "read:user", "notifications"]
   Forge.GitLab -> ["api", "read_user"]
   Forge.Forgejo -> ["read:user", "read:repository", "write:issue", "read:notification"]
 

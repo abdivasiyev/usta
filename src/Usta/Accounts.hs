@@ -35,6 +35,8 @@ import Usta.DB.Mirror (choose)
 import Usta.DB.Schema.Account (AccountId)
 import Usta.Forge (CloneUrls (..), Failure (..), Forge (..))
 import Usta.Forge.Forgejo (forgejo, siteOf, whoAmI)
+import Usta.Forge.GitHub (github)
+import qualified Usta.Forge.GitHub as GitHub
 import qualified Usta.OAuth as OAuth
 import Usta.Keyring (Keyring (..), KeyringError (..))
 import Usta.Mirrors (Mirrors (..))
@@ -114,7 +116,7 @@ describe problem = case problem of
   TokenRefused -> "The forge refused this token. Check that it is current and has the scopes listed."
   Unreachable -> "The server could not be reached."
   ForgeSaid message -> "The forge said: " <> message
-  NotYet GitHub -> "Signing in to GitHub comes with the GitHub client."
+  NotYet GitHub -> "Signing in to GitHub is not available."
   NotYet GitLab -> "Signing in to GitLab comes with the GitLab client."
   NotYet Forgejo -> "Signing in to Forgejo is not available."
   KeyringSaid message -> "The keyring did not keep the token: " <> message
@@ -151,10 +153,18 @@ connect settings = do
           Right Nothing -> settings.sync.report Status {accountId = key, state = Failed SignedOut}
           Left (KeyringError message) ->
             settings.sync.report Status {accountId = key, state = Failed (Refused message)}
+      GitHub -> do
+        found <- try (settings.keyring.load account.host account.login)
+        case found of
+          Right (Just token) -> startGitHub forges key account.host account.login (pure token)
+          Right Nothing -> settings.sync.report Status {accountId = key, state = Failed SignedOut}
+          Left (KeyringError message) ->
+            settings.sync.report Status {accountId = key, state = Failed (Refused message)}
       other -> settings.sync.report Status {accountId = key, state = Failed (Refused (describe (NotYet other)))}
 
-    start forges key host login token = do
-      forge <- forgejo settings.manager (settings.forgejoApi host) host token
+    start forges key host login token = forgejo settings.manager (settings.forgejoApi host) host token >>= running forges key login
+    startGitHub forges key host login token = github settings.manager host token >>= running forges key login
+    running forges key login forge = do
       atomicModifyIORef' forges (\m -> (Map.insert key (login, forge) m, ()))
       settings.sync.add key forge
 
@@ -206,23 +216,26 @@ connect settings = do
       other -> pure (Left (NotYet other))
 
     signIn forges kind host token = case kind of
-      Forgejo -> do
-        checked <- try (whoAmI settings.manager (settings.forgejoApi host) token)
-        case checked of
-          Left SignedOut -> pure (Left TokenRefused)
-          Left Offline -> pure (Left Unreachable)
-          Left (Refused message) -> pure (Left (ForgeSaid message))
-          Right login -> do
-            kept <- try (settings.keyring.save host login token)
-            case kept of
-              Left (KeyringError message) -> pure (Left (KeyringSaid message))
-              Right () -> do
-                now <- getCurrentTime
-                key <- run settings.pool $
-                  saveAccount now Account {forge = kind, host = host, login = login, authMethod = AccessToken}
-                start forges key host login (pure token)
-                pure (Right key)
+      Forgejo -> signInWith (whoAmI settings.manager (settings.forgejoApi host) token) (start forges)
+      GitHub -> signInWith (GitHub.whoAmI settings.manager host token) (startGitHub forges)
       other -> pure (Left (NotYet other))
+      where
+        signInWith asking begin = do
+          checked <- try asking
+          case checked of
+            Left SignedOut -> pure (Left TokenRefused)
+            Left Offline -> pure (Left Unreachable)
+            Left (Refused message) -> pure (Left (ForgeSaid message))
+            Right login -> do
+              kept <- try (settings.keyring.save host login token)
+              case kept of
+                Left (KeyringError message) -> pure (Left (KeyringSaid message))
+                Right () -> do
+                  now <- getCurrentTime
+                  key <- run settings.pool $
+                    saveAccount now Account {forge = kind, host = host, login = login, authMethod = AccessToken}
+                  begin key host login (pure token)
+                  pure (Right key)
 
     -- The token goes first: if the keyring refuses, the account stays as
     -- it was, still syncing.

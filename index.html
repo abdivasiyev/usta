@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>usta: your forges in one native window</title>
+<meta name="description" content="usta is a fast native desktop client for GitHub and Forgejo: one inbox for reviews, mentions and failed checks, pull requests read from real git diffs, and it works offline.">
+<meta property="og:title" content="usta: your forges in one native window">
+<meta property="og:description" content="A fast native desktop client for GitHub and Forgejo, for macOS and Linux.">
+<meta property="og:url" content="https://usta.azizovich.uz/">
+<link rel="icon" href="usta.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F7F8FA}
+a{color:#2F5FD0}a:hover{color:#1E46A8}
+</style>
+</head>
+<body>
+<div style="font-family: Inter, system-ui, sans-serif; color: #1B1D21; background: #F7F8FA; min-width: 0">
+
+<!-- Top bar -->
+<header style="max-width: 1200px; margin: 0 auto; padding: 22px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px; justify-content: space-between">
+  <a href="#top" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #1B1D21">
+    <svg width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#2F5FD0"></rect><path d="M9 22H50Q56 22 56 28H43Q39 28 39 33V39H46V48H18V39H25V33Q25 28 20 28H18Q12 28 9 22Z" fill="#FFFFFF"></path><path d="M44 15l3-5M36 14V8M28 15l-3-5" stroke="#F2C25C" stroke-width="3" stroke-linecap="round"></path></svg>
+    <span style="font-size: 22px; font-weight: 800; letter-spacing: -0.02em">usta</span>
+    <span style="font-size: 12px; font-weight: 600; color: #1E46A8; background: #E3EAFB; padding: 3px 8px; border-radius: 999px">Beta</span>
+  </a>
+  <nav style="display: flex; flex-wrap: wrap; gap: 24px; font-size: 15px; font-weight: 500">
+    <a href="#features" style="color: #3B4049; text-decoration: none">Features</a>
+    <a href="#review" style="color: #3B4049; text-decoration: none">Reviews</a>
+    <a href="#install" style="color: #3B4049; text-decoration: none">Install</a>
+    <a href="https://github.com/abdivasiyev/usta" style="color: #3B4049; text-decoration: none">GitHub</a>
+  </nav>
+</header>
+
+<!-- Hero -->
+<section id="top" style="max-width: 1200px; margin: 0 auto; padding: 56px 24px 32px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 22px">
+  <h1 style="margin: 0; font-size: clamp(40px, 6vw, 68px); line-height: 1.04; font-weight: 800; letter-spacing: -0.035em; max-width: 900px">Your forges, in one fast native window.</h1>
+  <p style="margin: 0; font-size: 19px; line-height: 1.55; color: #4B515B; max-width: 680px">usta is a desktop client for GitHub and Forgejo. One inbox for reviews, mentions and failed checks; pull requests read from real git diffs; and it keeps working when the network does not.</p>
+  <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 6px">
+    <a href="https://github.com/abdivasiyev/usta/releases/latest" style="display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 10px; background: #2F5FD0; color: #FFFFFF; font-weight: 600; font-size: 16px; text-decoration: none">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
+      Download for macOS
+    </a>
+    <a href="https://github.com/abdivasiyev/usta/releases/latest" style="display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 10px; background: #FFFFFF; color: #1B1D21; border: 1px solid #D3D7DE; font-weight: 600; font-size: 16px; text-decoration: none">Download for Linux</a>
+  </div>
+  <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #3B4049; background: #ECEEF2; padding: 8px 14px; border-radius: 8px">nix run github:abdivasiyev/usta</code>
+</section>
+
+<!-- Illustration: the inbox -->
+<section style="max-width: 1200px; margin: 0 auto; padding: 24px 24px 72px">
+  <div role="img" aria-label="The usta window: the inbox with three notifications from two forges and the pull request chosen" style="border-radius: 14px; overflow: hidden; border: 1px solid #D3D7DE; box-shadow: 0 30px 80px rgba(27,29,33,0.16), 0 6px 18px rgba(27,29,33,0.08); background: #FFFFFF">
+    <!-- window bar -->
+    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid #E4E7EC; background: #FFFFFF">
+      <div style="display: flex; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 999px; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 999px; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 999px; background: #28C840"></span></div>
+      <div style="display: flex; align-items: center; gap: 8px; font-weight: 700"><svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#2F5FD0"></rect><path d="M9 22H50Q56 22 56 28H43Q39 28 39 33V39H46V48H18V39H25V33Q25 28 20 28H18Q12 28 9 22Z" fill="#FFFFFF"></path></svg>usta</div>
+      <div style="flex: 1 1 200px; max-width: 520px; display: flex; align-items: center; justify-content: space-between; border: 1px solid #D3D7DE; border-radius: 8px; padding: 7px 12px; font-size: 13px; color: #5B616B"><span>Search pull requests, issues, repositories</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; border: 1px solid #D3D7DE; border-radius: 4px; padding: 1px 5px">⌘K</span></div>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #3B4049"><span style="width: 8px; height: 8px; border-radius: 999px; background: #1F8A4C"></span>Synced just now</div>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; min-height: 440px">
+      <!-- sidebar -->
+      <div style="flex: 0 0 210px; background: #F1F3F6; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 14px">
+        <div style="display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 8px; background: #DDE5F8; font-weight: 700"><span>Inbox</span><span style="color: #1E46A8">4</span></div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 10px"><span>Review requests</span><span style="color: #5B616B">2</span></div>
+        <div style="padding: 8px 10px">Assigned to me</div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 10px"><span>Mentions</span><span style="color: #5B616B">1</span></div>
+        <div style="padding: 8px 10px">Done</div>
+        <div style="height: 14px"></div>
+        <div style="padding: 8px 10px">Pull requests</div>
+        <div style="padding: 8px 10px">Issues</div>
+        <div style="padding: 8px 10px">Repositories</div>
+        <div style="padding: 16px 10px 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #5B616B">FORGES</div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 10px"><span style="width: 8px; height: 8px; border-radius: 999px; background: #1B1D21"></span>github.com</div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 6px 10px"><span style="width: 8px; height: 8px; border-radius: 999px; background: #C2410C"></span>codeberg.org</div>
+      </div>
+      <!-- list -->
+      <div style="flex: 1 1 340px; min-width: 0; border-right: 1px solid #E4E7EC">
+        <div style="display: flex; gap: 6px; padding: 12px 14px; border-bottom: 1px solid #E4E7EC; font-size: 13px"><span style="background: #1B1D21; color: #FFFFFF; padding: 5px 11px; border-radius: 7px">All</span><span style="padding: 5px 11px; color: #3B4049">Unread</span><span style="padding: 5px 11px; color: #3B4049">Participating</span></div>
+        <div style="padding: 14px 16px; border-bottom: 1px solid #EEF0F3; background: #EDF2FD; box-shadow: inset 3px 0 0 #2F5FD0">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; color: #5B616B; font-family: 'JetBrains Mono', monospace"><span>lumen/core #128</span><span style="font-family: Inter, sans-serif">5m</span></div>
+          <div style="font-weight: 600; margin: 3px 0 6px">feat: stream sync progress to the window</div>
+          <span style="font-size: 12px; color: #8A5300; background: #FDF1D8; padding: 2px 8px; border-radius: 6px">Review requested</span>
+        </div>
+        <div style="padding: 14px 16px; border-bottom: 1px solid #EEF0F3">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; color: #5B616B; font-family: 'JetBrains Mono', monospace"><span>orbit/cli #47</span><span style="font-family: Inter, sans-serif">22m</span></div>
+          <div style="font-weight: 600; margin: 3px 0 6px">fix: retry when the forge is offline</div>
+          <span style="font-size: 12px; color: #A1261D; background: #FCE4E2; padding: 2px 8px; border-radius: 6px">Checks failed</span>
+        </div>
+        <div style="padding: 14px 16px; border-bottom: 1px solid #EEF0F3">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; color: #5B616B; font-family: 'JetBrains Mono', monospace"><span>lumen/docs #12</span><span style="font-family: Inter, sans-serif">1h</span></div>
+          <div style="font-weight: 600; margin: 3px 0 6px">Explain how local mirrors are kept</div>
+          <span style="font-size: 12px; color: #1E46A8; background: #E3EAFB; padding: 2px 8px; border-radius: 6px">Mentioned</span>
+        </div>
+        <div style="padding: 14px 16px">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; color: #5B616B; font-family: 'JetBrains Mono', monospace"><span>orbit/site #9</span><span style="font-family: Inter, sans-serif">3h</span></div>
+          <div style="font-weight: 600; margin: 3px 0 6px">chore: move the docs to the new theme</div>
+          <span style="font-size: 12px; color: #8A5300; background: #FDF1D8; padding: 2px 8px; border-radius: 6px">Review requested</span>
+        </div>
+      </div>
+      <!-- detail -->
+      <div style="flex: 1.3 1 380px; min-width: 0; padding: 22px 26px; display: flex; flex-direction: column; gap: 16px">
+        <div style="font-size: 13px; color: #5B616B; font-family: 'JetBrains Mono', monospace">lumen/core #128 <span style="font-family: Inter, sans-serif; color: #1F7A45; background: #DDF3E5; padding: 2px 8px; border-radius: 999px; margin-left: 6px">Open</span></div>
+        <div style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em">feat: stream sync progress to the window</div>
+        <div style="font-size: 13px; color: #4B515B"><span style="font-family: 'JetBrains Mono', monospace; background: #EEF0F3; padding: 2px 6px; border-radius: 4px">mira:sync-progress</span> into <span style="font-family: 'JetBrains Mono', monospace; background: #EEF0F3; padding: 2px 6px; border-radius: 4px">main</span> · opened 5 min ago</div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+          <div style="border: 1px solid #E4E7EC; border-radius: 10px; padding: 10px 12px"><div style="font-size: 12px; color: #5B616B">Checks</div><div style="font-weight: 700; color: #1F7A45">4 of 4 passed</div></div>
+          <div style="border: 1px solid #E4E7EC; border-radius: 10px; padding: 10px 12px"><div style="font-size: 12px; color: #5B616B">Changes</div><div style="font-weight: 700"><span style="color: #1F7A45">+86</span> <span style="color: #B4261C">−14</span> in 5 files</div></div>
+          <div style="border: 1px solid #E4E7EC; border-radius: 10px; padding: 10px 12px"><div style="font-size: 12px; color: #5B616B">Your review</div><div style="font-weight: 700; color: #8A5300">Requested</div></div>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px"><span style="background: #2F5FD0; color: #FFFFFF; font-weight: 600; padding: 9px 16px; border-radius: 8px; font-size: 14px">Open review</span><span style="border: 1px solid #D3D7DE; padding: 9px 16px; border-radius: 8px; font-size: 14px">Mark as done</span></div>
+        <div style="border-top: 1px solid #E4E7EC; padding-top: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 14px">
+          <div style="display: flex; gap: 10px; align-items: center"><span style="width: 26px; height: 26px; border-radius: 999px; background: #F6DCC8; color: #8A3B0E; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">MI</span><span><b>mira</b> asked for your review · 5m</span></div>
+          <div style="display: flex; gap: 10px; align-items: center"><span style="width: 26px; height: 26px; border-radius: 999px; background: #D8E7DC; color: #1F5A35; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">TO</span><span><b>tomas</b> approved these changes · 3m</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features" style="background: #FFFFFF; border-top: 1px solid #E4E7EC; border-bottom: 1px solid #E4E7EC">
+  <div style="max-width: 1200px; margin: 0 auto; padding: 80px 24px">
+    <h2 style="margin: 0 0 12px; font-size: 40px; font-weight: 800; letter-spacing: -0.03em">Everything a review needs, nothing it waits for.</h2>
+    <p style="margin: 0 0 44px; font-size: 18px; color: #4B515B; max-width: 720px">Written in Haskell with GTK 4, usta opens in a blink and keeps your forges in a local cache, so the pages you know are already there.</p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px">
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13l2-8h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">One inbox, every forge</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">Review requests, mentions and failed checks from GitHub and Forgejo in one list, with desktop notifications when something needs you.</p>
+      </div>
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12M18 9v12M6 15a3 3 0 100 6 3 3 0 000-6zM18 3a3 3 0 100 6 3 3 0 000-6zM18 9c0 4-6 3-6 6"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">Reviews on real git diffs</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">Diffs come from a local mirror: split or unified, changed words marked, comments on any line or range, and files you viewed stay viewed until they change.</p>
+      </div>
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7c0-2 3.6-3 8-3s8 1 8 3-3.6 3-8 3-8-1-8-3zM4 7v10c0 2 3.6 3 8 3s8-1 8-3V7M4 12c0 2 3.6 3 8 3s8-1 8-3"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">Offline first, live when online</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">Everything synced is kept on disk. Open conversations update as people write, without reloading the page you are reading.</p>
+      </div>
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l4 4 10-10M5 20h14"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">Checks you can act on</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">Live job logs with colors and folded groups. Run a workflow with its inputs, re-run failed jobs or cancel a run, from the pull request itself.</p>
+      </div>
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3v6a3 3 0 003 3h4a3 3 0 003-3V3M12 12v9M7 3a2 2 0 100 0M17 3a2 2 0 100 0"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">Forks, clones, new repositories</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">Fork in a click, open pull requests from your fork, clone into any folder, or start a repository on any forge you use.</p>
+      </div>
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18v10H3zM7 11h1M11 11h1M15 11h2M7 14h10"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">Made for the keyboard</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">⌘K finds any pull request, issue or repository. j and k move, Enter opens, e marks done; text fields know the Emacs keys.</p>
+      </div>
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 006 0l3-3a4 4 0 00-6-6l-1 1M14 10a4 4 0 00-6 0l-3 3a4 4 0 006 6l1-1"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">Your links open here</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">Make usta the default browser and forge links from chat or mail open in the app; every other link goes on to the browser you choose.</p>
+      </div>
+      <div style="border: 1px solid #E4E7EC; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 10px">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2F5FD0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 5h-6zM12 22l-3-5h6zM2 12l5-3v6zM22 12l-5 3V9z"></path></svg>
+        <h3 style="margin: 0; font-size: 18px">Declarative with Nix</h3>
+        <p style="margin: 0; color: #4B515B; line-height: 1.55">A Home Manager, NixOS and nix-darwin module sets every preference from your configuration, so each machine starts the same.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Illustration: a review -->
+<section id="review" style="background: #15171B; color: #E7E9ED">
+  <div style="max-width: 1200px; margin: 0 auto; padding: 84px 24px; display: flex; flex-direction: column; gap: 32px">
+    <div style="max-width: 720px">
+      <h2 style="margin: 0 0 12px; font-size: 40px; font-weight: 800; letter-spacing: -0.03em; color: #FFFFFF">Read the change, not the page around it.</h2>
+      <p style="margin: 0; font-size: 18px; line-height: 1.55; color: #B8BDC7">Side by side or unified, with the file's header kept at the top of a long diff and its Viewed box always in reach. Threads sit on their lines; resolved ones fold away.</p>
+    </div>
+    <div role="img" aria-label="A split diff of src/Sync.hs with a comment thread under a changed line" style="border-radius: 14px; overflow: hidden; border: 1px solid #2E3239; background: #1E2024; box-shadow: 0 30px 80px rgba(0,0,0,0.45)">
+      <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #2E3239; background: #24272C">
+        <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #FFFFFF">src/Sync.hs</span>
+        <span style="font-size: 13px; color: #9AA0AB">+18 −4</span>
+        <span style="margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #D5D9E0"><span style="width: 16px; height: 16px; border: 1.5px solid #7D8490; border-radius: 4px"></span>Viewed</span>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.75; overflow-x: auto">
+        <div style="border-right: 1px solid #2E3239; min-width: 0">
+          <div style="padding: 0 14px; color: #7D8490; background: #20242C">@@ -41,9 +41,14 @@ run settings = do</div>
+          <div style="padding: 0 14px; color: #C7CBD3"><span style="color: #5F6672; display: inline-block; width: 30px">41</span>  pages &lt;- fetchAll settings.forge</div>
+          <div style="padding: 0 14px; color: #C7CBD3"><span style="color: #5F6672; display: inline-block; width: 30px">42</span>  forM_ pages $ \page -&gt; do</div>
+          <div style="padding: 0 14px; color: #FFD0CC; background: #3A2224"><span style="color: #9D6A66; display: inline-block; width: 30px">43</span>−   save settings.pool page</div>
+          <div style="padding: 0 14px; color: #FFD0CC; background: #3A2224"><span style="color: #9D6A66; display: inline-block; width: 30px">44</span>−   pure ()</div>
+          <div style="padding: 0 14px; color: #C7CBD3"><span style="color: #5F6672; display: inline-block; width: 30px">45</span>  done settings</div>
+          <div style="padding: 0 14px; height: 154px; background: repeating-linear-gradient(135deg, #1E2024 0 8px, #22252A 8px 16px)"></div>
+        </div>
+        <div style="min-width: 0">
+          <div style="padding: 0 14px; color: #7D8490; background: #20242C">&#160;</div>
+          <div style="padding: 0 14px; color: #C7CBD3"><span style="color: #5F6672; display: inline-block; width: 30px">41</span>  pages &lt;- fetchAll settings.forge</div>
+          <div style="padding: 0 14px; color: #C7CBD3"><span style="color: #5F6672; display: inline-block; width: 30px">42</span>  forM_ (zip [1 ..] pages) $ \(n, page) -&gt; do</div>
+          <div style="padding: 0 14px; color: #CFF5DA; background: #1D3325"><span style="color: #6A9C78; display: inline-block; width: 30px">43</span>+   save settings.pool page</div>
+          <div style="padding: 0 14px; color: #CFF5DA; background: #1D3325"><span style="color: #6A9C78; display: inline-block; width: 30px">44</span>+   -- The window shows how far it is.</div>
+          <div style="padding: 0 14px; color: #CFF5DA; background: #1D3325"><span style="color: #6A9C78; display: inline-block; width: 30px">45</span>+   settings.progress (n, length pages)</div>
+          <div style="margin: 10px 14px; padding: 14px; border: 1px solid #353A42; border-radius: 10px; background: #24272C; font-family: Inter, sans-serif; font-size: 14px; line-height: 1.5; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; gap: 10px; align-items: flex-start"><span style="flex: 0 0 26px; height: 26px; border-radius: 999px; background: #3C4A6B; color: #DCE4FA; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">TO</span><span style="color: #D5D9E0"><b style="color: #FFFFFF">tomas</b> · Could progress skip pages that came back unchanged, so the bar does not stall on a 304?</span></div>
+            <div style="display: flex; gap: 10px; align-items: flex-start"><span style="flex: 0 0 26px; height: 26px; border-radius: 999px; background: #5A3E2E; color: #F8DECF; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">MI</span><span style="color: #D5D9E0"><b style="color: #FFFFFF">mira</b> · Good catch, counting only fetched pages now.</span></div>
+            <div style="border: 1px solid #353A42; border-radius: 8px; padding: 8px 10px; color: #8C93A0">Reply…  <span style="float: right; font-size: 12px">Enter sends</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Install -->
+<section id="install" style="max-width: 1200px; margin: 0 auto; padding: 84px 24px">
+  <h2 style="margin: 0 0 12px; font-size: 40px; font-weight: 800; letter-spacing: -0.03em">Install</h2>
+  <p style="margin: 0 0 36px; font-size: 18px; color: #4B515B; max-width: 720px">usta is in beta. It runs on macOS and Linux and checks once a day whether a newer release is out.</p>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px">
+    <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 14px; padding: 26px; display: flex; flex-direction: column; gap: 12px">
+      <h3 style="margin: 0; font-size: 20px">macOS</h3>
+      <p style="margin: 0; color: #4B515B; line-height: 1.55">Download <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px">usta.dmg</code> from the latest release and drag usta into Applications.</p>
+      <a href="https://github.com/abdivasiyev/usta/releases/latest" style="font-weight: 600">Latest release →</a>
+    </div>
+    <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 14px; padding: 26px; display: flex; flex-direction: column; gap: 12px">
+      <h3 style="margin: 0; font-size: 20px">Linux</h3>
+      <p style="margin: 0; color: #4B515B; line-height: 1.55">Download <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px">usta-x86_64.AppImage</code>, make it executable and run it.</p>
+      <a href="https://github.com/abdivasiyev/usta/releases/latest" style="font-weight: 600">Latest release →</a>
+    </div>
+    <div style="background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 14px; padding: 26px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+      <h3 style="margin: 0; font-size: 20px">Nix</h3>
+      <p style="margin: 0; color: #4B515B; line-height: 1.55">Run it at once, or add the Home Manager module and set it up in your configuration.</p>
+      <pre style="margin: 0; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.6; background: #15171B; color: #E7E9ED; padding: 14px 16px; border-radius: 10px">inputs.usta.url = "github:abdivasiyev/usta";
+
+imports = [ inputs.usta.homeManagerModules.default ];
+programs.usta = {
+  enable = true;
+  settings.theme = "system";
+};</pre>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer style="border-top: 1px solid #E4E7EC; background: #FFFFFF">
+  <div style="max-width: 1200px; margin: 0 auto; padding: 28px 24px; display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; font-size: 14px; color: #4B515B">
+    <span><b style="color: #1B1D21">usta</b>: Uzbek for a master of a craft. Apache-2.0.</span>
+    <span style="display: flex; gap: 20px"><a href="https://github.com/abdivasiyev/usta">Source on GitHub</a><a href="https://github.com/abdivasiyev/usta/issues">Report a problem</a></span>
+  </div>
+</footer>
+
+</div>
+</body>
+</html>

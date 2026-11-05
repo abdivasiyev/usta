@@ -77,6 +77,7 @@ new now account = do
         , F.forkOwners = pure [unparse account.login]
         , F.forks = \_ -> pure []
         , F.parentOf = \_ -> pure Nothing
+        , F.canPush = \_ -> pure True
         , F.fork = \_ _ -> throwIO (F.Refused "The samples cannot fork.")
         , F.repository = \repo -> do
             failIfTold ref

@@ -113,6 +113,7 @@ data Source = Source
   , forkRepository :: Text -> Text -> Forge.Fork -> IO (Either Text Text)
     -- ^ The new fork's full name.
   , parentOf :: Text -> Text -> IO (Either Text (Maybe Text))
+  , canPush :: Text -> Text -> IO (Either Text Bool)
   , accounts :: IO [Connected]
   , onChange :: (Resource -> IO ()) -> IO ()
     -- ^ Runs the action on the GTK main thread whenever a list was saved
@@ -301,6 +302,7 @@ fromDatabase pool changes statuses sync = Source
   , forkOptions = \_ _ -> pure (Left "Sign in to that forge to fork.")
   , forkRepository = \_ _ _ -> pure (Left "Sign in to that forge to fork.")
   , parentOf = \_ _ -> pure (Right Nothing)
+  , canPush = \_ _ -> pure (Right True)
   , accounts = do
       rows <- run pool listAccounts
       pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login, byBrowser = a.authMethod == BrowserSignIn} | (key, a) <- rows]
@@ -436,6 +438,7 @@ samples = Source
   , forkOptions = \_ _ -> pure (Right (["abdivasiyev"], []))
   , forkRepository = \_ _ _ -> pure (Left "The samples cannot fork.")
   , parentOf = \_ _ -> pure (Right Nothing)
+  , canPush = \_ _ -> pure (Right True)
   , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev", byBrowser = False} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
   , onChange = const (pure ())
   , onStatus = const (pure ())
@@ -561,6 +564,7 @@ withAccounts pool accounts source = source
       pure (owners, [unparse x | x <- forks, T.takeWhile (/= '/') (unparse x) `elem` owners])
   , forkRepository = \host repo wanted -> onRepo host repo (\f name -> unparse <$> f.fork name wanted)
   , parentOf = \host repo -> onRepo host repo (\f name -> fmap unparse <$> f.parentOf name)
+  , canPush = \host repo -> onRepo host repo (\f name -> f.canPush name)
   , setDone = \n done -> do
       items <- run pool DB.inbox
       case [i | i <- items, matches n i] of

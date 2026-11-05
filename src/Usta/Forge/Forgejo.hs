@@ -105,6 +105,7 @@ forgejo manager base host token = do
         pure (unparse login : map (.name) orgs)
     , forks = \repo -> map (.fullName) <$> run client (everyPage (\page limit -> Api.api.forks (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
     , parentOf = \repo -> (.parent) <$> run client (Api.api.repository (owner repo) (shortName repo))
+    , canPush = \repo -> (.canPush) <$> run client (Api.api.repository (owner repo) (shortName repo))
     , fork = \repo f -> (.fullName) <$> run client (Api.api.fork (owner repo) (shortName repo) Api.ForkBody {organization = f.owner, name = f.name})
     , markRead = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Read)))
     , markUnread = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Unread)))

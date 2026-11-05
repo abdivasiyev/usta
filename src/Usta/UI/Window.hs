@@ -214,13 +214,15 @@ buildWith start crashed given app = do
               Right o -> either (pure . Left) (\url -> source.cloneTo url dir headBranch local) o.https
           }
       -- In @at@ (host and repository) when given, else the first one.
+      -- @at@ is chosen at first, and listed though it is not synced.
       openNewPullRequestIn at = do
         repos <- source.repositories
-        let places =
+        let synced =
               [ NewPullRequest.Place {forge = r.forge, host = r.host, repo = r.name, defaultBranch = r.defaultBranch}
               | r <- repos
               ]
-            chosen = length (takeWhile (\p -> Just (p.host, p.repo) /= at) places)
+            places = synced <> [p | Just p <- [at], (p.host, p.repo) `notElem` [(q.host, q.repo) | q <- synced]]
+            chosen = length (takeWhile (\p -> fmap (\a -> (a.host, a.repo)) at /= Just (p.host, p.repo)) places)
             opened p number title branches = openPullRequest "Pull requests" PullRequest.Summary
               { PullRequest.forge = p.forge, PullRequest.host = p.host, PullRequest.repo = p.repo
               , PullRequest.number = number, PullRequest.title = title, PullRequest.state = PullRequest.Open
@@ -433,15 +435,24 @@ buildWith start crashed given app = do
   showFork <- newIORef (\_ _ -> pure ())
   (repositoryPage, showRepository) <- source.repositories >>= Repositories.new Repositories.Actions
     { newIssue = \r -> openNewIssueIn (Just (r.host, r.name))
-    , newPullRequest = \r -> openNewPullRequestIn (Just (r.host, r.name))
+    , newPullRequest = \r -> openNewPullRequestIn (Just (pullPlace r))
+    , canPush = \r -> source.canPush r.host r.name
     , chooseMirror = chooseMirror
     , lookUpOrigins = \r -> source.mirrorOrigins r.host r.name
     , visit = \(host, name) -> source.visit host name
-    , fork = \r anchor -> ForkDialog.open anchor ForkDialog.Dialog
+    , fork = \forPull r anchor -> ForkDialog.open anchor ForkDialog.Dialog
         { repo = r.name, defaultBranch = r.defaultBranch, branchOnly = r.forge == Forge.GitHub
+        , reason = if forPull then Just ("You cannot push to " <> r.name <> ", so the changes go to a fork of yours.") else Nothing
         , options = source.forkOptions r.host r.name
         , create = \owner name only -> source.forkRepository r.host r.name Forge.Fork {owner = owner, name = name, defaultBranchOnly = only}
-        , opened = \name -> readIORef showFork >>= \go -> go (r.host, name) Nothing }
+        , opened = \name -> do
+            readIORef showFork >>= \go -> go (r.host, name) Nothing
+            -- A pull request then opens from the fork, into this one.
+            when forPull $ void $ forkIO $ do
+              found <- source.visit r.host name
+              void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                either (\_ -> openNewPullRequestIn (Just (pullPlace r))) (openNewPullRequestIn . Just . pullPlace) found
+                pure False }
     , loadContents = loadContents
     , files = \r opening -> RepositoryFiles.new RepositoryFiles.Actions
         { loadTree = fmap (\(from, es) -> (said from "From the local mirror" "From the forge's API", es))
@@ -1432,3 +1443,7 @@ browse url = do
 -- | Where a person's picture comes from on this forge.
 placeOf :: Forge.Kind -> Text -> Maybe Avatar.Place
 placeOf kind host = Just Avatar.Place {github = kind == Forge.GitHub, host = host}
+
+-- | Where a pull request can be opened, for a repository of the list.
+pullPlace :: Repositories.Repository -> NewPullRequest.Place
+pullPlace r = NewPullRequest.Place {forge = r.forge, host = r.host, repo = r.name, defaultBranch = r.defaultBranch}

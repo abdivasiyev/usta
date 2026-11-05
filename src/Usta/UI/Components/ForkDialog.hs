@@ -29,6 +29,9 @@ data Dialog = Dialog
   { repo :: Text
     -- ^ The one to fork, e.g. "aliftechuz/mobi-backend".
   , defaultBranch :: Text
+  , reason :: Maybe Text
+    -- ^ Why it is asked, as before a pull request to a repository you
+    -- cannot push to.
   , branchOnly :: Bool
     -- ^ Whether the forge can copy only the default branch (GitHub).
   , options :: IO (Either Text ([Text], [Text]))
@@ -55,6 +58,7 @@ open anchor d = do
   GI.set dialog [#titlebar := header]
 
   body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["form"]]
+  forM_ d.reason $ \why -> GI.new Gtk.Label [#label := why, #xalign := 0, #wrap := True, #cssClasses := ["reason"]] >>= #append body
   caption "Owner" >>= #append body
   owners <- Gtk.dropDownNewFromStrings ["Loading…"]
   GI.set owners [#sensitive := False]
@@ -131,6 +135,7 @@ css = mconcat
   , "window.u-fork box.form { padding: 18px 20px; background: var(--surface); }"
   , "window.u-fork label.step { font-size: 12px; color: var(--text-soft); margin-top: 4px; }"
   , "window.u-fork label.muted { color: var(--text-muted); font-size: 12px; }"
+  , "window.u-fork label.reason { padding: 8px 10px; margin-bottom: 4px; border-radius: 6px; background: var(--accent-bg); }"
   , "window.u-fork box.have { padding: 8px 10px; margin-top: 6px; border-radius: 6px; background: var(--accent-bg); }"
   , "window.u-fork box.footer { padding: 12px 20px; background: var(--window); border-top: 1px solid var(--border); }"
   , "window.u-fork dropdown > button { min-height: 34px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface); background-image: none; box-shadow: none; }"

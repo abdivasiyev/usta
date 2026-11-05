@@ -145,8 +145,11 @@ data Actions = Actions
   , pinned :: Repository -> IO Bool
   , setPinned :: Repository -> Bool -> IO ()
     -- ^ Pins it to the sidebar, or takes it off.
-  , fork :: Repository -> Gtk.Widget -> IO ()
-    -- ^ Opens the Fork dialog over the button.
+  , fork :: Bool -> Repository -> Gtk.Widget -> IO ()
+    -- ^ Opens the Fork dialog over the button; 'True' before a pull
+    -- request, which then opens from the fork.
+  , canPush :: Repository -> IO (Either Text Bool)
+    -- ^ Off the main thread.
   , visit :: (Text, Text) -> IO (Either Text Repository)
     -- ^ One that is not listed, by host and name, as a link opens it; off
     -- the main thread.
@@ -444,7 +447,16 @@ overview actions r realDefault follow = do
   void $ GI.on newIssue #clicked (actions.newIssue r)
   newPullRequest <- Button.new Button.defaults
     { Button.label = Just "New pull request", Button.variant = Button.Primary }
-  void $ GI.on newPullRequest #clicked (actions.newPullRequest r)
+  -- Without the right to push, the changes go to a fork first.
+  void $ GI.on newPullRequest #clicked $ do
+    anchor <- Gtk.toWidget newPullRequest
+    GI.set newPullRequest [#sensitive := False]
+    void $ forkIO $ do
+      allowed <- either (\(_ :: SomeException) -> Right True) id <$> try (actions.canPush r)
+      void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+        GI.set newPullRequest [#sensitive := True]
+        if allowed == Right False then actions.fork True r anchor else actions.newPullRequest r
+        pure False
   mirrorButtons <- if r.canMirror
     then do
       b <- Button.new Button.defaults { Button.label = Just "Mirror…" }
@@ -473,7 +485,7 @@ overview actions r realDefault follow = do
     GI.set pin [#label := if on then "📌 Pinned" else "📌 Pin"]
     (if on then Gtk.widgetAddCssClass else Gtk.widgetRemoveCssClass) pin "on"
   forkButton <- Button.new Button.defaults {Button.label = Just "⑂ Fork", Button.tooltip = Just "Fork it to you or an organization"}
-  void $ GI.on forkButton #clicked $ Gtk.toWidget forkButton >>= actions.fork r
+  void $ GI.on forkButton #clicked $ Gtk.toWidget forkButton >>= actions.fork False r
   forM_ ([star, pin, forkButton] <> mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
     GI.set b [#valign := Gtk.AlignStart]
     #append header b

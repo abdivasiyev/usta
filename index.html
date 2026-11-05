@@ -41,7 +41,7 @@ a{color:#2F5FD0}a:hover{color:#1E46A8}
 .title{font-size:18px;font-weight:700}.tabs{display:flex;flex-wrap:wrap;gap:14px;color:#4B515B;border-bottom:1px solid #E4E7EC;padding-bottom:6px}.tabs b{color:#1B1D21}
 .card{border:1px solid #E4E7EC;border-radius:10px;padding:10px 12px}.card p{margin:6px 0 0;color:#3B4049;line-height:1.5}
 .who{display:flex;align-items:center;gap:8px;color:#4B515B}.who b{color:#1B1D21}
-.av{width:22px;height:22px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-style:normal}.av.s{width:18px;height:18px;font-size:9px}.a1{background:#F6DCC8;color:#8A3B0E}.a2{background:#D8E7DC;color:#1F5A35}
+.av{width:22px;height:22px;border-radius:999px;object-fit:cover;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;font-style:normal}.av.s{width:18px;height:18px;font-size:9px}.a1{background:#F6DCC8;color:#8A3B0E}.a2{background:#D8E7DC;color:#1F5A35}
 .event{display:flex;gap:8px;align-items:center;color:#3B4049;padding-left:6px}.event .when{margin-left:auto;color:#5B616B}.dot{width:8px;height:8px;border-radius:999px;display:inline-block}.dot.blue{background:#2F5FD0}.dot.gray{background:#9AA1AC}
 .mono{font-family:'JetBrains Mono',monospace}.mut{color:#5B616B}.small{font-size:12px}
 .reacts{display:flex;gap:6px;margin-top:8px}.reacts span{border:1px solid #E4E7EC;border-radius:999px;padding:1px 8px}
@@ -193,8 +193,8 @@ section[id]{padding-top:48px!important;padding-bottom:48px!important}
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 10px"><span style="background: #2F5FD0; color: #FFFFFF; font-weight: 600; padding: 9px 16px; border-radius: 8px; font-size: 14px">Open review</span><span style="border: 1px solid #D3D7DE; padding: 9px 16px; border-radius: 8px; font-size: 14px">Mark as done</span></div>
         <div style="border-top: 1px solid #E4E7EC; padding-top: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 14px">
-          <div style="display: flex; gap: 10px; align-items: center"><span style="width: 26px; height: 26px; border-radius: 999px; background: #F6DCC8; color: #8A3B0E; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">MI</span><span><b>abdivasiyev</b> asked for your review · 5m</span></div>
-          <div style="display: flex; gap: 10px; align-items: center"><span style="width: 26px; height: 26px; border-radius: 999px; background: #D8E7DC; color: #1F5A35; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">TO</span><span><b>tomas</b> approved these changes · 3m</span></div>
+          <div style="display: flex; gap: 10px; align-items: center"><img src="avatars/abdivasiyev.jpg" alt="" width="26" height="26" style="width: 26px; height: 26px; border-radius: 999px; object-fit: cover; flex: 0 0 26px"><span><b>abdivasiyev</b> asked for your review · 5m</span></div>
+          <div style="display: flex; gap: 10px; align-items: center"><img src="avatars/lambdajon.jpg" alt="" width="26" height="26" style="width: 26px; height: 26px; border-radius: 999px; object-fit: cover; flex: 0 0 26px"><span><b>lambdajon</b> approved these changes · 3m</span></div>
         </div>
       </div>
     </div>
@@ -282,8 +282,8 @@ section[id]{padding-top:48px!important;padding-bottom:48px!important}
           <div style="padding: 0 14px; color: #CFF5DA; background: #1D3325"><span style="color: #6A9C78; display: inline-block; width: 30px">44</span>+   -- The window shows how far it is.</div>
           <div style="padding: 0 14px; color: #CFF5DA; background: #1D3325"><span style="color: #6A9C78; display: inline-block; width: 30px">45</span>+   settings.progress (n, length pages)</div>
           <div style="margin: 10px 14px; padding: 14px; border: 1px solid #353A42; border-radius: 10px; background: #24272C; font-family: Inter, sans-serif; font-size: 14px; line-height: 1.5; display: flex; flex-direction: column; gap: 10px">
-            <div style="display: flex; gap: 10px; align-items: flex-start"><span style="flex: 0 0 26px; height: 26px; border-radius: 999px; background: #3C4A6B; color: #DCE4FA; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">TO</span><span style="color: #D5D9E0"><b style="color: #FFFFFF">tomas</b> · Could progress skip pages that came back unchanged, so the bar does not stall on a 304?</span></div>
-            <div style="display: flex; gap: 10px; align-items: flex-start"><span style="flex: 0 0 26px; height: 26px; border-radius: 999px; background: #5A3E2E; color: #F8DECF; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">AB</span><span style="color: #D5D9E0"><b style="color: #FFFFFF">abdivasiyev</b> · Good catch, counting only fetched pages now.</span></div>
+            <div style="display: flex; gap: 10px; align-items: flex-start"><img src="avatars/lambdajon.jpg" alt="" width="26" height="26" style="width: 26px; height: 26px; border-radius: 999px; object-fit: cover; flex: 0 0 26px"><span style="color: #D5D9E0"><b style="color: #FFFFFF">lambdajon</b> · Could progress skip pages that came back unchanged, so the bar does not stall on a 304?</span></div>
+            <div style="display: flex; gap: 10px; align-items: flex-start"><img src="avatars/abdivasiyev.jpg" alt="" width="26" height="26" style="width: 26px; height: 26px; border-radius: 999px; object-fit: cover; flex: 0 0 26px"><span style="color: #D5D9E0"><b style="color: #FFFFFF">abdivasiyev</b> · Good catch, counting only fetched pages now.</span></div>
             <div style="border: 1px solid #353A42; border-radius: 8px; padding: 8px 10px; color: #8C93A0">Reply…  <span style="float: right; font-size: 12px">Enter sends</span></div>
           </div>
         </div>
@@ -312,15 +312,15 @@ section[id]{padding-top:48px!important;padding-bottom:48px!important}
       <div class="main">
         <div class="title">feat: fork repositories and open pull requests from forks</div>
         <div class="tabs"><b>Conversation 3</b><span>Files 5</span><span>Commits 4</span><span>Checks</span></div>
-        <div class="card"><div class="who"><i class="av a1">AB</i><b>abdivasiyev</b> opened this 2 hours ago</div><p>Forks a repository into you or an organization, and opens pull requests from the fork into the repository it came from.</p></div>
-        <div class="event"><i class="dot blue"></i><span><b>tomas</b> approved these changes</span><span class="when">1h</span></div>
+        <div class="card"><div class="who"><img class="av" src="avatars/abdivasiyev.jpg" alt="" width="22" height="22"><b>abdivasiyev</b> opened this 2 hours ago</div><p>Forks a repository into you or an organization, and opens pull requests from the fork into the repository it came from.</p></div>
+        <div class="event"><i class="dot blue"></i><span><b>lambdajon</b> approved these changes</span><span class="when">1h</span></div>
         <div class="event"><i class="dot gray"></i><span class="mono">3ba3a98</span><span>Fork first before a pull request you cannot push for</span></div>
-        <div class="card"><div class="who"><i class="av a2">TO</i><b>tomas</b> commented 40 min ago</div><p>Works with Forgejo forks too. Ship it.</p><div class="reacts"><span>👍 3</span><span>🚀 1</span></div></div>
+        <div class="card"><div class="who"><img class="av" src="avatars/lambdajon.jpg" alt="" width="22" height="22"><b>lambdajon</b> commented 40 min ago</div><p>Works with Forgejo forks too. Ship it.</p><div class="reacts"><span>👍 3</span><span>🚀 1</span></div></div>
         <div class="merge"><span class="ok">✓ All checks passed · 1 approval</span><span class="sel">Squash and merge ▾</span><span class="btn">Merge</span></div>
       </div>
       <div class="side">
-        <div class="k">Reviewers</div><div class="v"><i class="av a2 s">TO</i> tomas ✓</div>
-        <div class="k">Assignees</div><div class="v"><i class="av a1 s">AB</i> abdivasiyev</div>
+        <div class="k">Reviewers</div><div class="v"><img class="av s" src="avatars/lambdajon.jpg" alt="" width="18" height="18"> lambdajon ✓</div>
+        <div class="k">Assignees</div><div class="v"><img class="av s" src="avatars/abdivasiyev.jpg" alt="" width="18" height="18"> abdivasiyev</div>
         <div class="k">Labels</div><div class="v"><span class="lab blue">forks</span> <span class="lab green">enhancement</span></div>
         <div class="k">Milestone</div><div class="v">Beta</div>
       </div>
@@ -465,7 +465,7 @@ section[id]{padding-top:48px!important;padding-bottom:48px!important}
       <div class="dlg">
         <div class="dt">Fork abdivasiyev/usta</div>
         <div class="note">You cannot push to abdivasiyev/usta, so the changes go to a fork of yours.</div>
-        <div class="dk">Owner</div><div class="df">mira (you) ▾</div>
+        <div class="dk">Owner</div><div class="df">lambdajon (you) ▾</div>
         <div class="dk">Name</div><div class="df mono">usta</div>
         <div class="dfoot"><span class="btn ghost">Cancel</span><span class="btn">Create fork</span></div>
       </div>

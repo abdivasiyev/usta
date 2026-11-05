@@ -10,7 +10,7 @@ module Usta.UI.Pages.NewIssue
   , css
   ) where
 
-import Control.Monad (forM_, void)
+import Control.Monad (void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
@@ -66,7 +66,7 @@ open anchor create opened m = do
                               , #destroyWithParent := True
                               , #cssClasses := ["usta", "u-new-issue"]
                               ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
 
   -- Window controls follow the OS, like the main window.
   header <- GI.new Gtk.HeaderBar []

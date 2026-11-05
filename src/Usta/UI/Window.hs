@@ -479,7 +479,7 @@ buildWith start crashed given app = do
             , title = "Actions"
             , build = do
                 c <- clock
-                RepositoryActions.new c (source.runs r.host r.name) (source.checkLog r.host r.name)
+                RepositoryActions.new c (source.runs r.host r.name) (source.checkLog r.host r.name) (source.jobSteps r.host r.name)
             }
         , Repositories.Tab
             { followsBranch = True
@@ -888,6 +888,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         { provider = if summary.forge == Forge.Forgejo then "Forgejo Actions" else "Checks"
         , checks = found
         , logOf = source.checkLog summary.host summary.repo
+        , stepsOf = source.jobSteps summary.host summary.repo
         }
 
 -- | The labels picker of an issue or pull request; @refresh@ reloads the

@@ -26,15 +26,18 @@ import qualified GI.Pango as Pango
 import qualified Usta.UI.Components.Icon as Icon
 import Usta.UI.Format (Clock, ago)
 import Usta.UI.Page (refill)
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Pages.PullRequest.Checks as Checks
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Check (Job, Run (..), State (..))
 
--- | @load@ asks the forge for the runs; @logOf@ for a job's log.
-new :: Clock -> IO (Either Text [Run]) -> (Job -> IO (Either Text Text)) -> IO Gtk.Widget
-new c load logOf = do
+-- | @load@ asks the forge for the runs; @logOf@ for a job's log, @stepsOf@
+-- for a running job's steps.
+new :: Clock -> IO (Either Text [Run]) -> (Job -> IO (Either Text Text)) -> (Job -> IO (Either Text (State, [(Text, State)]))) -> IO Gtk.Widget
+new c load logOf stepsOf = do
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 16, #cssClasses := ["u-repo-actions"]]
-  left <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10, #hexpand := True, #widthRequest := 460]
+  -- The runs keep to a narrow column; the jobs and logs take the rest.
+  left <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10, #hexpand := False, #widthRequest := 380]
   workflows <- Gtk.dropDownNewFromStrings ["All workflows"]
   branches <- Gtk.dropDownNewFromStrings ["Any branch"]
   states <- Gtk.dropDownNewFromStrings ("Any status" : map stateText [minBound ..])
@@ -46,14 +49,19 @@ new c load logOf = do
   Gtk.listBoxSetPlaceholder list (Just empty)
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "list-card"]]
   #append card list
+  -- Placeholder rows until the forge answers.
+  loading <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  mapM_ (\_ -> Skeleton.listRow 300 >>= #append loading) [1 .. 6 :: Int]
+  #append card loading
   scroll <- GI.new Gtk.ScrolledWindow [ #child := card, #vexpand := True, #hscrollbarPolicy := Gtk.PolicyTypeNever
                                       , #propagateNaturalHeight := True, #valign := Gtk.AlignStart ]
   #append left scroll
-  note <- label "Loading the repository's runs…" ["meta", "note"]
+  note <- label "" ["meta", "note"]
+  GI.set note [#visible := False, #wrap := True]
   #append left note
   #append page left
   -- The chosen run's jobs and logs.
-  right <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #widthRequest := 420, #cssClasses := ["u-card", "run-detail"]]
+  right <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #widthRequest := 360, #cssClasses := ["u-card", "run-detail"]]
   #append page right
 
   items <- newIORef []
@@ -83,15 +91,16 @@ new c load logOf = do
     rows <- readIORef shownRows
     when (index >= 0 && fromIntegral index < length rows) $ do
       clear right
-      runDetail c logOf (rows !! fromIntegral index) >>= #append right
+      runDetail c logOf stepsOf (rows !! fromIntegral index) >>= #append right
 
   void $ forkIO $ do
     result <- try load
     void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      Gtk.boxRemove card loading
       case result of
-        Right (Right runs) -> fill runs >> GI.set note [#visible := False]
-        Right (Left problem) -> GI.set note [#label := "The forge could not list the runs. " <> problem]
-        Left (e :: SomeException) -> GI.set note [#label := "The forge could not list the runs. " <> T.pack (show e)]
+        Right (Right runs) -> fill runs
+        Right (Left problem) -> GI.set note [#label := "The forge could not list the runs. " <> problem, #visible := True]
+        Left (e :: SomeException) -> GI.set note [#label := "The forge could not list the runs. " <> T.pack (show e), #visible := True]
       pure False
   Gtk.toWidget page
   where
@@ -130,8 +139,8 @@ runRow c r = do
   pure row
 
 -- | The run's head and its jobs, each with its log.
-runDetail :: Clock -> (Job -> IO (Either Text Text)) -> Run -> IO Gtk.Box
-runDetail c logOf r = do
+runDetail :: Clock -> (Job -> IO (Either Text Text)) -> (Job -> IO (Either Text (State, [(Text, State)]))) -> Run -> IO Gtk.Box
+runDetail c logOf stepsOf r = do
   box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
   head' <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #cssClasses := ["run-head"]]
   top <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
@@ -143,7 +152,7 @@ runDetail c logOf r = do
   #append head' top
   label (r.event <> " on " <> r.branch) ["meta"] >>= #append head'
   #append box head'
-  Checks.new Checks.Model {provider = "Jobs", checks = r.jobs, logOf = logOf} >>= #append box
+  Checks.new Checks.Model {provider = "Jobs", checks = r.jobs, logOf = logOf, stepsOf = stepsOf} >>= #append box
   pure box
 
 -- | How long a run took, or that it still runs.

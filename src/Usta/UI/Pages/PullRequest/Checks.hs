@@ -32,6 +32,7 @@ import Text.Read (readMaybe)
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
 import qualified Usta.UI.Components.Icon as Icon
+import qualified Usta.UI.Components.Skeleton as Skeleton
 import Usta.UI.Style (Tone (..))
 import Usta.Types.Check (Check (..), Job, State (..))
 
@@ -58,6 +59,9 @@ data Model = Model
     -- ^ Where the checks come from, e.g. "Forgejo Actions".
   , checks :: [Check]
   , logOf :: Job -> IO (Either Text Text)
+  , stepsOf :: Job -> IO (Either Text (State, [(Text, State)]))
+    -- ^ A running job's state and steps, asked again every 5 seconds;
+    -- its log comes once it ends.
   }
 
 new :: Model -> IO Gtk.Widget
@@ -163,32 +167,56 @@ checkDetail m check = do
   #append box header
 
   let say text = label text ["muted"] >>= \l -> GI.set l [#wrap := True] >> #append box l
+      loadLog job = do
+        waiting <- Skeleton.block 220
+        #append box waiting
+        void $ forkIO $ do
+          got <- try (m.logOf job)
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            Gtk.boxRemove box waiting
+            case got of
+              Right (Right raw) -> do
+                let ls = parseLog (check.state == Failed) raw
+                logView ls >>= #append box
+                GI.set copy [#visible := True]
+                void $ GI.on copy #clicked $ do
+                  clipboard <- Gtk.widgetGetClipboard copy
+                  provider <- GI.toGValue (Just (T.unlines (map body (filter (/= EndGroup) ls)))) >>= Gdk.contentProviderNewForValue
+                  void (Gdk.clipboardSetContent clipboard (Just provider))
+              Right (Left _) -> say unreadable
+              Left (_ :: SomeException) -> say unreadable
+            pure False
+      -- While the job runs, its steps; the log once it ends. A forge that
+      -- does not list steps leaves the job as it was.
+      follow job fallback = do
+        steps <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4, #cssClasses := ["u-steps"]]
+        #append box steps
+        let ask = void $ forkIO $ do
+              got <- try (m.stepsOf job) :: IO (Either SomeException (Either Text (State, [(Text, State)])))
+              void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                attached <- Gtk.widgetGetRoot steps
+                case (attached, got) of
+                  (Nothing, _) -> pure ()
+                  (_, Right (Right (state, ss)))
+                    | state `elem` [Running, Waiting] -> do
+                        drawSteps steps state ss
+                        void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 5 (ask >> pure False)
+                    | otherwise -> Gtk.boxRemove box steps >> loadLog job
+                  _ -> Gtk.boxRemove box steps >> fallback
+                pure False
+        ask
   case (check.state, check.job) of
     (Skipped, _) -> say "This job was skipped, so it has no log."
-    (Waiting, _) -> say "This job has not started yet."
+    (Waiting, Just job) -> follow job (say "This job has not started yet.")
+    (Waiting, Nothing) -> say "This job has not started yet."
     (_, Nothing) -> say "This check runs outside the forge; its details are on its own page."
-    (_, Just job) -> do
-      waiting <- label "Loading the log…" ["muted"]
-      #append box waiting
-      void $ forkIO $ do
-        got <- try (m.logOf job)
-        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-          Gtk.boxRemove box waiting
-          case got of
-            Right (Right raw) -> do
-              let ls = parseLog (check.state == Failed) raw
-              logView ls >>= #append box
-              GI.set copy [#visible := True]
-              void $ GI.on copy #clicked $ do
-                clipboard <- Gtk.widgetGetClipboard copy
-                provider <- GI.toGValue (Just (T.unlines (map body (filter (/= EndGroup) ls)))) >>= Gdk.contentProviderNewForValue
-                void (Gdk.clipboardSetContent clipboard (Just provider))
-            Right (Left _) -> say unreadable
-            Left (_ :: SomeException) -> say unreadable
-          pure False
+    (Running, Just job) -> follow job (loadLog job)
+    (_, Just job) -> loadLog job
   pure box
   where
-    unreadable = "usta could not read this job's log. Forgejo shows the logs of a private repository's jobs only in the browser; Open in browser shows it there."
+    unreadable
+      | m.provider == "Forgejo Actions" = "usta could not read this job's log. Forgejo shows the logs of a private repository's jobs only in the browser; Open in browser shows it there."
+      | otherwise = "usta could not read this job's log; Open in browser shows it on the forge."
 
 openUri :: Text -> IO ()
 openUri url = do
@@ -282,9 +310,11 @@ logView ls = do
   -- group with an error in it starts open.
   let draw n l = do
         row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #cssClasses := ["log-line", kind l]]
-        GI.new Gtk.Label [ #label := T.pack (show n), #xalign := 1, #widthRequest := 48
+        GI.new Gtk.Label [ #label := T.pack (show n), #xalign := 1, #yalign := 0, #valign := Gtk.AlignStart, #widthRequest := 48
                          , #cssClasses := ["log-number"] ] >>= #append row
-        text <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #wrapMode := Pango.WrapModeWordChar, #cssClasses := ["log-text"]]
+        -- Wrapping, and asking for little width, so a long line neither
+        -- scrolls sideways nor widens the page.
+        text <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #wrapMode := Pango.WrapModeWordChar, #maxWidthChars := 20, #cssClasses := ["log-text"]]
         Gtk.labelSetMarkup text (ansiMarkup (marked l))
         GI.set text [#selectable := True, #hexpand := True]
         #append row text
@@ -341,6 +371,35 @@ logView ls = do
       Group t -> t
       _ -> ""
 
+-- | A running job's steps: done, running or waiting, each with its name.
+drawSteps :: Gtk.Box -> State -> [(Text, State)] -> IO ()
+drawSteps box state ss = do
+  let clear = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear)
+  clear
+  let doneCount = length [() | (_, st) <- ss, st `elem` [Passed, Failed, Skipped]]
+  label (if state == Waiting then "Waiting for a runner…" else "Running · step " <> T.pack (show (min (length ss) (doneCount + 1))) <> " of " <> T.pack (show (length ss)) <> " · the log comes when it ends") ["muted"]
+    >>= #append box
+  forM_ ss $ \(name, st) -> do
+    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["step-row", stepClass st]]
+    mark <- case st of
+      Running -> Gtk.toWidget =<< GI.new Gtk.Spinner [#spinning := True]
+      _ -> Gtk.toWidget =<< label (stepMark st) ["mark"]
+    #append row mark
+    label name [] >>= #append row
+    #append box row
+  where
+    stepMark st = case st of
+      Passed -> "✓"
+      Failed -> "✕"
+      Skipped -> "–"
+      _ -> "○"
+    stepClass st = case st of
+      Passed -> "passed"
+      Failed -> "failed"
+      Running -> "running"
+      Skipped -> "skipped"
+      Waiting -> "waiting"
+
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
@@ -375,4 +434,11 @@ css = mconcat
   , "box.u-log box.log-line.failure { background: #3A1D1D; color: #F6B4AC; }"
   , "box.u-log box.log-line.note { color: #9AA0A9; }"
   , "box.u-log box.log-line.command { color: #78D9EC; }"
+  , "box.u-checks box.u-steps { padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }"
+  , "box.u-checks box.step-row { padding: 3px 0; }"
+  , "box.u-checks box.step-row label.mark { min-width: 16px; font-weight: 600; }"
+  , "box.u-checks box.step-row.passed label.mark { color: var(--success); }"
+  , "box.u-checks box.step-row.failed label.mark { color: var(--danger); }"
+  , "box.u-checks box.step-row.waiting, box.u-checks box.step-row.skipped { color: var(--text-muted); }"
+  , "box.u-checks box.step-row.running { font-weight: 600; }"
   ]

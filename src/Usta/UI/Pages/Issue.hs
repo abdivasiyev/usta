@@ -443,6 +443,7 @@ replyBox actions m = do
   #append buttons close
   send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
   #append buttons send
+  MarkdownEditor.sendOn editor True (void (Gtk.widgetActivate send))
   -- The buttons wait for the forge, so a second click sends nothing twice.
   let run button doing act = do
         GI.set problem [#visible := False]

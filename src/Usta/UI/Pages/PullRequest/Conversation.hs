@@ -328,6 +328,7 @@ commentBox run actions m = do
     void $ GI.on close #clicked $ run close buttons (if m.closed then "Reopening…" else "Closing…") (actions.setClosed (not m.closed))
     #append buttons close
   send <- Button.new Button.defaults { Button.label = Just "Comment", Button.variant = Button.Primary }
+  MarkdownEditor.sendOn editor True (void (Gtk.widgetActivate send))
   void $ GI.on send #clicked $ do
     text <- maybe "" id <$> GI.get buffer #text
     -- Sent, the draft is done with.

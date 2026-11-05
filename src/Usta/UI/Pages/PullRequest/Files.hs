@@ -629,9 +629,7 @@ review actions m listed pendingRef pendingChanged = do
             showPending
             GI.set said [#label := "Review submitted.", #visible := True, #cssClasses := ["small", "muted"]]
   void $ GI.on submit #clicked send
-  keys <- GI.new Gtk.ShortcutController []
-  shortcut keys "<Primary>Return" send
-  Gtk.widgetAddController summary keys
+  MarkdownEditor.sendOn summary False send
 
   checksBox <- section "Checks"
   forM_ m.checks $ \(passed, name, took) -> do

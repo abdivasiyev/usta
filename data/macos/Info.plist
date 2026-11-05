@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>usta</string>
+  <key>CFBundleDisplayName</key>
+  <string>usta</string>
+  <key>CFBundleIdentifier</key>
+  <string>io.github.abdivasiyev.Usta</string>
+  <key>CFBundleVersion</key>
+  <string>@VERSION@</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@VERSION@</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleExecutable</key>
+  <string>usta</string>
+  <key>CFBundleIconFile</key>
+  <string>usta</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.developer-tools</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Forge links opened in usta</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>usta</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

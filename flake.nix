@@ -80,6 +80,23 @@
     packages = forAllSystems (pkgs: {
       usta = ustaFor pkgs;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.usta;
+      # What GTK reads at run time, for scripts/macos-app.sh to put in the
+      # bundle: compiled settings schemas, the SVG image loader and the
+      # Adwaita icons.
+      # The image loaders: gdk-pixbuf's own and librsvg's SVG one.
+      bundle-data = pkgs.runCommand "usta-bundle-data" {nativeBuildInputs = [pkgs.glib.dev pkgs.librsvg];} ''
+        mkdir -p $out/share/glib-2.0/schemas $out/share/icons $out/lib/gdk-pixbuf-2.0/2.10.0/loaders
+        # The app icon's art, on macOS's grid: 824 of its 1024 pixels.
+        rsvg-convert -w 824 -h 824 ${./data/usta.svg} -o $out/icon-824.png
+        cp ${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}/glib-2.0/schemas/*.xml $out/share/glib-2.0/schemas/
+        cp ${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}/glib-2.0/schemas/*.xml $out/share/glib-2.0/schemas/
+        glib-compile-schemas $out/share/glib-2.0/schemas
+        cp -r ${pkgs.adwaita-icon-theme}/share/icons/Adwaita $out/share/icons/
+        cp -r ${pkgs.hicolor-icon-theme}/share/icons/hicolor $out/share/icons/
+        cp ${pkgs.gdk-pixbuf}/lib/gdk-pixbuf-2.0/2.10.0/loaders/* ${pkgs.librsvg}/lib/gdk-pixbuf-2.0/2.10.0/loaders/* $out/lib/gdk-pixbuf-2.0/2.10.0/loaders/
+        sed -e "s|${pkgs.librsvg}/lib/gdk-pixbuf-2.0/2.10.0/loaders|@LOADERS@|" -e "s|${pkgs.gdk-pixbuf}/lib/gdk-pixbuf-2.0/2.10.0/loaders|@LOADERS@|" \
+          ${pkgs.librsvg}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache > $out/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache.in
+      '';
     });
 
     apps = forAllSystems (pkgs: {

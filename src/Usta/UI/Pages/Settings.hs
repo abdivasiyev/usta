@@ -124,7 +124,7 @@ new onBack onAddAccount m = do
         writeIORef chosen p
         m.onPreferences p
   unless (null m.fixed) $ do
-    note <- label "Some settings come from your Nix configuration (programs.usta.settings, written to ~/.config/usta/config.json). Change them there and rebuild." ["nix-note"]
+    note <- label "Some settings come from your Nix configuration (programs.usta.settings, in ~/.config/usta/config.json or /etc/xdg/usta/config.json). Change them there and rebuild." ["nix-note"]
     GI.set note [#wrap := True]
     #append content note
   sections <- forM [minBound .. maxBound] $ \s -> do
@@ -312,7 +312,7 @@ locked fixed' title pieces controls = do
   label title ["title"] >>= #append heading
   when fixed' $ do
     pill <- label "Set in Nix" ["nix-pill"]
-    GI.set pill [#tooltipText := "programs.usta.settings, in ~/.config/usta/config.json"]
+    GI.set pill [#tooltipText := "programs.usta.settings in your Nix configuration"]
     #append heading pill
   #append texts heading
   when (not (null pieces)) $ description pieces >>= #append texts

@@ -316,6 +316,7 @@ test-suite usta-test
     Usta.GraphTests
     Usta.LocalFilesTests
     Usta.MermaidTests
+    Usta.MigrationTests
     Usta.OAuthTests
     Usta.PreferencesTests
     Usta.SecurityTests

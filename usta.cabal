@@ -316,6 +316,7 @@ test-suite usta-test
     Usta.LocalFilesTests
     Usta.MermaidTests
     Usta.PreferencesTests
+    Usta.SecurityTests
     Usta.SyncTests
     Usta.Types.DiffTests
     Usta.Types.LinkTests

@@ -809,7 +809,7 @@ buildWith start crashed given app = do
         accounts <- source.accounts
         pullRequests <- map (paletteItem openPullRequest) <$> source.pullRequests
         issues <- map (issueItem openIssue) <$> source.issues
-        repositories <- map (repositoryItem (showPage Sidebar.Repositories)) <$> source.repositories
+        repositories <- map (repositoryItem (\at -> showPage Sidebar.Repositories >> showRepository at Nothing)) <$> source.repositories
         pure CommandPalette.Model
           { CommandPalette.recent = take 1 pullRequests <> take 1 issues <> take 1 (drop 1 repositories)
           , CommandPalette.items = pullRequests <> issues <> repositories <> commands
@@ -1130,9 +1130,10 @@ issueItem :: (Text -> Issue.Model -> IO ()) -> Issues.Issue -> CommandPalette.It
 issueItem open i = CommandPalette.Item CommandPalette.Issue i.title
   (shortRef i.repo i.number) (open "Back" (issueDetail i))
 
-repositoryItem :: IO () -> Repositories.Repository -> CommandPalette.Item
+-- | A repository of the list; choosing it opens it on the Repositories page.
+repositoryItem :: ((Text, Text) -> IO ()) -> Repositories.Repository -> CommandPalette.Item
 repositoryItem open r = CommandPalette.Item CommandPalette.Repository r.name
-  r.host open
+  r.host (open (r.host, r.name))
 
 -- | What a forge's search found, opened in usta.
 foundItem :: (Text -> PullRequest.Summary -> IO ()) -> (Text -> Issue.Model -> IO ()) -> ((Text, Text) -> IO ())
@@ -1218,7 +1219,8 @@ headerBar platform whoAmI syncChip onSync onSettings onSearch = do
   -- The field only opens the palette, where the searching happens.
   GI.set entry [#canFocus := False]
   void $ GI.on entry #activate onSearch
-  click <- GI.new Gtk.GestureClick []
+  -- Before the entry inside takes the click.
+  click <- GI.new Gtk.GestureClick [#propagationPhase := Gtk.PropagationPhaseCapture]
   void $ GI.on click #pressed $ \_ _ _ -> onSearch
   Gtk.widgetAddController search click
   #packStart header search

@@ -34,6 +34,7 @@ import qualified GI.Gtk as Gtk
 import System.FilePath (takeExtension)
 import Text.Read (readMaybe)
 
+import qualified Usta.UI.Components.FileIcon as FileIcon
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.CodeView as CodeView
 import Usta.UI.Components.CommandPalette (shortcut)
@@ -259,9 +260,7 @@ treeRow flat expanded e = do
                               , #cssClasses := ["chevron"]
                               ]
   #append row chevron
-  icon <- GI.new Gtk.Image [ #iconName := if e.kind == Tree.Folder then "folder-symbolic" else "text-x-generic-symbolic"
-                           , #cssClasses := [if e.kind == Tree.Folder then "folder" else "file"]
-                           ]
+  icon <- if e.kind == Tree.Folder then FileIcon.folder 16 (expanded && not flat) e.path else FileIcon.file 16 e.path
   #append row icon
   label name ["mono"] >>= #append row
   pure row

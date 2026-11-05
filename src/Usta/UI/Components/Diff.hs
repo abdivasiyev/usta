@@ -36,6 +36,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.FileIcon as FileIcon
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Highlight as Highlight
 import Text.Read (readMaybe)
@@ -127,6 +128,7 @@ build opts original attached commenting onViewed = do
                            , #spacing := 10
                            , #cssClasses := ["diff-header"]
                            ]
+  FileIcon.file 16 file.path >>= #append header
   label file.path ["mono", "strong"] >>= #append header
   label (stat file) ["muted", "small"] >>= #append header
   unless (null hidden) $

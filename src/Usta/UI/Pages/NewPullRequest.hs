@@ -25,6 +25,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.FileIcon as FileIcon
 import qualified Usta.UI.Components.BranchPicker as BranchPicker
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
@@ -303,7 +304,7 @@ contents scroll into from commits changes = do
       forM_ (zip changes diffs) $ \(f, d) -> do
         row <- GI.new Gtk.Button [#cssClasses := ["content-row", "file-row"]]
         inner <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
-        GI.new Gtk.Image [#iconName := "text-x-generic-symbolic"] >>= #append inner
+        FileIcon.file 16 f.path >>= #append inner
         name <- label f.path ["mono"]
         GI.set name [#hexpand := True, #ellipsize := Pango.EllipsizeModeMiddle]
         #append inner name

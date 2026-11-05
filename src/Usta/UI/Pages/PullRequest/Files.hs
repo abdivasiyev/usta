@@ -37,6 +37,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Components.FileIcon as FileIcon
 import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Avatar as Avatar
@@ -473,6 +474,7 @@ fileRow :: Diff.File -> Gtk.Box -> [(Bool, Thread.Thread)] -> IO Gtk.Button
 fileRow f markBox threads' = do
   content <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   #append content markBox
+  FileIcon.file 16 f.path >>= #append content
   names <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #hexpand := True]
   -- A long path keeps its file name and shortens its folders.
   let (folder, name) = T.breakOnEnd "/" f.path

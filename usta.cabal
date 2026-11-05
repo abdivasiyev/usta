@@ -306,9 +306,11 @@ test-suite usta-test
   main-is: Main.hs
   hs-source-dirs: test
   other-modules:
+    Usta.Types.DiffTests
     Usta.Types.LinkTests
     Usta.Types.ParseTests
     Usta.UI.FormatTests
+    Usta.UpdatesTests
   ghc-options: -threaded
   build-depends:
     aeson,

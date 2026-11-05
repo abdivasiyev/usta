@@ -5,6 +5,7 @@
 module Main (main) where
 
 import qualified Usta.Handoff as Handoff
+import qualified Usta.Updates as Updates
 import qualified Usta.UrlEvents as UrlEvents
 import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
@@ -20,6 +21,7 @@ import Usta.Types.Host (Host)
 import Usta.Types.Token (Token)
 import Data.Maybe (isJust)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Usta.Types.Link as Link
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forM_, forever, void, when)
@@ -61,12 +63,14 @@ import qualified Usta.UI.Window as Window
 -- | @usta --gallery@ opens the component gallery instead of the app;
 -- @usta --welcome@ and @usta --first-sync@ preview the first-run states;
 -- @usta --sample@ runs the whole app against sample forges;
+-- @usta --version@ says which usta it is;
 -- @usta git-credential get@ is git's credential helper for mirrors.
 main :: IO ()
 main = getArgs >>= choose
   where
     choose args
       | ["git-credential", action] <- args = newTlsManager >>= \m -> Credential.helper Keyring.system (current m) action
+      | has "--version" = T.putStrLn ("usta " <> Updates.current)
       | has "--gallery" = runApp (void . Gallery.build)
       | has "--welcome" = runApp (void . Window.buildAt Window.FirstRun Source.samples)
       | has "--first-sync" = runApp (void . Window.buildAt Window.FirstSync Source.samples)

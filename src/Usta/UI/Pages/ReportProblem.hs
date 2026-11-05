@@ -13,7 +13,7 @@ module Usta.UI.Pages.ReportProblem
   ) where
 
 import Control.Exception (SomeException, try)
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM, forM_, void)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.List (sortOn)
@@ -24,10 +24,11 @@ import qualified Data.Text.IO as T
 import Data.Text.Encoding (decodeUtf8Lenient, encodeUtf8)
 import Data.Time (defaultTimeLocale, formatTime, getZonedTime)
 import Data.Version (showVersion)
+import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 import Network.HTTP.Types (urlEncode)
-import System.Directory (copyFile, getFileSize, getHomeDirectory, getModificationTime, listDirectory)
+import System.Directory (copyFile, createDirectoryIfMissing, getFileSize, getHomeDirectory, getModificationTime, listDirectory)
 import System.FilePath ((</>))
 import System.Info (compilerVersion)
 import System.Process.Typed (proc, readProcessStdout_)
@@ -72,7 +73,7 @@ open anchor title = do
   let attachments =
         [ ("Version and system", system, system)
         , ("Last 200 log lines", "tokens, request bodies and your home folder left out", T.unlines logLines) ]
-        <> [ ("macOS crash report", name <> " · " <> T.pack (show (size `div` 1024)) <> " KB", "Saved to Downloads to drag into the issue.")
+        <> [ ("macOS crash report", name <> " · " <> T.pack (show (size `div` 1024)) <> " KB", "Saved as a text file in Downloads, to drop into the issue.")
            | Just (name, _, size) <- [crash] ]
   checks <- forM attachments $ \(name, detail, shown) -> do
     row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #cssClasses := ["attached"]]
@@ -114,22 +115,31 @@ open anchor title = do
         logText = T.unlines logLines
     stamp <- T.pack . formatTime defaultTimeLocale "%Y%m%d-%H%M%S" <$> getZonedTime
     downloads <- (</> "Downloads") <$> getHomeDirectory
-    -- The crash report never fits in a link; neither does a long log.
-    when (on' 2) $ forM_ crash $ \(name, path, _) -> void (try (copyFile path (downloads </> T.unpack name)) :: IO (Either SomeException ()))
-    let inline = T.length logText < 5000
+    -- A link carries only text, so the crash report and a long log become
+    -- files to drop into the issue, in a folder of their own. GitHub takes
+    -- no .ips, so the crash report goes as the text it is.
+    let folder = downloads </> ("usta-report-" <> T.unpack stamp)
+        inline = T.length logText < 5000
+        crashFile = "usta-crash-" <> stamp <> ".txt"
         logFile = "usta-log-" <> stamp <> ".txt"
-    when (withLog && not inline) $ void (try (T.writeFile (downloads </> T.unpack logFile) logText) :: IO (Either SomeException ()))
+        saving = [(folder </> T.unpack crashFile, Left path) | on' 2, Just (_, path, _) <- [crash]]
+          <> [(folder </> T.unpack logFile, Right logText) | withLog, not inline]
+    saved <- fmap concat $ forM saving $ \(to, what') -> do
+      done <- try (createDirectoryIfMissing True folder >> either (`copyFile` to) (T.writeFile to) what') :: IO (Either SomeException ())
+      pure [to | Right () <- [done]]
     let report = T.intercalate "\n\n" $
           [what | not (T.null (T.strip what))]
           <> ["### Version and system\n\n" <> system | on' 0]
-          <> [ if inline then "### Log\n\n```\n" <> logText <> "```" else "### Log\n\nAttached: " <> logFile <> " from Downloads."
+          <> [ if inline then "### Log\n\n```\n" <> logText <> "```" else "### Log\n\nAttached: " <> logFile
              | withLog ]
-          <> ["### Crash report\n\nAttached: " <> name <> " from Downloads." | on' 2, Just (name, _, _) <- [crash]]
+          <> ["### Crash report\n\nAttached: " <> crashFile | on' 2, crash /= Nothing]
         url = "https://github.com/abdivasiyev/usta/issues/new?title=" <> enc t <> "&body=" <> enc report
-    GI.set note [#label := if (withLog && not inline) || (on' 2 && crash /= Nothing)
-                             then "Too long for a link: saved to Downloads to drag into the issue."
-                             else ""]
-    Browser.open (url)
+    GI.set note [#label := if null saved then "" else "Drop the files from the Finder window into the issue: a link carries only text."]
+    Browser.open url
+    -- The folder opens with the files chosen, ready to drag.
+    forM_ (take 1 saved) $ \first -> do
+      launcher <- Gtk.fileLauncherNew . Just =<< Gio.fileNewForPath first
+      Gtk.fileLauncherOpenContainingFolder launcher parent (Nothing :: Maybe Gio.Cancellable) Nothing
   #present dialog
   where
     startsWith (x : _) y = x == y

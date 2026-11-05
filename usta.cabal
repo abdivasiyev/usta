@@ -148,6 +148,7 @@ executable usta
     Usta.UI.Components.FileIcon
     Usta.UI.Components.FileTools
     Usta.UI.Components.ForkDialog
+    Usta.UI.Components.NewRepository
     Usta.UI.Components.Forge
     Usta.UI.Components.Icon
     Usta.UI.Components.Markdown

@@ -24,6 +24,7 @@ import qualified Usta.MermaidTests
 import qualified Usta.UI.HighlightTests
 import qualified Usta.SyncTests
 import qualified Usta.CacheTests
+import qualified Usta.LocalFilesTests
 
 -- | The tests run with a home of their own: what usta keeps beside its
 -- cache (drafts, viewed files, the log) never touches the real one.
@@ -53,4 +54,5 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
       , Usta.UI.HighlightTests.tests
       , Usta.SyncTests.tests
       , Usta.CacheTests.tests
+      , Usta.LocalFilesTests.tests
       ]

@@ -311,6 +311,7 @@ test-suite usta-test
     Usta.DiagramTests
     Usta.GitTests
     Usta.GraphTests
+    Usta.LocalFilesTests
     Usta.MermaidTests
     Usta.PreferencesTests
     Usta.SyncTests

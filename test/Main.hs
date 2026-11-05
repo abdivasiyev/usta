@@ -27,6 +27,7 @@ import qualified Usta.CacheTests
 import qualified Usta.LocalFilesTests
 import qualified Usta.Contract.ForgeTests
 import qualified Usta.SecurityTests
+import qualified Usta.OAuthTests
 
 -- | The tests run with a home of their own: what usta keeps beside its
 -- cache (drafts, viewed files, the log) never touches the real one.
@@ -61,4 +62,5 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
       , Usta.LocalFilesTests.tests
       , Usta.Contract.ForgeTests.tests
       , Usta.SecurityTests.tests
+      , Usta.OAuthTests.tests
       ]

@@ -15,6 +15,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Scroll as Scroll
 import qualified Usta.UI.Highlight as Highlight
 
 -- | @path@ picks the language; @text@ is the whole file.
@@ -53,6 +54,7 @@ withView path text = do
                                       , #vscrollbarPolicy := Gtk.PolicyTypeNever
                                       , #propagateNaturalHeight := True
                                       ]
+  Scroll.sideways scroll
   w <- Gtk.toWidget scroll
   pure (w, view)
 

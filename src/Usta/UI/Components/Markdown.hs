@@ -41,6 +41,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Scroll as Scroll
 import qualified Usta.UI.Components.Mermaid as Mermaid
 import qualified Usta.UI.Highlight as Highlight
 
@@ -413,6 +414,7 @@ table doc alignments rows = do
   -- A wide table scrolls by itself rather than widening the page.
   scroll <- GI.new Gtk.ScrolledWindow [ #child := grid, #vscrollbarPolicy := Gtk.PolicyTypeNever
                                       , #propagateNaturalHeight := True, #propagateNaturalWidth := True ]
+  Scroll.sideways scroll
   Gtk.toWidget scroll
 
 -- | Diff lines, each with its "+", "-", "@@" or " ", coloured as a diff;
@@ -441,6 +443,7 @@ diffBlock title copied rows = do
     l <- GI.new Gtk.Label [#label := if T.null row then " " else row, #xalign := 0, #selectable := True, #cssClasses := ["line", kind]]
     #append lines' l
   scroll <- GI.new Gtk.ScrolledWindow [#child := lines', #vscrollbarPolicy := Gtk.PolicyTypeNever, #propagateNaturalHeight := True]
+  Scroll.sideways scroll
   #append card scroll
   Gtk.toWidget card
 
@@ -462,6 +465,7 @@ codeBlock language code = do
   Highlight.follow body $ \palette ->
     Gtk.labelSetMarkup body (T.intercalate "\n" (Highlight.markup palette (Highlight.languageNamed language) (T.stripEnd code)))
   scroll <- GI.new Gtk.ScrolledWindow [#child := body, #vscrollbarPolicy := Gtk.PolicyTypeNever, #propagateNaturalHeight := True]
+  Scroll.sideways scroll
   #append card scroll
   Gtk.toWidget card
 

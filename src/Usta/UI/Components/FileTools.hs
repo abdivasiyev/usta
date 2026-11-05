@@ -27,6 +27,7 @@ import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Scroll as Scroll
 import qualified Usta.UI.Components.Button as Button
 import Usta.UI.Components.CommandPalette (shortcut)
 import qualified Usta.UI.Components.Diff as Diff
@@ -64,6 +65,7 @@ blameView c load = loading load $ \lines' -> do
       GI.set code [#selectable := True, #hexpand := True]
       place code 3 n
   scroll <- GI.new Gtk.ScrolledWindow [#child := grid, #vscrollbarPolicy := Gtk.PolicyTypeNever, #propagateNaturalHeight := True]
+  Scroll.sideways scroll
   Gtk.toWidget scroll
   where
     -- Newer lines are warmer, as forges draw them.

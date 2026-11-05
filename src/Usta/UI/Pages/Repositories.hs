@@ -599,7 +599,7 @@ askClone anchor r actions = do
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
   dialog <- GI.new Gtk.Window [ #title := "Clone", #modal := True, #defaultWidth := 520
                               , #destroyWithParent := True, #cssClasses := ["usta", "u-clone"] ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   header <- GI.new Gtk.HeaderBar []
   Platform.configureHeaderBar Platform.current header
   GI.new Gtk.Label [#label := "Clone " <> r.name, #cssClasses := ["title"]] >>= \t -> GI.set header [#titleWidget := t]
@@ -690,7 +690,7 @@ askMirror anchor r chooseMirror lookUp = do
                               , #destroyWithParent := True
                               , #cssClasses := ["usta", "u-mirror"]
                               ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   header <- GI.new Gtk.HeaderBar []
   Platform.configureHeaderBar Platform.current header
   titles <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #valign := Gtk.AlignCenter]

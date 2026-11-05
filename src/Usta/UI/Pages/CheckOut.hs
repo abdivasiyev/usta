@@ -11,7 +11,7 @@ module Usta.UI.Pages.CheckOut
   ) where
 
 import Control.Exception (SomeException, try)
-import Control.Monad (forM_, void, when)
+import Control.Monad (void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
@@ -46,7 +46,7 @@ open anchor q = do
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
   dialog <- GI.new Gtk.Window [ #title := "Check out locally", #modal := True, #defaultWidth := 600
                               , #resizable := False, #destroyWithParent := True, #cssClasses := ["usta", "u-mirror"] ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   header <- GI.new Gtk.HeaderBar []
   Platform.configureHeaderBar Platform.current header
   titles <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #valign := Gtk.AlignCenter]

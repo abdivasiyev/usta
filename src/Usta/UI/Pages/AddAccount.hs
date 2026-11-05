@@ -126,7 +126,7 @@ open anchor m signInWith browserSignIn onAdded = do
                               , #destroyWithParent := True
                               , #cssClasses := ["usta", "u-add-account"]
                               ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   header <- GI.new Gtk.HeaderBar []
   Platform.configureHeaderBar Platform.current header
   GI.set dialog [#titlebar := header]

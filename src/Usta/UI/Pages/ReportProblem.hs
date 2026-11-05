@@ -47,7 +47,7 @@ open anchor title = do
   parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
   dialog <- GI.new Gtk.Window [ #title := "Report a problem", #modal := True, #defaultWidth := 680
                               , #destroyWithParent := True, #cssClasses := ["usta", "u-report"] ]
-  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  Platform.dialogOver dialog parent
   header <- GI.new Gtk.HeaderBar []
   Platform.configureHeaderBar Platform.current header
   titles <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #valign := Gtk.AlignCenter]

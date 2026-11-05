@@ -30,6 +30,7 @@ import qualified Usta.SecurityTests
 import qualified Usta.OAuthTests
 import qualified Usta.AccountsTests
 import qualified Usta.MigrationTests
+import qualified Usta.GoldenTests
 
 -- | The tests run with a home of their own: what usta keeps beside its
 -- cache (drafts, viewed files, the log) never touches the real one.
@@ -67,4 +68,5 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
       , Usta.OAuthTests.tests
       , Usta.AccountsTests.tests
       , Usta.MigrationTests.tests
+      , Usta.GoldenTests.tests
       ]

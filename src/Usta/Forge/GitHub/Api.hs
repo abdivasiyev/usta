@@ -85,6 +85,7 @@ module Usta.Forge.GitHub.Api
   , issueFields
   , reposQuery
   , OneRepo (..)
+  , ForkBody (..)
   , repoQuery
   ) where
 
@@ -129,6 +130,9 @@ data Routes mode = Routes
     -- that answer does not count against the rate limit.
   , markThread :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId :> Verb 'PATCH 205 '[JSON] NoContent
   , repository :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> Get '[JSON] RepoInfo
+  , myOrgs :: mode :- "user" :> "orgs" :> RecordQueryParam ListQuery :> Get '[JSON] [User]
+  , forks :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> RecordQueryParam ListQuery :> Get '[JSON] [RepositoryRef]
+  , fork :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> ReqBody '[JSON] ForkBody :> PostAccepted '[JSON] RepositoryRef
   , postComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "number" Number
            :> "comments" :> ReqBody '[JSON] Body :> PostCreated '[JSON] RestComment
@@ -588,10 +592,23 @@ data ListQuery = ListQuery
 instance ToQuery ListQuery
 
 type RepoInfo :: Type
-data RepoInfo = RepoInfo {cloneUrl :: Text, sshUrl :: Maybe Text}
+data RepoInfo = RepoInfo
+  { cloneUrl :: Text
+  , sshUrl :: Maybe Text
+  , parent :: Maybe RepoName
+    -- ^ The repository a fork was made from.
+  }
 
 instance FromJSON RepoInfo where
-  parseJSON = withObject "Repository" $ \o -> RepoInfo <$> o .: "clone_url" <*> o .:? "ssh_url"
+  parseJSON = withObject "Repository" $ \o -> RepoInfo
+    <$> o .: "clone_url" <*> o .:? "ssh_url" <*> (o .:? "parent" >>= traverse (.: "full_name"))
+
+-- | Where a fork goes: an organization, or the viewer when 'Nothing'.
+type ForkBody :: Type
+data ForkBody = ForkBody {organization :: Maybe Text, name :: Text, defaultBranchOnly :: Bool}
+
+instance ToJSON ForkBody where
+  toJSON b = object (["name" .= b.name, "default_branch_only" .= b.defaultBranchOnly] <> maybe [] (\o -> ["organization" .= o]) b.organization)
 
 type Body :: Type
 newtype Body = Body Text

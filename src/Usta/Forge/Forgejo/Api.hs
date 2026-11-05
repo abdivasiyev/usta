@@ -63,6 +63,8 @@ module Usta.Forge.Forgejo.Api
   , IssueState (..)
   , User (..)
   , Repository (..)
+  , Org (..)
+  , ForkBody (..)
   , RepositoryRef (..)
   , Thread (..)
   , Subject (..)
@@ -125,6 +127,9 @@ data Routes mode = Routes
   { me :: mode :- "user" :> Get '[JSON] User
   , repositories :: mode :- "user" :> "repos" :> RecordQueryParam ListQuery :> Get '[JSON] [Repository]
   , repository :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> Get '[JSON] Repository
+  , myOrgs :: mode :- "user" :> "orgs" :> RecordQueryParam ListQuery :> Get '[JSON] [Org]
+  , forks :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> RecordQueryParam ListQuery :> Get '[JSON] [RepositoryRef]
+  , fork :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> ReqBody '[JSON] ForkBody :> PostAccepted '[JSON] RepositoryRef
   , notifications :: mode :- "notifications" :> RecordQueryParam NotificationQuery :> Get '[JSON] [Thread]
   , markThread
       :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId :> RecordQueryParam ThreadQuery
@@ -1059,6 +1064,8 @@ data Repository = Repository
   , cloneUrl :: Text
   , sshUrl :: Maybe Text
     -- ^ 'Nothing' when ssh is turned off; Forgejo then sends "".
+  , parent :: Maybe RepoName
+    -- ^ The repository a fork was made from.
   }
 
 instance FromJSON Repository where
@@ -1072,8 +1079,23 @@ instance FromJSON Repository where
     <*> o .: "updated_at"
     <*> o .: "clone_url"
     <*> (nonEmpty <$> o .:? "ssh_url" .!= "")
+    <*> (o .:? "parent" >>= traverse (.: "full_name"))
     where
       nonEmpty t = if T.null t then Nothing else Just t
+
+-- | An organization you belong to.
+type Org :: Type
+newtype Org = Org {name :: Text}
+
+instance FromJSON Org where
+  parseJSON = withObject "Organization" $ \o -> Org <$> o .: "username"
+
+-- | Where a fork goes: an organization, or you when 'Nothing'.
+type ForkBody :: Type
+data ForkBody = ForkBody {organization :: Maybe Text, name :: Text}
+
+instance ToJSON ForkBody where
+  toJSON b = object (["name" .= b.name] <> maybe [] (\o -> ["organization" .= o]) b.organization)
 
 -- | The repository a thread or an issue is in.
 type RepositoryRef :: Type

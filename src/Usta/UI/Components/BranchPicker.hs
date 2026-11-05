@@ -146,5 +146,12 @@ css = mconcat
   , "popover.u-branch-picker label.pill { padding: 1px 8px; border-radius: 10px; background: var(--border-subtle); font-size: 11px; }"
   , "popover.u-branch-picker label.heading { padding: 8px 8px 2px; font-size: 11px; font-weight: 600; color: var(--text-muted); }"
   , "popover.u-branch-picker label.small { font-size: 12px; }"
+  -- Branches and Tags as page tabs: popovers recolor a dark chosen tab's
+  -- label to the same dark, so the chosen one here is raised and light.
+  , "popover.u-branch-picker box.u-segmented { background: var(--sidebar); border-radius: 8px; padding: 3px; margin-bottom: 6px; }"
+  , "popover.u-branch-picker box.u-segmented button { min-height: 28px; padding: 0 12px; border: none; border-radius: 6px; outline: none; box-shadow: none; background: transparent; background-image: none; color: var(--text-soft); }"
+  , "popover.u-branch-picker box.u-segmented button:hover { background: var(--border-subtle); }"
+  , "popover.u-branch-picker box.u-segmented button:checked { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(27,29,33,0.12); }"
+  , "popover.u-branch-picker box.u-segmented button label { color: inherit; }"
   , "popover.u-branch-picker label.footnote { padding: 6px 8px 0; border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-muted); }"
   ]

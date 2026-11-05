@@ -107,6 +107,12 @@ data Source = Source
   , visit :: Text -> Text -> IO (Either Text Repositories.Repository)
     -- ^ Any repository on a signed-in forge, by host and full name, synced
     -- or not: what a link or a search opens.
+  , forkOptions :: Text -> Text -> IO (Either Text ([Text], [Text]))
+    -- ^ Where a repository can be forked to, you first, and your forks
+    -- of it there already.
+  , forkRepository :: Text -> Text -> Forge.Fork -> IO (Either Text Text)
+    -- ^ The new fork's full name.
+  , parentOf :: Text -> Text -> IO (Either Text (Maybe Text))
   , accounts :: IO [Connected]
   , onChange :: (Resource -> IO ()) -> IO ()
     -- ^ Runs the action on the GTK main thread whenever a list was saved
@@ -292,6 +298,9 @@ fromDatabase pool changes statuses sync = Source
       rows <- run pool DB.repositories
       pure [Repositories.fromRepository kind r | (key, r) <- rows, Just kind <- [kindOf key]]
   , visit = \_ _ -> pure (Left "Sign in to that forge to open its repositories.")
+  , forkOptions = \_ _ -> pure (Left "Sign in to that forge to fork.")
+  , forkRepository = \_ _ _ -> pure (Left "Sign in to that forge to fork.")
+  , parentOf = \_ _ -> pure (Right Nothing)
   , accounts = do
       rows <- run pool listAccounts
       pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login, byBrowser = a.authMethod == BrowserSignIn} | (key, a) <- rows]
@@ -424,6 +433,9 @@ samples = Source
   , visit = \host repo -> pure $ case [r | r <- Repositories.sample, r.host == host, r.name == repo] of
       r : _ -> Right r
       [] -> Left "No such repository."
+  , forkOptions = \_ _ -> pure (Right (["abdivasiyev"], []))
+  , forkRepository = \_ _ _ -> pure (Left "The samples cannot fork.")
+  , parentOf = \_ _ -> pure (Right Nothing)
   , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev", byBrowser = False} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
   , onChange = const (pure ())
   , onStatus = const (pure ())
@@ -543,6 +555,12 @@ withAccounts pool accounts source = source
           case (forge, kindOf key) of
             (Just f, Just kind) -> either (Left . said) (Right . Repositories.fromRepository kind) <$> try (f.repository name)
             _ -> pure (Left (said SignedOut))
+  , forkOptions = \host repo -> onRepo host repo $ \f name -> do
+      owners <- f.forkOwners
+      forks <- f.forks name
+      pure (owners, [unparse x | x <- forks, T.takeWhile (/= '/') (unparse x) `elem` owners])
+  , forkRepository = \host repo wanted -> onRepo host repo (\f name -> unparse <$> f.fork name wanted)
+  , parentOf = \host repo -> onRepo host repo (\f name -> fmap unparse <$> f.parentOf name)
   , setDone = \n done -> do
       items <- run pool DB.inbox
       case [i | i <- items, matches n i] of

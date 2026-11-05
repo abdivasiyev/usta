@@ -1,5 +1,5 @@
-# A tag v<version> builds the release: usta.dmg on macOS and
-# usta-x86_64.AppImage on Linux, attached to a GitHub release with
+# A tag v<version> builds the release: usta.dmg on macOS, and on Linux
+# usta-x86_64.AppImage, a .deb and an .rpm, attached to a GitHub release with
 # generated notes. The tag must match usta.cabal's version, which is the
 # version the update check compares.
 #
@@ -86,11 +86,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
       - uses: DeterminateSystems/magic-nix-cache-action@v8
-      - name: Build the AppImage
+      - name: Build the AppImage, .deb and .rpm
+        # The .deb and .rpm carry usta's own GTK under /nix/store: the
+        # distributions' GTK is older than the 4.20 usta needs.
         run: |
           nix bundle --bundler github:ralismark/nix-appimage .#usta -o usta.AppImage
           cp -L usta.AppImage usta-x86_64.AppImage
+          nix bundle --bundler github:NixOS/bundlers#toDEB .#usta -o deb
+          cp -L deb/*.deb "usta_${GITHUB_REF_NAME#v}_amd64.deb"
+          nix bundle --bundler github:NixOS/bundlers#toRPM .#usta -o rpm
+          cp -L rpm/*.rpm "usta-${GITHUB_REF_NAME#v}.x86_64.rpm"
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" usta-x86_64.AppImage --clobber
+        run: gh release upload "$GITHUB_REF_NAME" usta-x86_64.AppImage ./*.deb ./*.rpm --clobber

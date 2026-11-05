@@ -56,6 +56,7 @@ module Usta.Forge.GitHub.Api
   , WorkflowRun (..)
   , Jobs (..)
   , RestJob (..)
+  , JobSteps (..)
   , RefPage (..)
   , RefNode (..)
   , Checks (..)
@@ -224,6 +225,9 @@ data Routes mode = Routes
   , runJobs
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int64
            :> "jobs" :> Get '[JSON] Jobs
+  , job
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "jobs" :> Capture "job" Int64
+           :> Get '[JSON] JobSteps
   , jobLog
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "jobs" :> Capture "job" Int64
            :> "logs" :> Get '[LogText] ByteString
@@ -1283,3 +1287,13 @@ countsQuery =
   "query($opened: String!, $drafts: String!, $merged: String!, $shut: String!, $every: String!) {"
     <> T.concat [" " <> k <> ": search(query: $" <> k <> ", type: ISSUE, first: 1) { issueCount }" | k <- ["opened", "drafts", "merged", "shut", "every"]]
     <> " }"
+
+-- | A job with its steps, each by name, status and conclusion.
+type JobSteps :: Type
+data JobSteps = JobSteps {status :: Text, conclusion :: Maybe Text, steps :: [(Text, Text, Maybe Text)]}
+
+instance FromJSON JobSteps where
+  parseJSON = withObject "Job" $ \o -> JobSteps
+    <$> o .: "status"
+    <*> o .:? "conclusion"
+    <*> (o .:? "steps" .!= [] >>= traverse (withObject "Step" (\x -> (,,) <$> x .: "name" <*> x .: "status" <*> x .:? "conclusion")))

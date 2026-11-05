@@ -14,6 +14,12 @@
 <style>
 body{margin:0;background:#F7F8FA}
 a{color:#2F5FD0}a:hover{color:#1E46A8}
+.download{display:inline-flex;align-items:center;gap:10px;min-height:48px;padding:0 22px;border-radius:10px;font-weight:600;font-size:16px;text-decoration:none;background:#FFFFFF;color:#1B1D21;border:1px solid #D3D7DE}
+.download svg{display:none}
+.download.primary{background:#2F5FD0;color:#FFFFFF;border-color:#2F5FD0;order:-1}
+.download.primary svg{display:block}
+.download:hover{color:#1B1D21;border-color:#9AA1AC}
+.download.primary:hover{color:#FFFFFF;background:#1E46A8;border-color:#1E46A8}
 </style>
 </head>
 <body>
@@ -39,11 +45,14 @@ a{color:#2F5FD0}a:hover{color:#1E46A8}
   <h1 style="margin: 0; font-size: clamp(40px, 6vw, 68px); line-height: 1.04; font-weight: 800; letter-spacing: -0.035em; max-width: 900px">Your forges, in one fast native window.</h1>
   <p style="margin: 0; font-size: 19px; line-height: 1.55; color: #4B515B; max-width: 680px">usta is a desktop client for GitHub and Forgejo. One inbox for reviews, mentions and failed checks; pull requests read from real git diffs; and it keeps working when the network does not.</p>
   <div style="display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-top: 6px">
-    <a href="https://github.com/abdivasiyev/usta/releases/latest" style="display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 10px; background: #2F5FD0; color: #FFFFFF; font-weight: 600; font-size: 16px; text-decoration: none">
+    <a id="get-macos" class="download primary" href="https://github.com/abdivasiyev/usta/releases/latest">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
       Download for macOS
     </a>
-    <a href="https://github.com/abdivasiyev/usta/releases/latest" style="display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 22px; border-radius: 10px; background: #FFFFFF; color: #1B1D21; border: 1px solid #D3D7DE; font-weight: 600; font-size: 16px; text-decoration: none">Download for Linux</a>
+    <a id="get-linux" class="download" href="https://github.com/abdivasiyev/usta/releases/latest">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>
+      Download for Linux
+    </a>
   </div>
   <code style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #3B4049; background: #ECEEF2; padding: 8px 14px; border-radius: 8px">nix run github:abdivasiyev/usta</code>
 </section>
@@ -247,5 +256,16 @@ programs.usta = {
 </footer>
 
 </div>
+<script>
+// The download for the visitor's system comes first; macOS otherwise.
+(function () {
+  var hint = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || "";
+  var linux = /linux|x11|freebsd|openbsd/i.test(hint) && !/android|cros/i.test(navigator.userAgent);
+  if (linux) {
+    document.getElementById("get-macos").classList.remove("primary");
+    document.getElementById("get-linux").classList.add("primary");
+  }
+})();
+</script>
 </body>
 </html>

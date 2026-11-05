@@ -608,7 +608,7 @@ askClone anchor r actions = do
   let caption t = GI.new Gtk.Label [#label := t, #xalign := 0, #cssClasses := ["step"]] >>= #append body
   caption "Over"
   (over, overButtons) <- Segmented.new ["HTTPS", "SSH"] 0
-  GI.set over [#halign := Gtk.AlignStart, #sensitive := False]
+  GI.set over [#halign := Gtk.AlignStart]
   #append body over
   url <- GI.new Gtk.Label [#label := "Looking up the addresses…", #xalign := 0, #selectable := True, #ellipsize := Pango.EllipsizeModeMiddle, #cssClasses := ["mono", "muted"]]
   #append body url
@@ -637,22 +637,21 @@ askClone anchor r actions = do
   mapM_ (#append content) [body, footer]
   GI.set dialog [#child := content]
 
-  -- HTTPS at once; the forge's addresses when they come.
-  urls <- newIORef ("https://" <> r.host <> "/" <> r.name <> ".git", Nothing)
+  -- The usual addresses at once, the forge's own when they come.
+  urls <- newIORef ("https://" <> r.host <> "/" <> r.name <> ".git", "git@" <> r.host <> ":" <> r.name <> ".git")
   let showUrl = do
         (https, ssh) <- readIORef urls
         useSsh <- case drop 1 overButtons of
           b : _ -> GI.get b #active
           [] -> pure False
-        GI.set url [#label := if useSsh then fromMaybe https ssh else https]
+        GI.set url [#label := if useSsh then ssh else https]
   showUrl
   void $ forkIO $ do
     found <- either (\(_ :: SomeException) -> Nothing) (either (const Nothing) Just) <$> try (actions.lookUpOrigins r)
     void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
       forM_ found $ \o -> do
-        (https, _) <- readIORef urls
-        writeIORef urls (either (const https) id o.https, either (const Nothing) Just o.ssh)
-        GI.set over [#sensitive := either (const False) (const True) o.ssh]
+        (https, ssh) <- readIORef urls
+        writeIORef urls (either (const https) id o.https, either (const ssh) id o.ssh)
       showUrl
       pure False
   forM_ overButtons $ \b -> void $ GI.on b #toggled showUrl

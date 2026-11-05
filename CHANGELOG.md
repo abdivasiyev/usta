@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The Releases page reads releases published by a bot, such as
+  github-actions[bot].
+- Job logs color 256-color and RGB text as plain text, not red.
+- Files whose names the icon map writes in capitals, ".Rhistory" or
+  "Dockerfile", have their icons.
+- Mermaid flowcharts draw links with arrows at both ends, circles and
+  crosses, and statements on the header's line, "graph TD; A-->B".
+- A comment or a done made offline is no longer lost when the waiting
+  ones are sent, nor sent twice.
+- Drafts, viewed files and pins are written safely: two changes at once
+  keep both, and stopping half way loses nothing.
+- Syncing GitHub no longer fails now and then on accounts with many
+  repositories.
+- A merged GitHub pull request whose branch is gone tells its readiness.
+- A new window no longer loads usta's styles again, and a closed one
+  stops following the system's theme.
+
+### Added
+
+- `usta --version`.
+- Tests: unit, property, behaviour, contract, security, golden,
+  migration and UI tests, and benchmarks (see docs/TESTING.md).
+
 ## 0.1.0 (beta)
 
 The first release of usta: a native desktop client for GitHub and Forgejo,

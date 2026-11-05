@@ -1066,6 +1066,7 @@ data Repository = Repository
     -- ^ 'Nothing' when ssh is turned off; Forgejo then sends "".
   , parent :: Maybe RepoName
     -- ^ The repository a fork was made from.
+  , canPush :: Bool
   }
 
 instance FromJSON Repository where
@@ -1080,6 +1081,7 @@ instance FromJSON Repository where
     <*> o .: "clone_url"
     <*> (nonEmpty <$> o .:? "ssh_url" .!= "")
     <*> (o .:? "parent" >>= traverse (.: "full_name"))
+    <*> (o .:? "permissions" >>= maybe (pure False) (\p -> p .:? "push" .!= False))
     where
       nonEmpty t = if T.null t then Nothing else Just t
 

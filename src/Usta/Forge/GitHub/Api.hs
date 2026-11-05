@@ -600,11 +600,13 @@ data RepoInfo = RepoInfo
   , sshUrl :: Maybe Text
   , parent :: Maybe RepoName
     -- ^ The repository a fork was made from.
+  , canPush :: Bool
   }
 
 instance FromJSON RepoInfo where
   parseJSON = withObject "Repository" $ \o -> RepoInfo
     <$> o .: "clone_url" <*> o .:? "ssh_url" <*> (o .:? "parent" >>= traverse (.: "full_name"))
+    <*> (o .:? "permissions" >>= maybe (pure False) (\p -> p .:? "push" .!= False))
 
 -- | Where a fork goes: an organization, or the viewer when 'Nothing'.
 type ForkBody :: Type

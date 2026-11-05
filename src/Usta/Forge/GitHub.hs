@@ -135,6 +135,7 @@ github manager host token = do
         pure (unparse login : [unparse o.login | o <- orgs])
     , forks = \repo -> map (.fullName) <$> pages (Api.api.forks (owner repo) (shortName repo))
     , parentOf = \repo -> (.parent) <$> run rest (Api.api.repository (owner repo) (shortName repo))
+    , canPush = \repo -> (.canPush) <$> run rest (Api.api.repository (owner repo) (shortName repo))
     , fork = \repo f -> (.fullName) <$> run rest (Api.api.fork (owner repo) (shortName repo)
         Api.ForkBody {organization = f.owner, name = f.name, defaultBranchOnly = f.defaultBranchOnly})
     , repository = \repo -> do

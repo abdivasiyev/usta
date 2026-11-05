@@ -71,6 +71,8 @@ data Forge = Forge
   , forks :: RepoName -> IO [RepoName]
   , parentOf :: RepoName -> IO (Maybe RepoName)
     -- ^ The repository a fork was made from.
+  , canPush :: RepoName -> IO Bool
+    -- ^ Whether you may push branches to it; else changes go to a fork.
   , fork :: RepoName -> Fork -> IO RepoName
     -- ^ The new fork's name; the forge may take a few seconds to fill it.
   , markRead :: ThreadId -> IO ()

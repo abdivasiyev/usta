@@ -47,6 +47,7 @@ import qualified Usta.Mirrors as Mirrors
 import qualified Usta.Preferences as Preferences
 import qualified Usta.UI.TextKeys as TextKeys
 import qualified Usta.UI.Browser as Browser
+import qualified Usta.UI.Platform as Platform
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind (..))
@@ -91,7 +92,7 @@ runApp open = do
   quit <- Gio.simpleActionNew "quit" Nothing
   void $ on quit #activate (\_ -> #quit app)
   Gio.actionMapAddAction app quit
-  Gtk.applicationSetAccelsForAction app "app.quit" ["<Primary>q"]
+  Gtk.applicationSetAccelsForAction app "app.quit" [Platform.keys "<Primary>q"]
   void $ #run app Nothing
 
 -- | The real cache, with every saved account syncing on its keyring

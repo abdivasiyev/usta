@@ -32,6 +32,7 @@ import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
 import Usta.UI.Components.CommandPalette (shortcut)
+import qualified Usta.UI.Platform as Platform
 import qualified Usta.Drafts as Drafts
 import qualified Usta.UI.Components.Attach as Attach
 import qualified Usta.UI.Components.Icon as Icon
@@ -274,7 +275,7 @@ toolButton view buffer tool = do
     void (Gtk.widgetGrabFocus view)
   pure button
   where
-    keyName k = "Ctrl " <> T.toUpper (T.takeWhileEnd (/= '>') k)
+    keyName k = Platform.shortcut Platform.current (T.toUpper (T.takeWhileEnd (/= '>') k))
 
 -- | Opens GTK's emoji chooser at the cursor, as @Ctrl .@ does in the
 -- text: it searches, groups by category and keeps recently used ones.

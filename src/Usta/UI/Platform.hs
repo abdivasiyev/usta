@@ -11,6 +11,7 @@ module Usta.UI.Platform
   , shortcut
   , configureHeaderBar
   , dialogOver
+  , keys
   ) where
 
 import Control.Monad (forM_, void)
@@ -18,6 +19,7 @@ import Data.GI.Base (AttrOp ((:=)), set)
 import qualified Data.GI.Base as GI
 import Data.GI.Base.ManagedPtr (withManagedPtr)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Foreign.Ptr (Ptr)
 import qualified GI.Gdk as Gdk
 import qualified GI.Gtk as Gtk
@@ -25,7 +27,7 @@ import qualified GI.Gtk as Gtk
 import Usta.Types.Platform (Platform (..), canNotify, current)
 
 -- | A shortcut on the primary modifier: "⌘K" on macOS, "Ctrl K" elsewhere.
--- Keybindings themselves use GTK's @<Primary>@, which maps the same way.
+-- Keybindings write @<Primary>@ and go through 'keys'.
 shortcut :: Platform -> Text -> Text
 shortcut MacOS key = "⌘" <> key
 shortcut _ key = "Ctrl " <> key
@@ -68,3 +70,10 @@ dialogOver dialog parent = forM_ parent $ \p -> do
 foreign import ccall unsafe "usta_prepare_dialog" c_prepare :: Ptr Gdk.Surface -> IO ()
 foreign import ccall unsafe "usta_attach_dialog" c_attach :: Ptr Gdk.Surface -> Ptr Gdk.Surface -> IO ()
 foreign import ccall unsafe "usta_detach_dialog" c_detach :: Ptr Gdk.Surface -> Ptr Gdk.Surface -> IO ()
+
+-- | A shortcut as GTK should read it. GTK reads @<Primary>@ as Control
+-- even on macOS, where the primary modifier is Command (@<Meta>@ to GTK).
+keys :: Text -> Text
+keys trigger = case current of
+  MacOS -> T.replace "<Primary>" "<Meta>" trigger
+  _ -> trigger

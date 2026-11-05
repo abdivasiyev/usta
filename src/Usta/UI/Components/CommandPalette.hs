@@ -26,6 +26,7 @@ import qualified GI.GLib as GLib
 import Control.Exception (SomeException, try)
 import Control.Concurrent (forkIO)
 
+import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Components.Shortcut as Shortcut
 
 type Kind :: Type
@@ -281,7 +282,7 @@ new content model = do
 -- | Runs @action@ for the key, e.g. "Down" or "<Primary>k".
 shortcut :: Gtk.ShortcutController -> Text -> IO () -> IO ()
 shortcut controller trigger action = do
-  parsed <- Gtk.shortcutTriggerParseString trigger
+  parsed <- Gtk.shortcutTriggerParseString (Platform.keys trigger)
   callback <- Gtk.callbackActionNew (\_ _ -> action >> pure True)
   s <- Gtk.shortcutNew parsed (Just callback)
   Gtk.shortcutControllerAddShortcut controller s

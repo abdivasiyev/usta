@@ -59,6 +59,8 @@ import qualified Usta.Types.Thread as Th
 import qualified Usta.Types.Release as Rel
 import qualified Usta.Types.Search as S
 import qualified Usta.Types.Tree as Tr
+import qualified Usta.Types.Workflow as W
+import qualified Data.Aeson.Key as Key
 import qualified Usta.Types.Label as L
 import qualified Usta.Types.Listing as Lt
 import qualified Usta.Types.Milestone as M
@@ -142,7 +144,25 @@ github manager host token = do
     , checks = \repo n -> (\(Api.Checks cs) -> map checkOf cs) <$> asked graph (Api.graph.checks Api.GraphQuery {query = Api.checksQuery, variables = itemVariables repo n Nothing})
     , workflows = \repo -> do
         Api.Workflows ws <- run rest (Api.api.workflows (owner repo) (shortName repo) Api.ListQuery {page = Just 1, perPage = Named (Just 100)})
-        pure [name | (name, state) <- ws, state /= "deleted"]
+        pure [name | (name, _, state) <- ws, state /= "deleted"]
+    , startable = \repo branch -> do
+        let (o, r) = (owner repo, shortName repo)
+        Api.Workflows ws <- run rest (Api.api.workflows o r Api.ListQuery {page = Just 1, perPage = Named (Just 100)})
+        -- Each file as the branch has it; one it lacks, or that cannot be
+        -- started by hand, is left out.
+        found <- for [(name, path) | (name, path, state) <- ws, state == "active", ".github/workflows/" `T.isPrefixOf` path] $ \(name, path) -> do
+          got <- try (run rest (Api.api.file o r (T.splitOn "/" path) (Just branch)))
+          pure $ case got of
+            Right bytes | Right (Just is) <- W.inputsOf bytes -> [W.Workflow {name = name, file = path, inputs = is}]
+            Left (_ :: Failure) -> []
+            _ -> []
+        pure (concat found)
+    , dispatch = \repo w branch values ->
+        runDone rest (Api.api.dispatch (owner repo) (shortName repo) (snd (T.breakOnEnd "/" w.file))
+          (object ["ref" .= branch, "inputs" .= object [Key.fromText k .= v | (k, v) <- values]]))
+    , rerun = \repo i failedOnly -> runDone rest ((if failedOnly then Api.api.rerunFailed else Api.api.rerun) (owner repo) (shortName repo) i)
+    , cancelRun = \repo i -> runDone rest (Api.api.cancelRun (owner repo) (shortName repo) i)
+    , rerunJob = \repo job -> runDone rest (Api.api.rerunJob (owner repo) (shortName repo) (fromIntegral job.run))
     , jobSteps = \repo job -> do
         j <- run rest (Api.api.job (owner repo) (shortName repo) (fromIntegral job.run))
         pure (stateOf j.status j.conclusion, [(name, stateOf status conclusion) | (name, status, conclusion) <- j.steps])
@@ -236,7 +256,8 @@ github manager host token = do
         for latest $ \w -> do
           Api.Jobs jobs <- run rest (Api.api.runJobs o r w.id)
           pure C.Run
-            { number = w.number, workflow = w.workflow, title = w.title, branch = w.branch, event = w.event
+            { id = w.id
+            , number = w.number, workflow = w.workflow, title = w.title, branch = w.branch, event = w.event
             , sha = w.sha, state = stateOf w.status w.conclusion, started = w.started, updated = w.updated
             , url = w.url, jobs = map jobCheck jobs }
     , react = \repo n which feeling adding -> do

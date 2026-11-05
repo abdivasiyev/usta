@@ -226,6 +226,22 @@ data Routes mode = Routes
   , workflows
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "workflows"
            :> RecordQueryParam ListQuery :> Get '[JSON] Workflows
+  , dispatch
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "workflows" :> Capture "workflow" Text
+           :> "dispatches" :> ReqBody '[JSON] Value :> PostNoContent
+  , rerun
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int64
+           :> "rerun" :> PostNoContent
+  , rerunFailed
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int64
+           :> "rerun-failed-jobs" :> PostNoContent
+  , cancelRun
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int64
+           :> "cancel" :> PostNoContent
+  , rerunJob
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "jobs" :> Capture "job" Int64
+           :> "rerun" :> PostNoContent
+    -- ^ These four answer 201 or 202: run them with 'Usta.Forge.Http.runDone'.
   , runJobs
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int64
            :> "jobs" :> Get '[JSON] Jobs
@@ -1305,8 +1321,9 @@ instance FromJSON JobSteps where
 -- | Each workflow's name and state: "active", "deleted" (its file is
 -- gone), or one of the "disabled_…" states.
 type Workflows :: Type
-newtype Workflows = Workflows [(Text, Text)]
+newtype Workflows = Workflows [(Text, Text, Text)]
+  -- ^ Each one's name, file and state.
 
 instance FromJSON Workflows where
   parseJSON = withObject "Workflows" $ \o -> Workflows
-    <$> (o .: "workflows" >>= traverse (withObject "Workflow" (\w -> (,) <$> w .: "name" <*> w .: "state")))
+    <$> (o .: "workflows" >>= traverse (withObject "Workflow" (\w -> (,,) <$> w .: "name" <*> w .: "path" <*> w .: "state")))

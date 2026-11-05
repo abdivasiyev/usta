@@ -168,8 +168,14 @@ data Routes mode = Routes
            :> RecordQueryParam RefQuery :> Get '[JSON] [Entry]
   , folder
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "contents" :> CaptureAll "path" Text
-           :> Get '[JSON] [Entry]
-    -- ^ A folder on the default branch.
+           :> QueryParam "ref" Text :> Get '[JSON] [Entry]
+    -- ^ A folder, on the default branch without a ref.
+  , rawAt
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "raw" :> CaptureAll "path" Text
+           :> RecordQueryParam RefQuery :> Get '[RawBytes] ByteString
+  , dispatch
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "workflows" :> Capture "workflow" Text
+           :> "dispatches" :> ReqBody '[JSON] Value :> Verb 'POST 204 '[JSON] NoContent
   , raw
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "raw" :> Capture "path" Text
            :> RecordQueryParam RefQuery :> Get '[RawText] Text

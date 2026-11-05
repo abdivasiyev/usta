@@ -42,6 +42,7 @@ import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import qualified Data.ByteString.Lazy as BL
+import Data.Aeson (object, (.=))
 import Servant.Multipart.API (FileData (..), MultipartData (..))
 import Servant.Multipart.Client (genBoundary)
 import qualified Usta.Types.Branch as Br
@@ -55,6 +56,8 @@ import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
 import qualified Usta.Types.Label as L
+import qualified Usta.Types.Workflow as W
+import qualified Data.Aeson.Key as Key
 import qualified Usta.Types.Listing as Lt
 import Usta.Types.Milestone (Milestone (..))
 import Usta.Types.Login (Login)
@@ -256,12 +259,30 @@ forgejo manager base host token = do
         pure (map (checkOf host) combined.statuses)
     -- The first attempt's: the status links the job, not its attempts.
     , jobSteps = \_ _ -> throwIO (Refused "Forgejo does not list a job's steps.")
+    , startable = \repo branch -> do
+        let (o, r) = (owner repo, shortName repo)
+            inFolder dir = either (\(_ :: Failure) -> []) (\es -> [(dir, e.name) | e <- es, e.kind == "file", any (`T.isSuffixOf` e.name) [".yml", ".yaml"]])
+              <$> try (run client (Api.api.folder o r [dir, "workflows"] (Just branch)))
+        found <- traverse inFolder [".forgejo", ".gitea", ".github"]
+        let files = take 1 [fs | fs@(_ : _) <- found] >>= id
+        concat <$> for files (\(dir, name) -> do
+          got <- try (run client (Api.api.rawAt o r [dir, "workflows", name] Api.RefQuery {ref = branch}))
+          pure $ case got of
+            Right bytes | Right (Just is) <- W.inputsOf bytes -> [W.Workflow {name = name, file = dir <> "/workflows/" <> name, inputs = is}]
+            Left (_ :: Failure) -> []
+            _ -> [])
+    , dispatch = \repo w branch values ->
+        () <$ run client (Api.api.dispatch (owner repo) (shortName repo) (snd (T.breakOnEnd "/" w.file))
+          (object ["ref" .= branch, "inputs" .= object [Key.fromText k .= v | (k, v) <- values]]))
+    , rerun = \_ _ _ -> throwIO (Refused "Forgejo has no API to run a workflow again.")
+    , cancelRun = \_ _ -> throwIO (Refused "Forgejo has no API to cancel a run.")
+    , rerunJob = \_ _ -> throwIO (Refused "Forgejo has no API to run a job again.")
     -- Forgejo has no list of workflows: they are the files of the first
     -- of its workflow folders the default branch has, named as its runs
     -- name them, by file.
     , workflows = \repo -> do
         let inFolder dir = either (\(_ :: Failure) -> []) (\es -> [e.name | e <- es, e.kind == "file", any (`T.isSuffixOf` e.name) [".yml", ".yaml"]])
-              <$> try (run client (Api.api.folder (owner repo) (shortName repo) [dir, "workflows"]))
+              <$> try (run client (Api.api.folder (owner repo) (shortName repo) [dir, "workflows"] Nothing))
         found <- traverse inFolder [".forgejo", ".gitea", ".github"]
         pure (take 1 [names | names@(_ : _) <- found] >>= id)
     , checkLog = \repo job -> run site (Api.web.jobLog (owner repo) (shortName repo) job.run job.index 1)
@@ -676,7 +697,8 @@ checkOf host s = C.Check
 runsOf :: [Api.Task] -> [C.Run]
 runsOf tasks =
   [ C.Run
-      { number = n
+      { id = fromIntegral n
+      , number = n
       , workflow = t.workflowId
       , title = t.displayTitle
       , branch = t.headBranch

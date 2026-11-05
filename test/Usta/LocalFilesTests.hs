@@ -11,7 +11,7 @@ import Control.Monad (forM_)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import System.Directory (getHomeDirectory)
-import Test.Tasty (DependencyType (..), TestTree, sequentialTestGroup)
+import Test.Tasty (DependencyType (..), TestTree, dependentTestGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 
 import qualified Usta.Drafts as Drafts
@@ -27,7 +27,7 @@ import qualified Usta.Waiting as Waiting
 tests :: TestTree
 tests =
   -- One after another: they share the files and the log.
-  sequentialTestGroup
+  dependentTestGroup
     "Local files"
     AllFinish
     [ testCase "a draft is kept, and an empty one taken away" $ do

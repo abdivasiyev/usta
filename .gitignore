@@ -17,3 +17,7 @@ cabal.project.local*
 result
 result-*
 .direnv/
+
+# SQLite beside a test cache
+*.db-wal
+*.db-shm

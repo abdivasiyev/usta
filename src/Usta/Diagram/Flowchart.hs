@@ -28,8 +28,8 @@ import Usta.Mermaid (Direction (..), Edge (..), Flowchart (..), Group (..), Node
 type Sized :: Type
 data Sized = Sized {node :: Node, text :: Size, box :: Size}
 
-draw :: Monad m => Measure m -> Flowchart -> m Scene
-draw measure chart = do
+draw :: Monad m => Moves -> Measure m -> Flowchart -> m Scene
+draw drags measure chart = do
   sized <- for chart.nodes $ \n -> do
     t <- measure nodeFont n.label
     pure Sized {node = n, text = t, box = boxFor n.shape t}
@@ -51,9 +51,9 @@ draw measure chart = do
         BottomUp -> Point {x = p.x, y = bottom - p.y}
         LeftRight -> Point {x = p.y, y = p.x}
         RightLeft -> Point {x = bottom - p.y, y = p.x}
-      centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
+      centers = Map.mapWithKey (dragged drags) (Map.fromList [(p.key, place p.center) | p <- result.placed])
       byName = Map.fromList [(s.node.name, s) | s <- sized]
-      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
+      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [Route.unbent drags centers r.from r.to (map place r.points)]) | r <- result.routed]
       shapeAt name = (,) <$> Map.lookup name centers <*> Map.lookup name byName
       -- Each edge takes the next route between its two nodes.
       taken = snd (foldl takeRoute (routes, []) (zip chart.edges labels))
@@ -102,7 +102,7 @@ draw measure chart = do
            in [ Rect {at = Point left top, size = Size (right' - left) (bottom' - top), radius = 8, fill = Just (Tint 0), edge = Just (pen Border 1)}
               , Text {at = Point (left + 10) (top + 13), text = g.title, font = bold 11, color = Muted, anchor = Start}
               ]
-  pure (scene 12 (groupItems <> edgeItems <> nodeItems))
+  pure (scene 12 (groupItems <> edgeItems <> nodeItems <> [handle s.node.name c s.box | s <- sized, Just c <- [Map.lookup s.node.name centers]]))
   where
     headOr d xs = case xs of
       x : _ -> x

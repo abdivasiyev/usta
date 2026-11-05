@@ -102,8 +102,8 @@ relationship line = do
       "|{" -> Just OneOrMany
       _ -> Nothing
 
-draw :: Monad m => Measure m -> Entities -> m Scene
-draw measure d = do
+draw :: Monad m => Moves -> Measure m -> Entities -> m Scene
+draw drags measure d = do
   sized <- for d.entities $ \e -> do
     title <- measure (bold 13) e.label
     cells <- for e.attributes $ \a -> do
@@ -123,9 +123,9 @@ draw measure d = do
   let turn z = if d.across then Size z.h z.w else z
       result = layered spacing [Box e.name (turn z) | (e, z, _) <- sized] [Link r.left r.right (if T.null r.label then 0 else 10 + (if d.across then l.w else l.h)) | (r, l) <- zip d.relationships labels]
       place p = if d.across then Point p.y p.x else p
-      centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
+      centers = Map.mapWithKey (dragged drags) (Map.fromList [(p.key, place p.center) | p <- result.placed])
       sizes = Map.fromList [(e.name, z) | (e, z, _) <- sized]
-      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
+      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [Route.unbent drags centers r.from r.to (map place r.points)]) | r <- result.routed]
       taken = snd (foldl' take' (routes, []) (zip d.relationships labels))
       take' (left', acc) (r, l) = case Map.lookup (r.left, r.right) left' of
         Just (ps : more) -> (Map.insert (r.left, r.right) more left', acc <> [(r, l, ps)])
@@ -150,7 +150,7 @@ draw measure d = do
           , \mid -> [ Rect {at = Point (mid.x - l.w / 2 - 4) (mid.y - l.h / 2 - 1), size = Size (l.w + 8) (l.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
                     , Text {at = mid, text = r.label, font = regular 11, color = Muted, anchor = Middle} ] )
       boxes = concat [entityBox p e z ws | (e, z, ws) <- sized, Just p <- [Map.lookup e.name centers]]
-  pure (scene 12 (links <> boxes))
+  pure (scene 12 (links <> boxes <> [handle e.name c z | (e, z, _) <- sized, Just c <- [Map.lookup e.name centers]]))
 
 entityBox :: Point -> Entity -> Size -> (Double, Double, Double, Double) -> [Item]
 entityBox c e z (w1, w2, w3, _) =

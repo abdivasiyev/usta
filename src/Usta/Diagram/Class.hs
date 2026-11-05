@@ -140,8 +140,8 @@ relation line = do
             ["", c, n] | not first -> (T.strip n, Just c)
             _ -> (T.strip (fst quoted), Nothing)
 
-draw :: Monad m => Measure m -> Classes -> m Scene
-draw measure diagram = do
+draw :: Monad m => Moves -> Measure m -> Classes -> m Scene
+draw drags measure diagram = do
   sized <- for diagram.classes $ \c -> do
     title <- measure (bold 13) c.label
     note <- traverse (measure (regular 11)) c.annotation
@@ -168,9 +168,9 @@ draw measure diagram = do
         Up -> Point p.x (bottom - p.y)
         Across -> Point p.y p.x
         Back -> Point (bottom - p.y) p.x
-      centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
+      centers = Map.mapWithKey (dragged drags) (Map.fromList [(p.key, place p.center) | p <- result.placed])
       sizes = Map.fromList [(c.name, s) | (c, s, _, _, _) <- sized]
-      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
+      routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [Route.unbent drags centers r.from r.to (map place r.points)]) | r <- result.routed]
       taken = snd (foldl' takeRoute (routes, []) (zip diagram.relations labels))
       takeRoute (left', acc) (r, l) = case Map.lookup (r.left, r.right) left' of
         Just (ps : more) -> (Map.insert (r.left, r.right) more left', acc <> [(r, l, ps)])
@@ -202,7 +202,7 @@ draw measure diagram = do
         [ Rect {at = Point (p.x - s.w / 2 - 4) (p.y - s.h / 2 - 1), size = Size (s.w + 8) (s.h + 2), radius = 3, fill = Just Paper, edge = Nothing}
         , Text {at = p, text = t, font = regular 11, color = Muted, anchor = Middle} ]
       classItems = concat (mapMaybe (\(c, s, headH, attributes, methods) -> (\p -> box p c s headH attributes methods) <$> Map.lookup c.name centers) sized)
-  pure (scene 12 (linkItems <> classItems))
+  pure (scene 12 (linkItems <> classItems <> [handle c.name p s | (c, s, _, _, _) <- sized, Just p <- [Map.lookup c.name centers]]))
   where
     headOr d xs = case xs of
       x : _ -> x

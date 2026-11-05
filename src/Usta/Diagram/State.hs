@@ -139,8 +139,8 @@ parse source = do
 -- in the level around it; a transition into or out of a composite meets
 -- its frame. Notes are boxes of their own, joined to their state, so they
 -- never cover another.
-draw :: Monad m => Measure m -> States -> m Scene
-draw measure d = do
+draw :: Monad m => Moves -> Measure m -> States -> m Scene
+draw drags measure d = do
   (_, items) <- level ""
   pure (scene 12 items)
   where
@@ -189,10 +189,10 @@ draw measure d = do
             <> [if n.onLeft then Link (noteKey i) n.target 0 else Link n.target (noteKey i) 0 | (i, n, _) <- noteSizes]
           result = layered spacing boxes links
           place p = if d.across then Point p.y p.x else p
-          centers = Map.fromList [(p.key, place p.center) | p <- result.placed]
+          centers = Map.mapWithKey (dragged drags) (Map.fromList [(p.key, place p.center) | p <- result.placed])
           sizes = Map.fromList ([(s.name, z) | (s, z, _) <- children] <> [(noteKey i, Size (z.w + 16) (z.h + 14)) | (i, _, z) <- noteSizes])
           kinds = Map.fromList [(s.name, s.kind) | (s, _, _) <- children]
-          routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [map place r.points]) | r <- result.routed]
+          routes = Map.fromListWith (flip (<>)) [((r.from, r.to), [Route.unbent drags centers r.from r.to (map place r.points)]) | r <- result.routed]
           outlineOf n = case Map.lookup n kinds of
             Just Choice -> Route.Rhombus
             Just Initial -> Route.Round
@@ -252,7 +252,7 @@ draw measure d = do
             [ [ Rect {at = Point (p.x - z.w / 2) (p.y - z.h / 2), size = z, radius = 4, fill = Just (Tint 4), edge = Just (pen (Series 4) 1)}
               , Text {at = p, text = n.text, font = regular 12, color = Ink, anchor = Middle} ]
             | (i, n, _) <- noteSizes, Just p <- [Map.lookup (noteKey i) centers], Just z <- [Map.lookup (noteKey i) sizes] ]
-          drawn = scene 0 (joins <> arrows <> nodes <> notes)
+          drawn = scene 0 (joins <> arrows <> nodes <> notes <> [handle s.name c z | (s, z, _) <- children, Just c <- [Map.lookup s.name centers]])
       pure (drawn.size, drawn.items)
 
 shape :: Point -> State -> Size -> [Item]

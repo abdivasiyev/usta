@@ -318,6 +318,7 @@ test-suite usta-test
     Usta.UI.Components.FileIconTests
     Usta.UI.Components.NewRepositoryTests
     Usta.UI.FormatTests
+    Usta.UI.HighlightTests
     Usta.UI.Pages.PullRequest.ChecksTests
     Usta.UpdatesTests
   ghc-options: -threaded

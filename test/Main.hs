@@ -18,6 +18,7 @@ import qualified Usta.GitTests
 import qualified Usta.UI.Components.NewRepositoryTests
 import qualified Usta.DiagramTests
 import qualified Usta.MermaidTests
+import qualified Usta.UI.HighlightTests
 
 main :: IO ()
 main =
@@ -38,4 +39,5 @@ main =
       , Usta.UI.Components.NewRepositoryTests.tests
       , Usta.DiagramTests.tests
       , Usta.MermaidTests.tests
+      , Usta.UI.HighlightTests.tests
       ]

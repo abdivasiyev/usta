@@ -314,6 +314,7 @@ test-suite usta-test
     Usta.Types.ParseTests
     Usta.Types.WorkflowTests
     Usta.UI.Components.FileIconTests
+    Usta.UI.Components.NewRepositoryTests
     Usta.UI.FormatTests
     Usta.UI.Pages.PullRequest.ChecksTests
     Usta.UpdatesTests

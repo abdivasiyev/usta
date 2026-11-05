@@ -6,6 +6,7 @@ module Main (main) where
 
 import qualified Usta.Handoff as Handoff
 import qualified Usta.UrlEvents as UrlEvents
+import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
@@ -81,6 +82,13 @@ runApp open = do
   app <- new Application [ #applicationId := "io.github.abdivasiyev.Usta"
                          , On #activate (open ?self)
                          ]
+  -- macOS's Quit (the Dock, the app menu, Cmd Q) asks GTK, which ends the
+  -- process at once unless the app has a quit action; with one, run
+  -- returns and usta stops as it should.
+  quit <- Gio.simpleActionNew "quit" Nothing
+  void $ on quit #activate (\_ -> #quit app)
+  Gio.actionMapAddAction app quit
+  Gtk.applicationSetAccelsForAction app "app.quit" ["<Primary>q"]
   void $ #run app Nothing
 
 -- | The real cache, with every saved account syncing on its keyring

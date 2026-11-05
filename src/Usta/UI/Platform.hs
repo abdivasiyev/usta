@@ -55,6 +55,9 @@ dialogOver dialog parent = forM_ parent $ \p -> do
             case (mine, theirs) of
               (Just a, Just b) -> withManagedPtr a $ \pa -> withManagedPtr b $ \pb -> act pa pb
               _ -> pure ()
+      -- Ready before macOS first shows it, then a child once shown.
+      void $ GI.after dialog #realize $
+        Gtk.nativeGetSurface dialog >>= mapM_ (\a -> withManagedPtr a c_prepare)
       void $ GI.on dialog #map (both c_attach)
       void $ GI.on dialog #unmap (both c_detach)
     _ -> pure ()
@@ -62,5 +65,6 @@ dialogOver dialog parent = forM_ parent $ \p -> do
   -- usta never ends up with no window in front.
   void $ GI.on dialog #destroy (Gtk.windowPresent p)
 
+foreign import ccall unsafe "usta_prepare_dialog" c_prepare :: Ptr Gdk.Surface -> IO ()
 foreign import ccall unsafe "usta_attach_dialog" c_attach :: Ptr Gdk.Surface -> Ptr Gdk.Surface -> IO ()
 foreign import ccall unsafe "usta_detach_dialog" c_detach :: Ptr Gdk.Surface -> Ptr Gdk.Surface -> IO ()

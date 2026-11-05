@@ -45,6 +45,7 @@ import qualified Usta.Git.Credential as Credential
 import qualified Usta.Keyring as Keyring
 import qualified Usta.Mirrors as Mirrors
 import qualified Usta.Preferences as Preferences
+import qualified Usta.UI.TextKeys as TextKeys
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind (..))
@@ -80,6 +81,7 @@ current manager host token = case OAuth.stored token of
 runApp :: (Application -> IO ()) -> IO ()
 runApp open = do
   app <- new Application [ #applicationId := "io.github.abdivasiyev.Usta"
+                         , On #startup TextKeys.everywhere
                          , On #activate (open ?self)
                          ]
   -- macOS's Quit (the Dock, the app menu, Cmd Q) asks GTK, which ends the

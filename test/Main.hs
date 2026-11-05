@@ -9,6 +9,8 @@ import qualified Usta.Types.LinkTests
 import qualified Usta.UI.FormatTests
 import qualified Usta.UpdatesTests
 import qualified Usta.Types.DiffTests
+import qualified Usta.Types.WorkflowTests
+import qualified Usta.GraphTests
 
 main :: IO ()
 main =
@@ -20,4 +22,6 @@ main =
       , Usta.UI.FormatTests.tests
       , Usta.UpdatesTests.tests
       , Usta.Types.DiffTests.tests
+      , Usta.Types.WorkflowTests.tests
+      , Usta.GraphTests.tests
       ]

@@ -39,6 +39,30 @@ module Usta.Forge.GitHub.Api
   , ReactionGroup (..)
   , Item (..)
   , TimelineNode (..)
+  , GitHubDiff
+  , GitHubRaw
+  , LogText
+  , CommitsQuery (..)
+  , RestCommit (..)
+  , BaseHead (..)
+  , Comparison (..)
+  , Named' (..)
+  , Tree (..)
+  , TreeEntry (..)
+  , RestRelease (..)
+  , RestAsset (..)
+  , WorkflowRuns (..)
+  , WorkflowRun (..)
+  , Jobs (..)
+  , RestJob (..)
+  , RefPage (..)
+  , RefNode (..)
+  , Checks (..)
+  , CheckNode (..)
+  , FoundNode (..)
+  , refsQuery
+  , checksQuery
+  , foundQuery
   , feelingName
   , feelingOf
   , discussionQuery
@@ -54,7 +78,11 @@ import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), Object, ToJSON (..), Value, object, withObject, (.!=), (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
 import qualified Data.Aeson.Key
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BL
 import Data.Int (Int64)
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
@@ -137,6 +165,59 @@ data Routes mode = Routes
   , createIssue
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> ReqBody '[JSON] Value
            :> Post '[JSON] Created
+  , createPull
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> ReqBody '[JSON] Value
+           :> Post '[JSON] Created
+  , requestReviewers
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "requested_reviewers" :> ReqBody '[JSON] Value :> Post '[JSON] Ignored
+  , unrequestReviewers
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "requested_reviewers" :> ReqBody '[JSON] Value :> Delete '[JSON] Ignored
+  , pullDiff
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> Get '[GitHubDiff] Text
+  , pullCommits
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "pulls" :> Capture "number" Number
+           :> "commits" :> RecordQueryParam ListQuery :> Get '[JSON] [RestCommit]
+  , commitDiff
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits" :> Capture "sha" Text
+           :> Get '[GitHubDiff] Text
+  , commits
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "commits" :> RecordQueryParam CommitsQuery
+           :> Get '[JSON] [RestCommit]
+  , compare
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "compare" :> Capture "basehead" BaseHead
+           :> Get '[JSON] Comparison
+  , compareDiff
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "compare" :> Capture "basehead" BaseHead
+           :> Get '[GitHubDiff] Text
+  , readme
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "readme" :> QueryParam "ref" Text
+           :> Get '[JSON] Named'
+  , tree
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "git" :> "trees" :> Capture "ref" Text
+           :> QueryParam "recursive" Int :> Get '[JSON] Tree
+  , file
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "contents" :> CaptureAll "path" Text
+           :> QueryParam "ref" Text :> Get '[GitHubRaw] ByteString
+  , releases
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "releases" :> RecordQueryParam ListQuery
+           :> Get '[JSON] [RestRelease]
+  , runs
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> RecordQueryParam ListQuery
+           :> Get '[JSON] WorkflowRuns
+  , runJobs
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "runs" :> Capture "run" Int64
+           :> "jobs" :> Get '[JSON] Jobs
+  , jobLog
+      :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "actions" :> "jobs" :> Capture "job" Int64
+           :> "logs" :> Get '[LogText] ByteString
+    -- ^ GitHub answers with a redirect to the log, which the client follows.
+  , starred :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> GetNoContent
+    -- ^ 204 when starred, 404 when not.
+  , star :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> PutNoContent
+  , unstar :: mode :- "user" :> "starred" :> Capture "owner" Text :> Capture "repo" Text :> DeleteNoContent
   }
   deriving stock (Generic)
 
@@ -153,6 +234,9 @@ data Graph mode = Graph
   , discussion :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer DiscussionNode)
   , timeline :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer (Item [TimelineNode]))
   , mutate :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer Ignored)
+  , refs :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer RefPage)
+  , checks :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer Checks)
+  , found :: mode :- ReqBody '[JSON] GraphQuery :> Post '[JSON] (Answer (Page FoundNode))
   }
   deriving stock (Generic)
 
@@ -704,3 +788,298 @@ timelineQuery =
 subscriptionMutation :: Text
 subscriptionMutation =
   "mutation($id: ID!, $state: SubscriptionState!) { updateSubscription(input: {subscribableId: $id, state: $state}) { clientMutationId } }"
+
+-- | A diff, as GitHub sends it for this media type.
+type GitHubDiff :: Type
+data GitHubDiff
+
+instance Accept GitHubDiff where
+  contentTypes _ = "application/vnd.github.diff" :| []
+
+instance MimeUnrender GitHubDiff Text where
+  mimeUnrender _ = Right . decodeUtf8Lenient . BL.toStrict
+
+-- | A file's bytes as they are, or a job's log.
+type GitHubRaw :: Type
+data GitHubRaw
+
+instance Accept GitHubRaw where
+  contentTypes _ = "application/vnd.github.raw" :| []
+
+instance MimeUnrender GitHubRaw ByteString where
+  mimeUnrender _ = Right . BL.toStrict
+
+-- | A job's log. GitHub's API takes only its own media type, then
+-- redirects to storage that sends the log as text.
+type LogText :: Type
+data LogText
+
+instance Accept LogText where
+  contentTypes _ = "application/vnd.github+json" :| ["text/plain", "application/octet-stream"]
+
+instance MimeUnrender LogText ByteString where
+  mimeUnrender _ = Right . BL.toStrict
+
+type CommitsQuery :: Type
+data CommitsQuery = CommitsQuery
+  { sha :: Maybe Text
+  , path :: Maybe Text
+  , page :: Maybe Int
+  , perPage :: Named "per_page" (Maybe Int)
+  }
+  deriving stock (Generic)
+
+instance ToQuery CommitsQuery
+
+type RestCommit :: Type
+data RestCommit = RestCommit
+  { sha :: Text
+  , author :: Text
+  , authoredAt :: UTCTime
+  , message :: Text
+  }
+
+instance FromJSON RestCommit where
+  parseJSON = withObject "Commit" $ \o -> do
+    c <- o .: "commit"
+    a <- c .: "author"
+    RestCommit <$> o .: "sha" <*> a .: "name" <*> a .: "date" <*> c .: "message"
+
+-- | The path segment "base...head".
+type BaseHead :: Type
+data BaseHead = BaseHead Text Text
+
+instance ToHttpApiData BaseHead where
+  toUrlPiece (BaseHead base tip) = base <> "..." <> tip
+
+type Comparison :: Type
+data Comparison = Comparison {commits :: [RestCommit], files :: [Text]}
+
+instance FromJSON Comparison where
+  parseJSON = withObject "Comparison" $ \o -> Comparison
+    <$> o .: "commits"
+    <*> (o .:? "files" .!= [] >>= traverse (withObject "File" (.: "filename")))
+
+-- | Something with a name and a path, as the README answer.
+type Named' :: Type
+data Named' = Named' {name :: Text, path :: Text}
+
+instance FromJSON Named' where
+  parseJSON = withObject "Content" $ \o -> Named' <$> o .: "name" <*> o .: "path"
+
+type Tree :: Type
+data Tree = Tree {entries :: [TreeEntry], truncated :: Bool}
+
+instance FromJSON Tree where
+  parseJSON = withObject "Tree" $ \o -> Tree <$> o .: "tree" <*> o .:? "truncated" .!= False
+
+type TreeEntry :: Type
+data TreeEntry = TreeEntry {path :: Text, folder :: Bool, size :: Maybe Int}
+
+instance FromJSON TreeEntry where
+  parseJSON = withObject "Entry" $ \o -> TreeEntry
+    <$> o .: "path"
+    <*> ((== ("tree" :: Text)) <$> o .: "type")
+    <*> o .:? "size"
+
+type RestRelease :: Type
+data RestRelease = RestRelease
+  { name :: Maybe Text
+  , tag :: Text
+  , notes :: Maybe Text
+  , author :: Maybe Login
+  , published :: Maybe UTCTime
+  , draft :: Bool
+  , prerelease :: Bool
+  , url :: Text
+  , assets :: [RestAsset]
+  }
+
+instance FromJSON RestRelease where
+  parseJSON = withObject "Release" $ \o -> RestRelease
+    <$> o .:? "name"
+    <*> o .: "tag_name"
+    <*> o .:? "body"
+    <*> (o .:? "author" >>= maybe (pure Nothing) (.:? "login"))
+    <*> o .:? "published_at"
+    <*> o .: "draft"
+    <*> o .: "prerelease"
+    <*> o .: "html_url"
+    <*> o .: "assets"
+
+type RestAsset :: Type
+data RestAsset = RestAsset {name :: Text, size :: Int64, downloads :: Int, url :: Text}
+
+instance FromJSON RestAsset where
+  parseJSON = withObject "Asset" $ \o -> RestAsset
+    <$> o .: "name" <*> o .: "size" <*> o .: "download_count" <*> o .: "browser_download_url"
+
+type WorkflowRuns :: Type
+newtype WorkflowRuns = WorkflowRuns [WorkflowRun]
+
+instance FromJSON WorkflowRuns where
+  parseJSON = withObject "Runs" $ \o -> WorkflowRuns <$> o .: "workflow_runs"
+
+type WorkflowRun :: Type
+data WorkflowRun = WorkflowRun
+  { id :: Int64
+  , number :: Int
+  , workflow :: Text
+  , title :: Text
+  , branch :: Text
+  , event :: Text
+  , sha :: Text
+  , status :: Text
+  , conclusion :: Maybe Text
+  , started :: UTCTime
+  , updated :: UTCTime
+  , url :: Text
+  }
+
+instance FromJSON WorkflowRun where
+  parseJSON = withObject "Run" $ \o -> WorkflowRun
+    <$> o .: "id"
+    <*> o .: "run_number"
+    <*> o .:? "name" .!= ""
+    <*> o .:? "display_title" .!= ""
+    <*> o .:? "head_branch" .!= ""
+    <*> o .: "event"
+    <*> o .: "head_sha"
+    <*> o .: "status"
+    <*> o .:? "conclusion"
+    <*> (o .:? "run_started_at" >>= maybe (o .: "created_at") pure)
+    <*> o .: "updated_at"
+    <*> o .: "html_url"
+
+type Jobs :: Type
+newtype Jobs = Jobs [RestJob]
+
+instance FromJSON Jobs where
+  parseJSON = withObject "Jobs" $ \o -> Jobs <$> o .: "jobs"
+
+type RestJob :: Type
+data RestJob = RestJob
+  { id :: Int64
+  , name :: Text
+  , status :: Text
+  , conclusion :: Maybe Text
+  , startedAt :: Maybe UTCTime
+  , completedAt :: Maybe UTCTime
+  , url :: Text
+  }
+
+instance FromJSON RestJob where
+  parseJSON = withObject "Job" $ \o -> RestJob
+    <$> o .: "id" <*> o .: "name" <*> o .: "status" <*> o .:? "conclusion"
+    <*> o .:? "started_at" <*> o .:? "completed_at" <*> o .: "html_url"
+
+-- | A page of a repository's branches or tags.
+type RefPage :: Type
+newtype RefPage = RefPage (Page RefNode)
+
+instance FromJSON RefPage where
+  parseJSON = withObject "Data" $ \d -> d .: "repository" >>= (.: "found") >>= fmap RefPage . connection
+
+type RefNode :: Type
+data RefNode = RefNode {name :: Text, at :: Maybe UTCTime}
+
+instance FromJSON RefNode where
+  parseJSON = withObject "Ref" $ \o -> do
+    target <- o .:? "target"
+    -- A tag may point at an annotated tag, which points at the commit.
+    at <- case target of
+      Just t -> do
+        direct <- t .:? "committedDate"
+        inner <- t .:? "target" >>= maybe (pure Nothing) (.:? "committedDate")
+        pure (direct <|> inner)
+      Nothing -> pure Nothing
+    RefNode <$> o .: "name" <*> pure at
+
+-- | One check on a pull request's latest commit: a check run (most are
+-- GitHub Actions jobs) or a commit status.
+type CheckNode :: Type
+data CheckNode = CheckNode
+  { kind :: Text
+  , name :: Text
+  , status :: Maybe Text
+  , conclusion :: Maybe Text
+  , state :: Maybe Text
+  , description :: Maybe Text
+  , url :: Maybe Text
+  , jobId :: Maybe Int64
+  }
+
+-- | The checks of the pull request found.
+type Checks :: Type
+newtype Checks = Checks [CheckNode]
+
+instance FromJSON Checks where
+  parseJSON = withObject "Data" $ \d -> fmap Checks $ do
+    found <- d .: "repository" >>= (.: "found")
+    commits <- found .: "commits" >>= (.: "nodes")
+    case commits of
+      c : _ -> c .: "commit" >>= (.:? "statusCheckRollup") >>= \case
+        Just r -> r .: "contexts" >>= (.: "nodes")
+        Nothing -> pure []
+      [] -> pure []
+
+instance FromJSON CheckNode where
+  parseJSON = withObject "Check" $ \o -> CheckNode
+    <$> o .: "__typename"
+    <*> ((<|>) <$> o .:? "name" <*> o .:? "context" >>= maybe (pure "") pure)
+    <*> o .:? "status"
+    <*> o .:? "conclusion"
+    <*> o .:? "state"
+    <*> ((<|>) <$> o .:? "title" <*> o .:? "description")
+    <*> ((<|>) <$> o .:? "detailsUrl" <*> o .:? "targetUrl")
+    <*> o .:? "databaseId"
+
+-- | A pull request, issue or repository the forge's search found.
+type FoundNode :: Type
+data FoundNode = FoundNode
+  { kind :: Text
+  , repo :: Text
+  , number :: Maybe Int
+  , title :: Text
+  , closed :: Bool
+  , updated :: UTCTime
+  }
+
+instance FromJSON FoundNode where
+  parseJSON = withObject "Found" $ \o -> do
+    kind <- o .: "__typename"
+    case kind :: Text of
+      "Repository" -> FoundNode kind <$> o .: "nameWithOwner" <*> pure Nothing <*> (o .:? "description" .!= "") <*> pure False <*> o .: "updatedAt"
+      _ -> FoundNode kind
+        <$> (o .: "repository" >>= (.: "nameWithOwner"))
+        <*> (Just <$> o .: "number")
+        <*> o .: "title"
+        <*> o .: "closed"
+        <*> o .: "updatedAt"
+
+-- | Branches (@$prefix@ "refs/heads/") or tags ("refs/tags/"), latest
+-- commit first, a page of 100.
+refsQuery :: Text
+refsQuery =
+  "query($owner: String!, $name: String!, $prefix: String!, $after: String) { repository(owner: $owner, name: $name) {"
+    <> " found: refs(refPrefix: $prefix, first: 100, after: $after, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {"
+    <> " totalCount pageInfo { hasNextPage endCursor } nodes { name target { ... on Commit { committedDate }"
+    <> " ... on Tag { target { ... on Commit { committedDate } } } } } } } }"
+
+-- | The checks on a pull request's latest commit.
+checksQuery :: Text
+checksQuery =
+  "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
+    <> " found: pullRequest(number: $number) { commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) {"
+    <> " nodes { __typename ... on CheckRun { name status conclusion title detailsUrl databaseId }"
+    <> " ... on StatusContext { context state description targetUrl } } } } } } } } } }"
+
+-- | The forge's search for @$q@ (an ISSUE or REPOSITORY search, @$type@),
+-- ten of them.
+foundQuery :: Text
+foundQuery =
+  "query($q: String!, $type: SearchType!) { found: search(query: $q, type: $type, first: 10) {"
+    <> " issueCount pageInfo { hasNextPage endCursor } nodes { __typename"
+    <> " ... on PullRequest { number title closed updatedAt repository { nameWithOwner } }"
+    <> " ... on Issue { number title closed updatedAt repository { nameWithOwner } }"
+    <> " ... on Repository { nameWithOwner description updatedAt } } } }"

@@ -18,7 +18,10 @@ module Usta.Forge.GitHub
   , graphUrl
   ) where
 
-import Control.Exception (throwIO)
+import Control.Exception (throwIO, try)
+import Control.Monad (unless)
+import Data.Traversable (for)
+import Data.Text.Encoding (decodeUtf8Lenient)
 import Data.Aeson (ToJSON (..), Value (Null, String), object, (.=))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.ByteString (ByteString)
@@ -28,7 +31,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
-import Data.Time (UTCTime, addUTCTime, getCurrentTime, nominalDay)
+import Data.Time (NominalDiffTime, UTCTime, addUTCTime, diffUTCTime, getCurrentTime, nominalDay)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import qualified Network.HTTP.Client as HTTP
 import Servant.API (getResponse, lookupResponseHeader, ResponseHeader (..))
@@ -41,7 +44,14 @@ import Usta.Forge.Http (Client, connect, run, runChanged)
 import Usta.Types.Host (Host)
 import Usta.Types.Involvement (Involvement (..))
 import qualified Usta.Types.Issue as I
+import qualified Usta.Types.Branch as Br
+import qualified Usta.Types.Check as C
+import qualified Usta.Types.Commit as Cm
+import Usta.Types.Diff (FileDiff, parseDiff)
 import qualified Usta.Types.Discussion as D
+import qualified Usta.Types.Release as Rel
+import qualified Usta.Types.Search as S
+import qualified Usta.Types.Tree as Tr
 import qualified Usta.Types.Label as L
 import qualified Usta.Types.Milestone as M
 import Usta.Types.Number (Number)
@@ -88,6 +98,8 @@ github manager host token = do
           go n = do
             got <- run rest (route Api.ListQuery {page = Just n, perPage = Named (Just 100)})
             if length got < 100 || n >= 20 then pure got else (got <>) <$> go (n + 1)
+      commitsOn repo branch path n count = traverse commitOf =<< run rest (Api.api.commits (owner repo) (shortName repo)
+        Api.CommitsQuery {sha = branch, path = path, page = Just n, perPage = Named (Just count)})
   -- Who the token signs in as, asked once.
   me <- newIORef Nothing
   let myLogin = readIORef me >>= \case
@@ -108,14 +120,16 @@ github manager host token = do
     , cloneUrls = \repo -> do
         r <- run rest (Api.api.repository (owner repo) (shortName repo))
         pure CloneUrls {https = r.cloneUrl, ssh = r.sshUrl}
-    , pullDiff = soon
-    , pullCommits = soon
+    , pullDiff = \repo n -> run rest (Api.api.pullDiff (owner repo) (shortName repo) n) >>= diffOf
+    , pullCommits = \repo n -> traverse commitOf =<< pages (Api.api.pullCommits (owner repo) (shortName repo) n)
     , threads = soon
-    , checks = soon
-    , checkLog = soon
+    , checks = \repo n -> (\(Api.Checks cs) -> map checkOf cs) <$> asked graph (Api.graph.checks Api.GraphQuery {query = Api.checksQuery, variables = itemVariables repo n Nothing})
+    , checkLog = \repo job -> decodeUtf8Lenient <$> run rest (Api.api.jobLog (owner repo) (shortName repo) (fromIntegral job.run))
     , reviewers = soon
-    , requestReview = soon
-    , unrequestReview = soon
+    , requestReview = \repo n whos ->
+        () <$ run rest (Api.api.requestReviewers (owner repo) (shortName repo) n (reviewersBody whos))
+    , unrequestReview = \repo n who ->
+        () <$ run rest (Api.api.unrequestReviewers (owner repo) (shortName repo) n (reviewersBody [who]))
     , readiness = soon
     , markReady = soon
     , updateBranch = soon
@@ -123,9 +137,17 @@ github manager host token = do
     , cancelScheduledMerge = soon
     , reviewCandidates = soon
     , reply = soon
-    , recentCommits = soon
-    , readme = soon
-    , commitDiff = soon
+    , recentCommits = \repo branch -> commitsOn repo (Just branch) Nothing 1 10
+    , readme = \repo branch -> do
+        found <- try (run rest (Api.api.readme (owner repo) (shortName repo) (Just branch)))
+        case found of
+          -- No README is a 404.
+          Left (Refused _) -> pure Nothing
+          Left e -> throwIO e
+          Right r -> do
+            bytes <- run rest (Api.api.file (owner repo) (shortName repo) (T.splitOn "/" r.path) (Just branch))
+            pure (Just (r.name, decodeUtf8Lenient bytes))
+    , commitDiff = \repo sha -> run rest (Api.api.commitDiff (owner repo) (shortName repo) (unparse sha)) >>= diffOf
     , discussion = \repo n -> discussionOf graph repo n
     , comment = \repo n text -> do
         c <- run rest (Api.api.postComment (owner repo) (shortName repo) n (Api.Body text))
@@ -151,9 +173,21 @@ github manager host token = do
     , timeline = \repo n -> do
         Api.Item nodes <- asked graph (Api.graph.timeline Api.GraphQuery {query = Api.timelineQuery, variables = itemVariables repo n Nothing})
         eventsOf nodes
-    , repoPullRequests = soon
-    , repoIssues = soon
-    , runs = soon
+    , repoPullRequests = \repo -> do
+        found <- searchedOnce graph Api.graph.searchPulls Api.pullFields ("is:pr sort:updated-desc repo:" <> unparse repo)
+        traverse (\p -> pullOf host (p, [])) found
+    , repoIssues = \repo -> do
+        found <- searchedOnce graph Api.graph.searchIssues Api.issueFields ("is:issue sort:created-desc repo:" <> unparse repo)
+        traverse (\i -> issueOf host (i, [])) found
+    , runs = \repo -> do
+        let (o, r) = (owner repo, shortName repo)
+        Api.WorkflowRuns latest <- run rest (Api.api.runs o r Api.ListQuery {page = Just 1, perPage = Named (Just 20)})
+        for latest $ \w -> do
+          Api.Jobs jobs <- run rest (Api.api.runJobs o r w.id)
+          pure C.Run
+            { number = w.number, workflow = w.workflow, title = w.title, branch = w.branch, event = w.event
+            , sha = w.sha, state = stateOf w.status w.conclusion, started = w.started, updated = w.updated
+            , url = w.url, jobs = map jobCheck jobs }
     , react = \repo n which feeling adding -> do
         let (o, r) = (owner repo, shortName repo)
             body = Api.ReactionBody feeling
@@ -176,17 +210,38 @@ github manager host token = do
         created <- run rest (Api.api.createIssue (owner repo) (shortName repo) (object
           ["title" .= new.title, "body" .= new.body, "labels" .= new.labels, "assignees" .= map unparse new.assignees]))
         pure created.number
-    , createPull = soon
-    , branches = soon
-    , branchList = soon
-    , tags = soon
-    , upload = soon
-    , search = soon
-    , starred = soon
-    , setStarred = soon
-    , releases = soon
-    , fileHistory = soon
-    , history = soon
+    , createPull = \repo new -> do
+        let (o, r) = (owner repo, shortName repo)
+        created <- run rest (Api.api.createPull o r (object
+          ["title" .= new.title, "body" .= new.body, "head" .= new.from, "base" .= new.into, "draft" .= new.draft]))
+        unless (null new.labels) $ () <$ run rest (Api.api.setLabels o r created.number (Api.LabelNames new.labels))
+        unless (null new.reviewers) $
+          () <$ run rest (Api.api.requestReviewers o r created.number (object ["reviewers" .= map unparse new.reviewers]))
+        pure created.number
+    , branches = \repo -> map (.name) <$> refsOf graph repo "refs/heads/"
+    , branchList = \repo -> map (\r -> Br.Branch {name = r.name, pushed = r.at, ahead = Nothing, behind = Nothing}) <$> refsOf graph repo "refs/heads/"
+    , tags = \repo -> map (\r -> Br.Tag {name = r.name, at = r.at}) <$> refsOf graph repo "refs/tags/"
+    , upload = \_ _ _ _ -> throwIO (Refused "GitHub has no API for attachments: add the file to the comment on github.com.")
+    , search = \words' -> do
+        let ask kind = asked graph (Api.graph.found Api.GraphQuery {query = Api.foundQuery, variables = object ["q" .= words', "type" .= (kind :: Text)]})
+        issuesFound <- ask "ISSUE"
+        reposFound <- ask "REPOSITORY"
+        pure [ S.Found {kind = kindOf f.kind, repo = f.repo, number = f.number, title = f.title, closed = f.closed, updated = f.updated}
+             | f <- issuesFound.nodes <> reposFound.nodes ]
+    , starred = \repo -> do
+        found <- try (run rest (Api.api.starred (owner repo) (shortName repo)))
+        case found of
+          Right _ -> pure True
+          -- 404 is GitHub's "not starred".
+          Left (Refused _) -> pure False
+          Left e -> throwIO e
+    , setStarred = \repo on ->
+        () <$ run rest ((if on then Api.api.star else Api.api.unstar) (owner repo) (shortName repo))
+    , releases = \repo -> do
+        rs <- run rest (Api.api.releases (owner repo) (shortName repo) Api.ListQuery {page = Just 1, perPage = Named (Just 30)})
+        pure (map releaseOf rs)
+    , fileHistory = \repo branch path -> commitsOn repo (Just branch) (Just path) 1 50
+    , history = \repo branch n -> commitsOn repo (Just branch) Nothing n 50
     , labels = \repo -> map (\l -> L.Definition {name = l.name, color = l.color, description = l.description})
         <$> pages (\q -> Api.api.labels (owner repo) (shortName repo) q)
     , setLabels = \repo n names -> () <$ run rest (Api.api.setLabels (owner repo) (shortName repo) n (Api.LabelNames names))
@@ -205,10 +260,14 @@ github manager host token = do
             found : _ -> pure (toJSON found)
             [] -> throwIO (Refused ("The repository has no milestone " <> t <> "."))
         () <$ run rest (Api.api.editIssue (owner repo) (shortName repo) n (object ["milestone" .= target]))
-    , compare = soon
-    , compareDiff = soon
-    , tree = soon
-    , file = soon
+    , compare = \repo into tip -> do
+        c <- run rest (Api.api.compare (owner repo) (shortName repo) (Api.BaseHead into tip))
+        (\cs -> (cs, c.files)) <$> traverse commitOf c.commits
+    , compareDiff = \repo into tip -> run rest (Api.api.compareDiff (owner repo) (shortName repo) (Api.BaseHead into tip)) >>= diffOf
+    , tree = \repo ref -> do
+        t <- run rest (Api.api.tree (owner repo) (shortName repo) ref (Just 1))
+        pure [Tr.Entry {path = e.path, kind = if e.folder then Tr.Folder else Tr.File, size = e.size} | e <- t.entries]
+    , file = \repo ref path -> run rest (Api.api.file (owner repo) (shortName repo) (T.splitOn "/" path) (Just ref))
     }
 
 -- | What the GitHub client does not do yet; each of its parts replaces
@@ -479,3 +538,98 @@ asked :: Client -> ClientM (Api.Answer a) -> IO a
 asked graph call = run graph call >>= \case
   Api.Answer a -> pure a
   Api.Problem message -> throwIO (Refused ("GitHub said: " <> message))
+
+-- | The first page of a search, for a repository's tabs.
+searchedOnce :: Client -> (Api.GraphQuery -> ClientM (Api.Answer (Api.Page a))) -> Text -> Text -> IO [a]
+searchedOnce client route fields q = (.nodes) <$> asked client (route Api.GraphQuery
+  {query = Api.searchQuery fields, variables = object ["q" .= q, "after" .= Null]})
+
+diffOf :: Text -> IO [FileDiff]
+diffOf text = either (throwIO . Refused) pure (parseDiff text)
+
+commitOf :: Api.RestCommit -> IO Cm.Commit
+commitOf c = do
+  sha <- parseM c.sha
+  let (subject, rest') = T.breakOn "\n" c.message
+  pure Cm.Commit {sha = sha, author = c.author, authoredAt = c.authoredAt, subject = subject, body = T.strip rest'}
+
+-- | Every branch or tag, at most 1000.
+refsOf :: Client -> RepoName -> Text -> IO [Api.RefNode]
+refsOf graph repo prefix = go (1 :: Int) Nothing
+  where
+    go n after = do
+      Api.RefPage found <- asked graph (Api.graph.refs Api.GraphQuery
+        { query = Api.refsQuery
+        , variables = object ["owner" .= owner repo, "name" .= shortName repo, "prefix" .= prefix, "after" .= maybe Null String after] })
+      case found.next of
+        Just cursor | n < 10 -> (found.nodes <>) <$> go (n + 1) (Just cursor)
+        _ -> pure found.nodes
+
+releaseOf :: Api.RestRelease -> Rel.Release
+releaseOf r = Rel.Release
+  { name = fromMaybe r.tag (r.name >>= \n -> if T.null n then Nothing else Just n)
+  , tag = r.tag
+  , notes = fromMaybe "" r.notes
+  , author = maybe "" unparse r.author
+  , published = r.published
+  , draft = r.draft
+  , prerelease = r.prerelease
+  , url = r.url
+  , assets = [Rel.Asset {name = a.name, size = a.size, downloads = a.downloads, url = a.url} | a <- r.assets]
+  }
+
+-- | A run's or job's state from GitHub's status and conclusion.
+stateOf :: Text -> Maybe Text -> C.State
+stateOf status conclusion = case (status, conclusion) of
+  ("completed", Just c)
+    | c == "success" -> C.Passed
+    | c `elem` ["cancelled", "skipped", "neutral", "stale"] -> C.Skipped
+    | otherwise -> C.Failed
+  ("in_progress", _) -> C.Running
+  _ -> C.Waiting
+
+-- | A job as a check; its log is asked by the job's id.
+jobCheck :: Api.RestJob -> C.Check
+jobCheck j = C.Check
+  { name = j.name
+  , state = stateOf j.status j.conclusion
+  , description = case (j.startedAt, j.completedAt) of
+      (Just a, Just b) -> "Took " <> took (diffUTCTime b a)
+      _ -> if j.status == "in_progress" then "Running" else "Waiting"
+  , url = Just j.url
+  , job = Just C.Job {run = fromIntegral j.id, index = 0}
+  }
+
+took :: NominalDiffTime -> Text
+took d = let n = round d :: Int in
+  if n < 60 then T.pack (show n) <> "s" else T.pack (show (n `div` 60)) <> "m " <> T.pack (show (n `mod` 60)) <> "s"
+
+checkOf :: Api.CheckNode -> C.Check
+checkOf c = C.Check
+  { name = c.name
+  , state = case c.kind of
+      "CheckRun" -> stateOf (maybe "" T.toLower c.status) (T.toLower <$> c.conclusion)
+      _ -> case c.state of
+        Just "SUCCESS" -> C.Passed
+        Just "FAILURE" -> C.Failed
+        Just "ERROR" -> C.Failed
+        Just "PENDING" -> C.Running
+        _ -> C.Waiting
+  , description = fromMaybe "" c.description
+  , url = c.url
+  -- A check run of GitHub Actions has the job's id; others link out.
+  , job = if c.kind == "CheckRun" && maybe False ("/actions/runs/" `T.isInfixOf`) c.url
+      then (\i -> C.Job {run = fromIntegral i, index = 0}) <$> c.jobId
+      else Nothing
+  }
+
+kindOf :: Text -> S.Kind
+kindOf k = case k of
+  "PullRequest" -> S.PullRequest
+  "Repository" -> S.Repository
+  _ -> S.Issue
+
+reviewersBody :: [Rv.Who] -> Value
+reviewersBody whos = object
+  [ "reviewers" .= [unparse l | Rv.Person l <- whos]
+  , "team_reviewers" .= [t | Rv.Team t <- whos] ]

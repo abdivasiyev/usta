@@ -292,7 +292,7 @@ content now = do
       author <- parseM "abdivasiyev"
       c <- parseM comments
       pure P.PullRequest
-        { ref = r, title = title, author = author, headBranch = branch, baseBranch = "master"
+        { ref = r, title = title, author = author, headBranch = branch, headOwner = Nothing, baseBranch = "master"
         , state = state, checks = checks, review = review, comments = c
         , changedFiles = Nothing, commits = Nothing, involvement = involvement
         , createdAt = ago created, updatedAt = ago updated }
@@ -343,7 +343,7 @@ changes = do
             , title = "feat: sync engine", reason = Just N.ReviewRequested, unread = True, updatedAt = time }
             : s.notifications
         , pullRequests = P.PullRequest
-            { ref = pr8, title = "feat: sync engine", author = author, headBranch = "feat/sync", baseBranch = "master"
+            { ref = pr8, title = "feat: sync engine", author = author, headBranch = "feat/sync", headOwner = Nothing, baseBranch = "master"
             , state = P.Open, checks = Just P.ChecksRunning, review = Just P.AwaitingReview, comments = none
             , changedFiles = Nothing, commits = Nothing, involvement = [AsReviewer]
             , createdAt = time, updatedAt = time }

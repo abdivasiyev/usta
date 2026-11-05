@@ -86,6 +86,8 @@ data PullRequest = PullRequest
   , author :: Login
   , headBranch :: Text
     -- ^ The branch with the changes.
+  , headOwner :: Maybe Text
+    -- ^ Who owns the fork the branch is in; 'Nothing' in the repository.
   , baseBranch :: Text
     -- ^ The branch it would merge into.
   , state :: State

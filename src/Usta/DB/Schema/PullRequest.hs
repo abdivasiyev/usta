@@ -37,6 +37,7 @@ PullRequest sql=pull_requests
     title         Text
     author        Login
     headBranch    Text
+    headOwner     Text Maybe
     baseBranch    Text
     state         State
     checks        Checks Maybe

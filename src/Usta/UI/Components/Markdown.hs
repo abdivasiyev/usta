@@ -41,6 +41,7 @@ import qualified GI.Graphene as Graphene
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
 
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Scroll as Scroll
 import qualified Usta.UI.Components.Mermaid as Mermaid
 import qualified Usta.UI.Highlight as Highlight
@@ -281,7 +282,12 @@ openLinksWith = writeIORef forgeLinks
 links :: Doc -> Gtk.Label -> IO ()
 links doc l = void $ GI.on l #activateLink $ \uri -> case T.stripPrefix "#" uri of
   Just name -> jump doc name >> pure True
-  Nothing | hasScheme uri -> readIORef forgeLinks >>= \handled -> handled uri
+  Nothing | hasScheme uri -> do
+              handled <- readIORef forgeLinks >>= ($ uri)
+              -- A web link usta does not take goes to the browser, which
+              -- may not be the system's default when that is usta.
+              let web = any (`T.isPrefixOf` uri) ["http://", "https://"]
+              if not handled && web then Browser.open uri >> pure True else pure handled
           | otherwise -> doc.follow uri >> pure True
   where
     hasScheme u = case T.breakOn ":" u of

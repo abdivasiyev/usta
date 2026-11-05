@@ -46,6 +46,7 @@ import qualified Usta.Keyring as Keyring
 import qualified Usta.Mirrors as Mirrors
 import qualified Usta.Preferences as Preferences
 import qualified Usta.UI.TextKeys as TextKeys
+import qualified Usta.UI.Browser as Browser
 import qualified Usta.Sync as Sync
 import Usta.Types.Account (Account (..), AuthMethod (..))
 import Usta.Types.Forge (Kind (..))
@@ -153,10 +154,14 @@ running links = do
                 pure w
         (_, openLink) <- window
         forM_ links (void . openLink)
+        -- With usta as the default browser every web link comes here: a
+        -- forge's opens in usta, any other goes on to the browser.
         let fromMacOS l = do
               Log.say "link" ("from macOS: " <> l)
-              window >>= Gtk.windowPresent . fst
-              void (openLink l)
+              took <- openLink l
+              if took
+                then window >>= Gtk.windowPresent . fst
+                else when (any (`T.isPrefixOf` l) ["http://", "https://"]) (Browser.open l)
         readIORef queued >>= mapM_ fromMacOS
         writeIORef opener fromMacOS
         Handoff.listen (void . openLink) (window >>= Gtk.windowPresent . fst)

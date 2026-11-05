@@ -20,12 +20,15 @@ import Control.Monad (forM, forM_, unless, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.Kind (Type)
+import Data.List (findIndex)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
+import qualified Usta.UI.Browser as Browser
+import qualified Usta.UI.Platform as Platform
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
@@ -223,7 +226,36 @@ section s m change onAddAccount = do
       opening <- setting' "openLinks" "Open forge links in usta"
         [plain "Links to your forges in comments, in the search or given as ", code "usta <link>", plain " open the pull request, issue or repository here; every other link goes to the browser"]
         =<< sequence [switch m.preferences.openLinks (\on p -> p {openLinks = on})]
-      others <- setting "Other links open in" [plain "The system's default browser. Installed as an app, usta also opens ", code "usta://<forge link>", plain " links from anywhere on the system"] []
+      others <- if Platform.current /= Platform.MacOS
+        then setting "Other links open in" [plain "The system's default browser"] []
+        else do
+          found <- Browser.browsers
+          pick <- Gtk.dropDownNewFromStrings ("The system's default" : map (.name) found)
+          Gtk.dropDownSetSelected pick (maybe 0 (\b -> maybe 0 (fromIntegral . (+ 1)) (findIndex ((== b) . (.bundle)) found)) m.preferences.browser)
+          void $ GI.on pick (GI.PropertyNotify #selected) $ \_ -> do
+            i <- fromIntegral <$> Gtk.dropDownGetSelected pick
+            change (\p -> p {browser = if i == 0 || i > length found then Nothing else Just (found !! (i - 1)).bundle})
+          setting' "browser" "Other links open in"
+            [plain "Web links that are not your forges'. The system's default is Safari while usta is the default browser"]
+            =<< sequence [Gtk.toWidget pick]
+      -- As the default browser usta gets every web link from other apps.
+      everywhere <- if Platform.current /= Platform.MacOS
+        then setting "Links from other apps" [plain "Give usta a link: ", code "usta <link>"] []
+        else do
+          said <- label "" ["muted"]
+          make <- Button.new Button.defaults {Button.label = Just "Make usta the default browser"}
+          let showState = do
+                now <- Browser.isDefault
+                GI.set said [#label := if now then "\10003 usta is the default browser" else "", #visible := now]
+                GI.set make [#visible := not now]
+          showState
+          void $ GI.on make #clicked $ do
+            Browser.makeDefault
+            -- macOS asks first; its answer shows a moment later.
+            void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 3 (showState >> pure False)
+          setting "Forge links from other apps"
+            [plain "As the default web browser, usta opens links to your forges from any app and sends every other link on to the browser above"]
+            =<< sequence [Gtk.toWidget said, Gtk.toWidget make]
       entry <- GI.new Gtk.Entry [#placeholderText := "Paste a link", #widthRequest := 320]
       trying <- setting "Try a link" [plain "Paste one to see where it would open"] =<< sequence [Gtk.toWidget entry]
       answer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #visible := False, #cssClasses := ["setting", "answer"]]
@@ -240,7 +272,7 @@ section s m change onAddAccount = do
         GI.set answer [#visible := not (T.null t)]
         GI.set mark [#visible := maybe False ("Opens in usta" `T.isPrefixOf`) where']
         GI.set said [#label := maybe "Opens in the browser: not a forge link" id where']
-      sequence [pure opening, pure others, pure trying, Gtk.toWidget answer]
+      sequence [pure opening, pure everywhere, pure others, pure trying, Gtk.toWidget answer]
     Appearance -> sequence
       [ setting' "theme" "Theme" [] =<< sequence [themeChoice m.preferences.theme (\t -> change (\p -> p {theme = t}))]
       ]

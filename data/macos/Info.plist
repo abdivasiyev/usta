@@ -34,6 +34,33 @@
         <string>usta</string>
       </array>
     </dict>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Web links, when usta is the default browser</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>http</string>
+        <string>https</string>
+      </array>
+    </dict>
+  </array>
+  <!-- With the web schemes, macOS lists usta among the browsers only when
+       it opens web pages too: usta sends them on to the browser chosen. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Web page</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.html</string>
+        <string>public.xhtml</string>
+      </array>
+    </dict>
   </array>
 </dict>
 </plist>

@@ -363,3 +363,30 @@ test-suite usta-test
     vector,
     wai,
     warp
+
+test-suite usta-ui-test
+  import: language
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test-ui
+  other-modules:
+    Harness
+  c-sources: test-ui/keys.c
+  pkgconfig-depends: gtk4
+  ghc-options: -threaded
+  build-depends:
+    base,
+    directory,
+    filepath,
+    gi-gdk4,
+    gi-gio,
+    gi-glib,
+    gi-graphene,
+    gi-gsk,
+    gi-gtk4,
+    haskell-gi-base,
+    tasty,
+    tasty-hunit,
+    temporary,
+    text,
+    usta

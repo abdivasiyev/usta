@@ -86,6 +86,7 @@ module Usta.Forge.GitHub.Api
   , reposQuery
   , OneRepo (..)
   , ForkBody (..)
+  , NewRepoBody (..)
   , repoQuery
   ) where
 
@@ -133,6 +134,8 @@ data Routes mode = Routes
   , myOrgs :: mode :- "user" :> "orgs" :> RecordQueryParam ListQuery :> Get '[JSON] [User]
   , forks :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> RecordQueryParam ListQuery :> Get '[JSON] [RepositoryRef]
   , fork :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> ReqBody '[JSON] ForkBody :> PostAccepted '[JSON] RepositoryRef
+  , createMyRepo :: mode :- "user" :> "repos" :> ReqBody '[JSON] NewRepoBody :> PostCreated '[JSON] RepositoryRef
+  , createOrgRepo :: mode :- "orgs" :> Capture "org" Text :> "repos" :> ReqBody '[JSON] NewRepoBody :> PostCreated '[JSON] RepositoryRef
   , postComment
       :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "issues" :> Capture "number" Number
            :> "comments" :> ReqBody '[JSON] Body :> PostCreated '[JSON] RestComment
@@ -607,6 +610,13 @@ instance FromJSON RepoInfo where
   parseJSON = withObject "Repository" $ \o -> RepoInfo
     <$> o .: "clone_url" <*> o .:? "ssh_url" <*> (o .:? "parent" >>= traverse (.: "full_name"))
     <*> (o .:? "permissions" >>= maybe (pure False) (\p -> p .:? "push" .!= False))
+
+-- | A repository to create.
+type NewRepoBody :: Type
+data NewRepoBody = NewRepoBody {name :: Text, description :: Text, private :: Bool, autoInit :: Bool}
+
+instance ToJSON NewRepoBody where
+  toJSON b = object ["name" .= b.name, "description" .= b.description, "private" .= b.private, "auto_init" .= b.autoInit]
 
 -- | Where a fork goes: an organization, or the viewer when 'Nothing'.
 type ForkBody :: Type

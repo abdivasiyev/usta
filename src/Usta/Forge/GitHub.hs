@@ -41,7 +41,7 @@ import Servant.API (getResponse, lookupResponseHeader, ResponseHeader (..))
 import Servant.Client (BaseUrl (..), ClientM, Scheme (Https))
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Fork (..), Known (..), LineNote (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Fork (..), Known (..), NewRepo (..), LineNote (..))
 import qualified Usta.Forge.GitHub.Api as Api
 import Usta.Forge.Http (Client, connect, run, runChanged, runDone)
 import Usta.Types.Host (Host)
@@ -138,6 +138,9 @@ github manager host token = do
     , canPush = \repo -> (.canPush) <$> run rest (Api.api.repository (owner repo) (shortName repo))
     , fork = \repo f -> (.fullName) <$> run rest (Api.api.fork (owner repo) (shortName repo)
         Api.ForkBody {organization = f.owner, name = f.name, defaultBranchOnly = f.defaultBranchOnly})
+    , createRepository = \new -> do
+        let body = Api.NewRepoBody {name = new.name, description = new.description, private = new.private, autoInit = new.readme}
+        (.fullName) <$> run rest (maybe (Api.api.createMyRepo body) (\org -> Api.api.createOrgRepo org body) new.owner)
     , repository = \repo -> do
         Api.OneRepo found <- asked graph (Api.graph.repository Api.GraphQuery
           {query = Api.repoQuery, variables = object ["owner" .= owner repo, "name" .= shortName repo]})

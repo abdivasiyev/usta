@@ -65,6 +65,7 @@ module Usta.Forge.Forgejo.Api
   , Repository (..)
   , Org (..)
   , ForkBody (..)
+  , NewRepoBody (..)
   , RepositoryRef (..)
   , Thread (..)
   , Subject (..)
@@ -130,6 +131,8 @@ data Routes mode = Routes
   , myOrgs :: mode :- "user" :> "orgs" :> RecordQueryParam ListQuery :> Get '[JSON] [Org]
   , forks :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> RecordQueryParam ListQuery :> Get '[JSON] [RepositoryRef]
   , fork :: mode :- "repos" :> Capture "owner" Text :> Capture "repo" Text :> "forks" :> ReqBody '[JSON] ForkBody :> PostAccepted '[JSON] RepositoryRef
+  , createMyRepo :: mode :- "user" :> "repos" :> ReqBody '[JSON] NewRepoBody :> PostCreated '[JSON] RepositoryRef
+  , createOrgRepo :: mode :- "orgs" :> Capture "org" Text :> "repos" :> ReqBody '[JSON] NewRepoBody :> PostCreated '[JSON] RepositoryRef
   , notifications :: mode :- "notifications" :> RecordQueryParam NotificationQuery :> Get '[JSON] [Thread]
   , markThread
       :: mode :- "notifications" :> "threads" :> Capture "id" ThreadId :> RecordQueryParam ThreadQuery
@@ -1091,6 +1094,15 @@ newtype Org = Org {name :: Text}
 
 instance FromJSON Org where
   parseJSON = withObject "Organization" $ \o -> Org <$> o .: "username"
+
+-- | A repository to create; with a README it starts on "main".
+type NewRepoBody :: Type
+data NewRepoBody = NewRepoBody {name :: Text, description :: Text, private :: Bool, autoInit :: Bool}
+
+instance ToJSON NewRepoBody where
+  toJSON b = object
+    [ "name" .= b.name, "description" .= b.description, "private" .= b.private
+    , "auto_init" .= b.autoInit, "readme" .= ("Default" :: Text), "default_branch" .= ("main" :: Text) ]
 
 -- | Where a fork goes: an organization, or you when 'Nothing'.
 type ForkBody :: Type

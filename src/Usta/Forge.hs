@@ -6,6 +6,7 @@ module Usta.Forge
   , Fetched (..)
   , CloneUrls (..)
   , Fork (..)
+  , NewRepo (..)
   , Failure (..)
   , LineNote (..)
   ) where
@@ -75,6 +76,7 @@ data Forge = Forge
     -- ^ Whether you may push branches to it; else changes go to a fork.
   , fork :: RepoName -> Fork -> IO RepoName
     -- ^ The new fork's name; the forge may take a few seconds to fill it.
+  , createRepository :: NewRepo -> IO RepoName
   , markRead :: ThreadId -> IO ()
   , markUnread :: ThreadId -> IO ()
     -- ^ Puts a notification back among the unread, for "Move to inbox".
@@ -209,6 +211,18 @@ data Forge = Forge
 
 -- | A repository's clone URLs. The forge gives them because only it knows
 -- its address (it may sit under a path) and its ssh port.
+-- | A repository to make: in an organization, or yours when 'Nothing'.
+type NewRepo :: Type
+data NewRepo = NewRepo
+  { owner :: Maybe Text
+  , name :: Text
+  , description :: Text
+  , private :: Bool
+  , readme :: Bool
+    -- ^ Start with a README, so it has a first commit and a branch.
+  }
+  deriving stock (Eq, Show)
+
 -- | A fork to make: in an organization, or yours when 'Nothing'.
 type Fork :: Type
 data Fork = Fork

@@ -32,6 +32,9 @@ data Comment = Comment
   , url :: Text
     -- ^ Its page on the forge, to link to.
   , reactions :: [Reaction]
+  , review :: Maybe Verdict
+    -- ^ A pull request review's text, with how it voted; such a comment is
+    -- edited on the forge's page, not here.
   }
   deriving stock (Eq, Show)
 

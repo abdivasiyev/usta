@@ -9,6 +9,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 
+import Usta.Types.Discussion (Verdict)
 import Usta.Types.Label (Label)
 import Usta.Types.Login (Login)
 import Usta.Types.Number (Number)
@@ -41,4 +42,6 @@ data Happening
   | MergeScheduled Bool
     -- ^ Set to merge when the checks pass, or no longer.
   | BranchDeleted
+  | Reviewed Verdict
+    -- ^ A review with no text of its own: an approval or a change request.
   deriving stock (Eq, Show)

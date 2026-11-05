@@ -131,7 +131,7 @@ new now account = do
                   <> [(p.author, p.createdAt, p.state `elem` [P.Merged, P.Closed], p.state == P.Merged) | p <- s.pullRequests, p.ref.repo == repo, p.ref.number == n]
             case opened of
               (author, at, closed, merged) : _ -> pure D.Discussion
-                { D.opening = D.Comment {D.author = author, D.body = "", D.createdAt = at, D.id = Nothing, D.edited = False, D.url = "", D.reactions = []}
+                { D.opening = D.Comment {D.author = author, D.body = "", D.createdAt = at, D.id = Nothing, D.edited = False, D.url = "", D.reactions = [], D.review = Nothing}
                 , D.comments = []
                 , D.closed = closed
                 , D.merged = merged

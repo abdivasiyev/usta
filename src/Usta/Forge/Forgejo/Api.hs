@@ -607,7 +607,7 @@ instance FromJSON IssueDetail where
     title <- traverse (.: "title") milestone
     url <- o .:? "html_url" .!= ""
     pure IssueDetail
-      { opening = Comment {author = (user :: User).login, body = body, createdAt = createdAt, id = Nothing, edited = False, url = url, reactions = []}
+      { opening = Comment {author = (user :: User).login, body = body, createdAt = createdAt, id = Nothing, edited = False, url = url, reactions = [], review = Nothing}
       , closed = state == "closed"
       , merged = merged
       , assignees = map (\(User login) -> login) assignees
@@ -628,7 +628,7 @@ instance FromJSON ApiComment where
     url <- o .:? "html_url" .!= ""
     -- Forgejo moves updated_at only when the text changes.
     let edited = diffUTCTime updatedAt createdAt > 1
-    pure (ApiComment Comment {author = (user :: User).login, body = body, createdAt = createdAt, id = Just i, edited = edited, url = url, reactions = []})
+    pure (ApiComment Comment {author = (user :: User).login, body = body, createdAt = createdAt, id = Just i, edited = edited, url = url, reactions = [], review = Nothing})
 
 -- | Someone's reaction: the feeling as Forgejo names it, and who.
 type ApiReaction :: Type

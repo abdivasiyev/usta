@@ -95,6 +95,14 @@ jobs:
     needs: release
     runs-on: ubuntu-24.04
     steps:
+      # GHC 9.12's packages are not in the binary cache, so nix builds
+      # them, gi-gtk4 with its docs among them: the runner's 14 GB run
+      # out. The SDKs it carries and usta does not use free 30 more.
+      - name: Make room on the disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force
+          df -h /
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
       - name: Build the AppImage, .deb and .rpm

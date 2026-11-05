@@ -8,27 +8,18 @@ module Usta.Pins
   , setPinned
   ) where
 
-import Control.Exception (SomeException, try)
-import Data.Aeson (decodeFileStrict, encodeFile)
 import Data.Text (Text)
-import System.FilePath (takeDirectory, (</>))
 
-import Usta.DB (databaseFile)
+import qualified Usta.JsonFile as JsonFile
 
 -- | Each pin as (host, name).
 pins :: IO [(Text, Text)]
-pins = do
-  path <- file
-  found <- try (decodeFileStrict path) :: IO (Either SomeException (Maybe [(Text, Text)]))
-  pure (either (const []) (maybe [] id) found)
+pins = file >>= JsonFile.read []
 
 setPinned :: (Text, Text) -> Bool -> IO ()
 setPinned repo on = do
-  current <- pins
-  let changed = filter (/= repo) current <> [repo | on]
   path <- file
-  _ <- try (encodeFile path changed) :: IO (Either SomeException ())
-  pure ()
+  JsonFile.modify [] path (\current -> filter (/= repo) current <> [repo | on])
 
 file :: IO FilePath
-file = (</> "pins.json") . takeDirectory <$> databaseFile
+file = JsonFile.beside "pins.json"

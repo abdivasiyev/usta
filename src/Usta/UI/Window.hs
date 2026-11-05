@@ -680,9 +680,9 @@ buildWith start crashed given app = do
                     , Issue.title = repo <> " #" <> T.pack (show number), Issue.closed = False, Issue.comments = [], Issue.events = []
                     , Issue.timeline = [], Issue.assignees = [], Issue.labels = [], Issue.milestone = Nothing, Issue.linkedPullRequests = []
                     }
-              Link.FileAt {repo, branch, path, line} ->
+              Link.FileAt {repo, place, line} ->
                 showPage Sidebar.Repositories >> showRepository (target.host, repo)
-                  (Just (branch, path <> maybe "" (("#L" <>) . T.pack . show) line))
+                  (Just (place <> maybe "" (("#L" <>) . T.pack . show) line))
               Link.RepositoryAt {repo} -> showPage Sidebar.Repositories >> showRepository (target.host, repo) Nothing
             pure True
           _ -> pure False

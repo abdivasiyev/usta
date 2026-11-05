@@ -6,10 +6,13 @@ module Usta.Types.Link
   ( Target (..)
   , parseLink
   , describe
+  , splitPlace
   ) where
 
 import Data.Char (isDigit)
 import Data.Kind (Type)
+import Data.List (sortOn)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Read (readMaybe)
@@ -19,7 +22,9 @@ data Target
   = PullAt {host :: Text, repo :: Text, number :: Int, files :: Bool}
     -- ^ @files@ for its Files tab.
   | IssueAt {host :: Text, repo :: Text, number :: Int}
-  | FileAt {host :: Text, repo :: Text, branch :: Text, path :: Text, line :: Maybe Int}
+  | FileAt {host :: Text, repo :: Text, place :: Text, line :: Maybe Int}
+    -- ^ @place@ is the branch and the path as one, "feat/x/src/A.hs": a
+    -- branch may hold "/" too, so only the repository's branches split it.
   | RepositoryAt {host :: Text, repo :: Text}
   deriving stock (Eq, Show)
 
@@ -43,8 +48,8 @@ parseLink raw = case T.splitOn "/" rest of
       kind : n : _ | Just number <- readMaybe (T.unpack n), kind == "issues" ->
         Just (IssueAt host repo number)
       -- Forgejo: src/branch/<branch>/<path>; GitHub and GitLab: blob/<branch>/<path>.
-      "src" : "branch" : b : p | not (null p) -> Just (FileAt host repo b (T.intercalate "/" p) lineOf)
-      "blob" : b : p | not (null p) -> Just (FileAt host repo b (T.intercalate "/" p) lineOf)
+      "src" : "branch" : p@(_ : _ : _) -> Just (FileAt host repo (T.intercalate "/" p) lineOf)
+      "blob" : p@(_ : _ : _) -> Just (FileAt host repo (T.intercalate "/" p) lineOf)
       _ -> Just (RepositoryAt host repo)
     a <|> b = maybe b Just a
 
@@ -53,7 +58,15 @@ describe :: Target -> Text
 describe = \case
   PullAt {number, files} -> "pull request #" <> n number <> if files then ", Files tab" else ", Conversation tab"
   IssueAt {number} -> "issue #" <> n number
-  FileAt {repo, path, line} -> path <> maybe "" ((" line " <>) . n) line <> " in " <> repo
+  FileAt {repo, place, line} -> snd (T.breakOnEnd "/" place) <> maybe "" ((" line " <>) . n) line <> " in " <> repo
   RepositoryAt {repo} -> "the repository " <> repo
   where
     n = T.pack . show
+
+-- | "feat/x/src/A.hs" to ("feat/x", "src/A.hs") when @branches@ has
+-- "feat/x": the longest branch it starts with, or else its first part.
+splitPlace :: [Text] -> Text -> (Text, Text)
+splitPlace branches place =
+  case sortOn (Down . T.length) [b | b <- branches, (b <> "/") `T.isPrefixOf` place] of
+    b : _ -> (b, T.drop (T.length b + 1) place)
+    [] -> fmap (T.drop 1) (T.breakOn "/" place)

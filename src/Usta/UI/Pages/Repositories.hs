@@ -48,9 +48,10 @@ import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Style (Tone (..))
 import qualified Usta.Git as Git
 import Usta.Types.Mirror (Choice (..), Transport (..))
-import Usta.Types.Branch (Branch, Tag)
+import Usta.Types.Branch (Branch (..), Tag)
 import Usta.Types.Parse (unparse)
 import qualified Usta.Types.Repository as R
+import qualified Usta.Types.Link as Link
 
 type Commit :: Type
 data Commit = Commit
@@ -155,11 +156,9 @@ data Tab = Tab
     -- ^ Shows the chosen branch, so the picker shows beside the tabs.
   }
 
--- | The page, and what shows one repository, by host and name, as a pin
--- in the sidebar asks.
 -- | The page, and what shows one repository (host and name), or a file
--- in it (branch and path, "#L12" for a line) on its Files tab.
-new :: Actions -> [Repository] -> IO (Page Repository, (Text, Text) -> Maybe (Text, Text) -> IO ())
+-- in it ("branch/path", "#L12" for a line) on its Files tab.
+new :: Actions -> [Repository] -> IO (Page Repository, (Text, Text) -> Maybe Text -> IO ())
 new actions repositories = do
   items <- newIORef repositories
   page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
@@ -178,7 +177,7 @@ new actions repositories = do
                              ]
   selectedKey <- newIORef Nothing
   -- What opens a file in the repository shown.
-  opener <- newIORef (\_ _ -> pure ())
+  opener <- newIORef (const (pure ()))
   -- A sync refills the list, which drops the selection for a moment and
   -- selects the same repository again: its detail stays as it is, on the
   -- tab, file and scroll position the user left it.
@@ -237,7 +236,7 @@ new actions repositories = do
         shown <- readIORef items
         forM_ (lookup wanted (zip (map key shown) [0 :: Int ..])) $ \i -> do
           Gtk.listBoxGetRowAtIndex list (fromIntegral i) >>= Gtk.listBoxSelectRow list
-          forM_ file $ \(branch, path) -> readIORef opener >>= \open' -> open' branch path
+          forM_ file $ \place -> readIORef opener >>= ($ place)
   pure . (, show') $ Page
     { widget = page
     , update = \shown -> do
@@ -252,14 +251,19 @@ new actions repositories = do
 -- | The Overview, Files and later tabs over the one chosen, with the
 -- branch picker; @onWide@ runs with whether a tab other than Overview is
 -- shown. Choosing a branch draws the tabs again for it, on the same tab.
-repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO (Gtk.Box, Text -> Text -> IO ())
+repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO (Gtk.Box, Text -> IO ())
 repositoryDetail actions r onWide = do
   holder <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
   let drawWith file branch tab = do
         clear holder
         onBranch actions r {defaultBranch = branch} r.defaultBranch tab file (drawWith Nothing) onWide >>= #append holder
   drawWith Nothing r.defaultBranch "overview"
-  pure (holder, \branch path -> drawWith (Just path) branch "overview")
+  -- A link's "feat/x/src/A.hs" splits on the branches the repository has.
+  let openPlace place = void $ forkIO $ do
+        known <- either (const []) (map (.name)) <$> actions.branches r r.defaultBranch
+        let (branch, path) = Link.splitPlace known place
+        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ drawWith (Just path) branch "overview" >> pure False
+  pure (holder, openPlace)
 
 -- | The tabs for @r@ on its 'defaultBranch', the one chosen; @realDefault@
 -- is the repository's own; @startTab@ is shown first, or the Files tab

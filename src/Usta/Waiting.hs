@@ -7,20 +7,22 @@
 module Usta.Waiting
   ( Action (..)
   , load
-  , save
+  , update
   , add
+  , sending
   , describe
   ) where
 
-import Control.Exception (SomeException, try)
-import Data.Aeson (FromJSON, ToJSON, decodeFileStrict, encodeFile)
+import Control.Concurrent.MVar (MVar, newMVar, putMVar, tryTakeMVar)
+import Control.Exception (bracket)
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import System.FilePath (takeDirectory, (</>))
+import System.IO.Unsafe (unsafePerformIO)
 
-import Usta.DB (databaseFile)
+import qualified Usta.JsonFile as JsonFile
 
 type Action :: Type
 data Action
@@ -33,19 +35,26 @@ data Action
 
 -- | Everything waiting, oldest first.
 load :: IO [Action]
-load = do
-  path <- file
-  found <- try (decodeFileStrict path) :: IO (Either SomeException (Maybe [Action]))
-  pure (either (const []) (maybe [] id) found)
+load = file >>= JsonFile.read []
 
-save :: [Action] -> IO ()
-save actions = do
-  path <- file
-  _ <- try (encodeFile path actions) :: IO (Either SomeException ())
-  pure ()
+-- | Changes what waits, as one step: an action added meanwhile is kept.
+update :: ([Action] -> [Action]) -> IO ()
+update change = file >>= \path -> JsonFile.modify [] path change
 
 add :: Action -> IO ()
-add action = load >>= save . (<> [action])
+add action = update (<> [action])
+
+-- | Runs @send@, which sends what waits, unless a send is running
+-- already: two would post the same comment twice. Then it is how many
+-- wait.
+sending :: IO Int -> IO Int
+sending send = bracket (tryTakeMVar busy) (mapM_ (putMVar busy)) $ \case
+  Just () -> send
+  Nothing -> length <$> load
+
+busy :: MVar ()
+busy = unsafePerformIO (newMVar ())
+{-# NOINLINE busy #-}
 
 -- | "Comment on usta #3".
 describe :: Action -> Text
@@ -56,4 +65,4 @@ describe = \case
     short r n = T.takeWhileEnd (/= '/') r <> " #" <> T.pack (show n)
 
 file :: IO FilePath
-file = (</> "waiting.json") . takeDirectory <$> databaseFile
+file = JsonFile.beside "waiting.json"

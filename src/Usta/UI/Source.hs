@@ -628,10 +628,10 @@ withAccounts pool accounts source = source
         Right (Right ()) -> pure (Right ())
         Left why -> pure (Left why)
   , waiting = Waiting.load
-  , dropWaiting = \k -> Waiting.load >>= \xs -> Waiting.save (take k xs <> drop (k + 1) xs)
+  , dropWaiting = \k -> Waiting.update (\xs -> take k xs <> drop (k + 1) xs)
   -- In order; the first one the forge does not answer stops the rest. One
   -- it refuses is dropped, as sending it again would not change that.
-  , sendWaiting = do
+  , sendWaiting = Waiting.sending $ do
       let go [] = pure []
           go (x : rest) = do
             sent <- try (send x)
@@ -647,10 +647,12 @@ withAccounts pool accounts source = source
               items <- run pool DB.inbox
               forM_ (take 1 [i | i <- items, matchesAt host repo number i]) $ \i ->
                 accounts.forgeOf i.accountId >>= mapM_ (\f -> f.markRead i.notification.threadId)
-      left <- Waiting.load >>= go
-      Waiting.save left
+      waiting <- Waiting.load
+      left <- go waiting
+      -- Only what was sent goes: what was added meanwhile stays.
+      Waiting.update (drop (length waiting - length left))
       when (null left) source.syncNow
-      pure (length left)
+      length <$> Waiting.load
   , editComment = \host repo n which text -> changing (onForge host repo n (\f name number -> f.editComment name number which text))
   , deleteComment = \host repo i -> changing (onRepo host repo (\f name -> f.deleteComment name i))
   , editTitle = \host repo n title -> changing (onForge host repo n (\f name number -> f.editTitle name number title))

@@ -93,6 +93,7 @@ library
     Usta.Keyring
     Usta.Mermaid
     Usta.Handoff
+    Usta.JsonFile
     Usta.Log
     Usta.Mirrors
     Usta.OAuth

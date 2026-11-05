@@ -16,6 +16,7 @@ module Usta.Preferences
   , managedFile
   , loadManaged
   , fixedKeys
+  , over
   , effective
   , keeping
   ) where

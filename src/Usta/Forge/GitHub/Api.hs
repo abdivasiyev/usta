@@ -518,11 +518,13 @@ issueFields =
     <> " labels(first: 20) { nodes { name color } } comments { totalCount } createdAt updatedAt closedAt }"
 
 -- | The repositories the viewer owns, works on or is in an organization
--- of, recently changed first.
+-- of, recently changed first. Both filters are needed: ownerAffiliations
+-- leaves out an organization's repositories unless it is given too.
 reposQuery :: Text
 reposQuery =
   "query($after: String) { viewer { found: repositories(first: 100, after: $after,"
-    <> " affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER], orderBy: {field: UPDATED_AT, direction: DESC}) {"
+    <> " affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER], ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER],"
+    <> " orderBy: {field: UPDATED_AT, direction: DESC}) {"
     <> " totalCount pageInfo { hasNextPage endCursor } nodes { nameWithOwner description defaultBranchRef { name }"
     <> " isPrivate isArchived pullRequests(states: OPEN) { totalCount } issues(states: OPEN) { totalCount } updatedAt } } } }"
 

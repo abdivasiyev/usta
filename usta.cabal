@@ -309,6 +309,7 @@ test-suite usta-test
     Usta.DiagramTests
     Usta.GitTests
     Usta.GraphTests
+    Usta.MermaidTests
     Usta.PreferencesTests
     Usta.Types.DiffTests
     Usta.Types.LinkTests

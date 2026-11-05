@@ -1,5 +1,8 @@
 # usta
 
+[![Tests](https://github.com/abdivasiyev/usta/actions/workflows/test.yml/badge.svg)](https://github.com/abdivasiyev/usta/actions/workflows/test.yml)
+[![Release](https://img.shields.io/github/v/release/abdivasiyev/usta?label=release)](https://github.com/abdivasiyev/usta/releases/latest)
+[![Build the release](https://github.com/abdivasiyev/usta/actions/workflows/release.yml/badge.svg)](https://github.com/abdivasiyev/usta/actions/workflows/release.yml)
 [![Landing page](https://github.com/abdivasiyev/usta/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/abdivasiyev/usta/actions/workflows/pages/pages-build-deployment)
 
 A desktop client to connect with your forge.

@@ -18,7 +18,7 @@ import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
-import Data.Maybe (catMaybes, isNothing)
+import Data.Maybe (catMaybes, isJust, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GI.GLib as GLib
@@ -37,8 +37,9 @@ data Picker = Picker
   , defaultBranch :: Text
   , clock :: Clock
   , branches :: IO (Either Text [Branch])
-  , tags :: IO (Either Text [Tag])
-    -- ^ Both run off the main thread, the first time the picker opens.
+  , tags :: Maybe (IO (Either Text [Tag]))
+    -- ^ Both run off the main thread, the first time the picker opens;
+    -- without tags the picker has no Tags tab.
   , choose :: Text -> IO ()
   , note :: Text
     -- ^ Under the list, e.g. what follows the branch.
@@ -54,7 +55,7 @@ new p = do
   button <- GI.new Gtk.MenuButton [#child := caption, #popover := popover, #tooltipText := "Choose a branch (b)", #cssClasses := ["u-branch-button"]]
 
   (kinds, kindButtons) <- Segmented.new ["Branches", "Tags"] 0
-  GI.set kinds [#halign := Gtk.AlignStart]
+  GI.set kinds [#halign := Gtk.AlignStart, #visible := isJust p.tags]
   #append content kinds
   find <- GI.new Gtk.SearchEntry [#placeholderText := "Find a branch"]
   #append content find
@@ -120,7 +121,7 @@ new p = do
     already <- readIORef loaded
     when (isNothing already) $ void $ forkIO $ do
       bs <- try p.branches
-      ts <- try p.tags
+      ts <- try (maybe (pure (Right [])) id p.tags)
       let flat r = either (\(e :: SomeException) -> Left (T.pack (show e))) id r
       void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
         writeIORef loaded (Just (flat bs, flat ts))

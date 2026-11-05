@@ -293,7 +293,7 @@ onBranch actions r realDefault startTab startFile redraw onWide = do
   c <- clock
   picker <- BranchPicker.new BranchPicker.Picker
     { shown = r.defaultBranch, defaultBranch = realDefault, clock = c
-    , branches = actions.branches r realDefault, tags = actions.tags r
+    , branches = actions.branches r realDefault, tags = Just (actions.tags r)
     , choose = \b -> readIORef current >>= redraw b
     , note = "Overview, Files and Commits follow the branch"
     }

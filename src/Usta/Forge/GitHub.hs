@@ -207,7 +207,9 @@ github manager urls host token = do
         () <$ run rest (Api.api.unrequestReviewers (owner repo) (shortName repo) n (reviewersBody [who]))
     , readiness = \repo n -> do
         st <- stateOfPull repo n
-        behind <- (.behindBy) <$> run rest (Api.api.compare (owner repo) (shortName repo) (Api.BaseHead st.baseBranch (headRef repo st)))
+        -- A head branch deleted after the merge cannot be compared.
+        behind <- either (\(_ :: Failure) -> 0) (.behindBy)
+          <$> try (run rest (Api.api.compare (owner repo) (shortName repo) (Api.BaseHead st.baseBranch (headRef repo st))))
         pure Rd.Readiness
           { draft = st.draft, behind = behind, conflicts = st.mergeable == "CONFLICTING"
           , requiredApprovals = st.requiredApprovals, scheduled = st.autoMerge }

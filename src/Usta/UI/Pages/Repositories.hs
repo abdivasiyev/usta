@@ -29,7 +29,10 @@ import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import System.Directory (getHomeDirectory)
+import System.FilePath ((</>))
 import qualified Data.Text as T
+import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
@@ -43,6 +46,7 @@ import qualified Usta.UI.Components.Markdown as Markdown
 import Usta.UI.Pages.RepositoryFiles (linkTarget)
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.SearchField as SearchField
+import qualified Usta.UI.Components.Segmented as Segmented
 import qualified Usta.UI.Components.Skeleton as Skeleton
 import qualified Usta.UI.Platform as Platform
 import Usta.UI.Page (Page (..), refill)
@@ -150,6 +154,9 @@ data Actions = Actions
     -- request, which then opens from the fork.
   , canPush :: Repository -> IO (Either Text Bool)
     -- ^ Off the main thread.
+  , clone :: Repository -> Text -> FilePath -> IO (Either Text ())
+    -- ^ By url, into a new folder, on its default branch; off the main
+    -- thread.
   , newRepository :: Gtk.Widget -> IO ()
     -- ^ Opens the New repository dialog over the button.
   , visit :: (Text, Text) -> IO (Either Text Repository)
@@ -465,43 +472,46 @@ overview actions r realDefault follow = do
         GI.set newPullRequest [#sensitive := True]
         if allowed == Right False then actions.fork True r anchor else actions.newPullRequest r
         pure False
-  mirrorButtons <- if r.canMirror
-    then do
-      b <- Button.new Button.defaults { Button.label = Just "Mirror…" }
-      void $ GI.on b #clicked $ Gtk.toWidget b >>= \anchor -> askMirror anchor r actions.chooseMirror actions.lookUpOrigins
-      pure [b]
-    else pure []
+  -- Everything but the two new-item buttons is under "⋯".
+  items <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["menu"]]
+  menu <- GI.new Gtk.Popover [#child := items, #hasArrow := False, #cssClasses := ["u-repo-menu"]]
+  more <- Button.menu Button.defaults {Button.icon = Just "view-more-symbolic", Button.tooltip = Just "More"} menu
+  let item text = do
+        b <- Button.new Button.defaults {Button.label = Just text, Button.variant = Button.Flat}
+        Gtk.widgetAddCssClass b "item"
+        Gtk.buttonGetChild b >>= mapM_ (`Gtk.widgetSetHalign` Gtk.AlignStart)
+        #append items b
+        pure b
+      -- An item that closes the menu and acts over the "⋯" button.
+      acting text act = do
+        b <- item text
+        void $ GI.on b #clicked $ Gtk.popoverPopdown menu >> Gtk.toWidget more >>= act
   -- Star asks the forge; Pin is usta's own, for the sidebar.
-  star <- Button.new Button.defaults {Button.label = Just "☆ Star", Button.tooltip = Just "Star it on the forge"}
+  star <- item "☆ Star"
   GI.set star [#sensitive := False]
   void $ forkIO $ do
     known <- actions.starred r
     void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-      forM_ (either (const Nothing) Just known) $ \on -> GI.set star [#label := if on then "★ Starred" else "☆ Star", #sensitive := True]
+      forM_ (either (const Nothing) Just known) $ \on -> GI.set star [#label := if on then "★ Unstar" else "☆ Star", #sensitive := True]
       pure False
   void $ GI.on star #clicked $ do
     on <- (== Just "☆ Star") <$> GI.get star #label
     Button.busy star ([] :: [Gtk.Button]) (if on then "Starring…" else "Unstarring…") (actions.setStarred r on) $ \case
-      Right () -> GI.set star [#label := if on then "★ Starred" else "☆ Star"]
+      Right () -> GI.set star [#label := if on then "★ Unstar" else "☆ Star"]
       Left _ -> pure ()
   pinnedNow <- actions.pinned r
-  pin <- Button.new Button.defaults {Button.label = Just (if pinnedNow then "📌 Pinned" else "📌 Pin"), Button.tooltip = Just "Pin it to the sidebar"}
-  when pinnedNow $ Gtk.widgetAddCssClass pin "on"
+  pin <- item (if pinnedNow then "📌 Unpin" else "📌 Pin to the sidebar")
   void $ GI.on pin #clicked $ do
-    on <- not <$> Gtk.widgetHasCssClass pin "on"
+    on <- (/= Just "📌 Unpin") <$> GI.get pin #label
     actions.setPinned r on
-    GI.set pin [#label := if on then "📌 Pinned" else "📌 Pin"]
-    (if on then Gtk.widgetAddCssClass else Gtk.widgetRemoveCssClass) pin "on"
-  forkButton <- Button.new Button.defaults {Button.label = Just "⑂ Fork", Button.tooltip = Just "Fork it to you or an organization"}
-  void $ GI.on forkButton #clicked $ Gtk.toWidget forkButton >>= actions.fork False r
-  -- The buttons wrap onto more rows when the page is narrow.
-  buttons <- GI.new Gtk.FlowBox [ #selectionMode := Gtk.SelectionModeNone, #columnSpacing := 8, #rowSpacing := 8
-                                , #maxChildrenPerLine := 8, #halign := Gtk.AlignEnd, #valign := Gtk.AlignStart
-                                , #homogeneous := False, #cssClasses := ["repo-buttons"] ]
-  forM_ ([star, pin, forkButton] <> mirrorButtons <> [newIssue, newPullRequest]) $ \b -> do
-    GI.set b [#valign := Gtk.AlignStart, #halign := Gtk.AlignEnd]
-    Gtk.flowBoxAppend buttons b
-  #append header buttons
+    GI.set pin [#label := if on then "📌 Unpin" else "📌 Pin to the sidebar"]
+  acting "⑂ Fork…" (actions.fork False r)
+  acting "Clone…" (\anchor -> askClone anchor r actions)
+  when r.canMirror $ acting "Mirror…" (\anchor -> askMirror anchor r actions.chooseMirror actions.lookUpOrigins)
+  forM_ [Gtk.toWidget more, Gtk.toWidget newIssue, Gtk.toWidget newPullRequest] $ \w -> do
+    b <- w
+    GI.set b [#valign := Gtk.AlignStart]
+    #append header b
   #append pane header
 
   stats <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
@@ -581,6 +591,94 @@ sections r follow c into = do
 -- | Asks whether to mirror @r@, and how, as the add-account dialog asks
 -- for an account. Its "Don't mirror" is kept, so the question is not asked
 -- again; the page's button stays for changing one's mind.
+-- | Clone: by HTTPS or SSH, into a folder chosen, on the default branch;
+-- the folder can open once it is there.
+askClone :: Gtk.Widget -> Repository -> Actions -> IO ()
+askClone anchor r actions = do
+  root <- Gtk.widgetGetRoot anchor
+  parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
+  dialog <- GI.new Gtk.Window [ #title := "Clone", #modal := True, #defaultWidth := 520
+                              , #destroyWithParent := True, #cssClasses := ["usta", "u-clone"] ]
+  forM_ parent $ \p -> Gtk.windowSetTransientFor dialog (Just p)
+  header <- GI.new Gtk.HeaderBar []
+  Platform.configureHeaderBar Platform.current header
+  GI.new Gtk.Label [#label := "Clone " <> r.name, #cssClasses := ["title"]] >>= \t -> GI.set header [#titleWidget := t]
+  GI.set dialog [#titlebar := header]
+  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["form"]]
+  let caption t = GI.new Gtk.Label [#label := t, #xalign := 0, #cssClasses := ["step"]] >>= #append body
+  caption "Over"
+  (over, overButtons) <- Segmented.new ["HTTPS", "SSH"] 0
+  GI.set over [#halign := Gtk.AlignStart, #sensitive := False]
+  #append body over
+  url <- GI.new Gtk.Label [#label := "Looking up the addresses…", #xalign := 0, #selectable := True, #ellipsize := Pango.EllipsizeModeMiddle, #cssClasses := ["mono", "muted"]]
+  #append body url
+  caption "Into"
+  home <- getHomeDirectory
+  let short = T.unpack (T.takeWhileEnd (/= '/') r.name)
+  folderRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+  folder <- GI.new Gtk.Entry [#text := T.pack (home </> short), #hexpand := True, #cssClasses := ["mono"]]
+  choose <- Button.new Button.defaults {Button.label = Just "Choose…"}
+  #append folderRow folder
+  #append folderRow choose
+  #append body folderRow
+  GI.new Gtk.Label [#label := "A new folder, on " <> r.defaultBranch, #xalign := 0, #cssClasses := ["muted"]] >>= #append body
+  showRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
+  showIt <- GI.new Gtk.Switch [#active := True, #valign := Gtk.AlignCenter]
+  #append showRow showIt
+  GI.new Gtk.Label [#label := "Show the folder when it is cloned", #xalign := 0] >>= #append showRow
+  #append body showRow
+  problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
+  #append body problem
+  footer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd, #cssClasses := ["footer"]]
+  cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
+  go <- Button.new Button.defaults {Button.label = Just "Clone", Button.variant = Button.Primary}
+  mapM_ (#append footer) [cancel, go]
+  content <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+  mapM_ (#append content) [body, footer]
+  GI.set dialog [#child := content]
+
+  -- HTTPS at once; the forge's addresses when they come.
+  urls <- newIORef ("https://" <> r.host <> "/" <> r.name <> ".git", Nothing)
+  let showUrl = do
+        (https, ssh) <- readIORef urls
+        useSsh <- case drop 1 overButtons of
+          b : _ -> GI.get b #active
+          [] -> pure False
+        GI.set url [#label := if useSsh then fromMaybe https ssh else https]
+  showUrl
+  void $ forkIO $ do
+    found <- either (\(_ :: SomeException) -> Nothing) (either (const Nothing) Just) <$> try (actions.lookUpOrigins r)
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+      forM_ found $ \o -> do
+        (https, _) <- readIORef urls
+        writeIORef urls (either (const https) id o.https, either (const Nothing) Just o.ssh)
+        GI.set over [#sensitive := either (const False) (const True) o.ssh]
+      showUrl
+      pure False
+  forM_ overButtons $ \b -> void $ GI.on b #toggled showUrl
+  void $ GI.on choose #clicked $ do
+    chooser <- GI.new Gtk.FileDialog [#title := "Where to clone it", #modal := True]
+    Gtk.fileDialogSelectFolder chooser (Just dialog) (Nothing :: Maybe Gio.Cancellable) $ Just $ \_ result -> do
+      picked <- try (Gtk.fileDialogSelectFolderFinish chooser result)
+      case picked of
+        Right file -> Gio.fileGetPath file >>= mapM_ (\p -> Gtk.editableSetText folder (T.pack (p </> short)))
+        Left (_ :: SomeException) -> pure ()
+  void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
+  void $ GI.on go #clicked $ do
+    dir <- T.unpack . T.strip <$> Gtk.editableGetText folder
+    from <- GI.get url #label
+    GI.set problem [#visible := False]
+    Button.busy go [cancel] "Cloning…" (actions.clone r from dir) $ \case
+      Left why -> GI.set problem [#label := why, #visible := True]
+      Right () -> do
+        showing <- GI.get showIt #active
+        when showing $ do
+          launcher <- Gtk.fileLauncherNew . Just =<< Gio.fileNewForPath dir
+          Gtk.fileLauncherLaunch launcher parent (Nothing :: Maybe Gio.Cancellable) Nothing
+        Gtk.windowDestroy dialog
+  void $ GI.on folder #activate (void (Gtk.widgetActivate go))
+  #present dialog
+
 askMirror :: Gtk.Widget -> Repository -> ChooseMirror -> LookUpOrigins -> IO ()
 askMirror anchor r chooseMirror lookUp = do
   root <- Gtk.widgetGetRoot anchor
@@ -822,7 +920,15 @@ css = mconcat
   , "window.u-mirror button.decline label.name { font-weight: 500; }"
   , "button.u-button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }"
   , "box.u-repo-pane { background: var(--surface); border-right: 1px solid var(--border); }"
-  , "flowbox.repo-buttons > flowboxchild { padding: 0; }"
+  , "window.u-clone headerbar { background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: none; }"
+  , "window.u-clone box.form { padding: 18px 20px; background: var(--surface); }"
+  , "window.u-clone label.step { font-size: 12px; color: var(--text-soft); margin-top: 4px; }"
+  , "window.u-clone label.muted { color: var(--text-muted); font-size: 12px; }"
+  , "window.u-clone label.problem { color: var(--danger); font-size: 12px; }"
+  , "window.u-clone box.footer { padding: 12px 20px; background: var(--window); border-top: 1px solid var(--border); }"
+  , "window.u-clone entry { min-height: 34px; border: 1px solid var(--input-border); border-radius: 6px; }"
+  , "popover.u-repo-menu > contents { padding: 4px; min-width: 200px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
+  , "popover.u-repo-menu button.item { padding: 6px 10px; }"
   , "box.u-repo-pane box.search-bar { padding: 12px; }"
   , "box.u-repo-pane box.search-bar dropdown > button { min-height: 30px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface); background-image: none; box-shadow: none; font-size: 12px; }"
   , "list.u-repo-list { background: var(--surface); }"

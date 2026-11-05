@@ -26,6 +26,7 @@ import Data.List (nub, sortOn)
 import Data.Maybe (isJust)
 import Data.Ord (Down (..))
 import Data.Text (Text)
+import Data.Time (UTCTime (..), fromGregorian)
 import qualified Data.Text as T
 import qualified GI.Gtk as Gtk
 import qualified GI.Pango as Pango
@@ -36,6 +37,7 @@ import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Forge as Forge
 import qualified Usta.UI.Components.Icon as Icon
 import qualified Usta.UI.Components.Pager as Pager
+import qualified Usta.UI.Components.Choices as Choices
 import qualified Usta.UI.Components.Segmented as Segmented
 import Usta.UI.Page (Page (..), refill)
 import Usta.UI.Format (Clock, ago, short, thousands)
@@ -72,6 +74,8 @@ data Issue = Issue
   , updated :: Text
   , closed :: Bool
   , relations :: [Relation]
+  , createdAt :: UTCTime
+  , updatedAt :: UTCTime
   }
 
 type Tab :: Type
@@ -96,6 +100,8 @@ inTab t i = case t of
 -- activated with Enter.
 new :: IO () -> (Issue -> IO ()) -> [Issue] -> IO (Page Issue)
 new onNew onOpen issues = do
+  -- Everything listed, and the rows shown in their order.
+  everything <- newIORef issues
   items <- newIORef issues
   page <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
                          , #spacing := 14
@@ -127,9 +133,10 @@ new onNew onOpen issues = do
                             , #hexpand := True
                             , #halign := Gtk.AlignEnd
                             ]
-  forM_ [ ["All repositories", "abdivasiyev/usta", "abdivasiyev/homelab", "abdivasiyev/nix"]
-        , ["Any label", "gtk", "bug", "forge api", "nix"]
-        ] $ \options -> Gtk.dropDownNewFromStrings options >>= #append filters
+  repos <- Choices.new "All repositories"
+  labelChoice <- Choices.new "Any label"
+  sorts <- Gtk.dropDownNewFromStrings ["Recently updated", "Newest", "Oldest"]
+  mapM_ (#append filters) [repos, labelChoice, sorts]
 
   toolbar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
   #append toolbar tabs
@@ -139,7 +146,6 @@ new onNew onOpen issues = do
   list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeNone
                              , #cssClasses := ["u-issue-list"]
                              ]
-  refill list issueRow issues
   empty <- GI.new Gtk.Label [#label := "Nothing here", #cssClasses := ["muted", "empty"]]
   Gtk.listBoxSetPlaceholder list (Just empty)
   void $ GI.on list #rowActivated $ \row -> do
@@ -160,6 +166,31 @@ new onNew onOpen issues = do
         writeIORef current tab
         Gtk.listBoxInvalidateFilter list
 
+  -- The repository and label chosen, in the order chosen; the tabs count
+  -- what they leave.
+  let draw = do
+        all' <- readIORef everything
+        repo <- Choices.chosen repos
+        wanted <- Choices.chosen labelChoice
+        order <- Gtk.dropDownGetSelected sorts
+        let kept = [ i | i <- all', maybe True (== i.host <> "/" <> i.repo) repo
+                   , maybe True (`elem` [name | Label _ name <- i.labels]) wanted ]
+            sorted = case order of
+              1 -> sortOn (Down . (.createdAt)) kept
+              2 -> sortOn (.createdAt) kept
+              _ -> sortOn (Down . (.updatedAt)) kept
+        writeIORef items sorted
+        refill list issueRow sorted
+        forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
+          GI.set button [#label := tabText sorted tab]
+      fill shown = do
+        writeIORef everything shown
+        Choices.offer repos [i.host <> "/" <> i.repo | i <- shown]
+        Choices.offer labelChoice [name | i <- shown, Label _ name <- i.labels]
+        draw
+  forM_ [repos, labelChoice, sorts] $ \d -> void $ GI.on d (GI.PropertyNotify #selected) (const draw)
+  fill issues
+
   card <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["u-card", "list-card"]]
   #append card list
   scroll <- GI.new Gtk.ScrolledWindow [ #child := card
@@ -171,11 +202,7 @@ new onNew onOpen issues = do
   #append page scroll
   pure Page
     { widget = page
-    , update = \shown -> do
-        writeIORef items shown
-        refill list issueRow shown
-        forM_ (zip [minBound ..] tabButtons) $ \(tab, button) ->
-          GI.set button [#label := tabText shown tab]
+    , update = fill
     }
 
 issueRow :: Issue -> IO Gtk.Box
@@ -385,6 +412,8 @@ fromIssue c forge issue = Issue
   , updated = short c issue.updatedAt
   , closed = isJust issue.closedAt
   , relations = [rel | Just rel <- map relation issue.involvement]
+  , createdAt = issue.createdAt
+  , updatedAt = issue.updatedAt
   }
   where
     relation i = case i of
@@ -425,18 +454,20 @@ label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses
 sample :: [Issue]
 sample =
   [ Issue Forge.GitHub "github.com" "abdivasiyev/usta" 5 "Render the main window with GTK4"
-      [Label Accent "gtk"] "abdivasiyev" "1 day ago" 2 "1h" False [AssignedToMe]
+      [Label Accent "gtk"] "abdivasiyev" "1 day ago" 2 "1h" False [AssignedToMe] sampleAt sampleAt
   , Issue Forge.GitHub "github.com" "abdivasiyev/usta" 3 "Diff view: keep scroll position when switching files"
-      [Label Danger "bug"] "abdivasiyev" "2 days ago" 1 "1h" False [AssignedToMe]
+      [Label Danger "bug"] "abdivasiyev" "2 days ago" 1 "1h" False [AssignedToMe] sampleAt sampleAt
   , Issue Forge.GitHub "github.com" "abdivasiyev/usta" 4 "Support GitLab merge request discussions"
-      [Label Merged "forge api"] "abdivasiyev" "2 days ago" 0 "Mon" False [AssignedToMe]
+      [Label Merged "forge api"] "abdivasiyev" "2 days ago" 0 "Mon" False [AssignedToMe] sampleAt sampleAt
   , Issue Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix" 12 "Restart nix-daemon after substituter changes"
-      [Label Neutral "nix"] "abdivasiyev" "3 days ago" 3 "Yesterday" False [CreatedByMe]
+      [Label Neutral "nix"] "abdivasiyev" "3 days ago" 3 "Yesterday" False [CreatedByMe] sampleAt sampleAt
   , Issue Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab" 30 "Binary cache answers as not a cache"
-      [Label Danger "bug"] "abdivasiyev" "last week" 4 "Tue" False [MentionedMe]
+      [Label Danger "bug"] "abdivasiyev" "last week" 4 "Tue" False [MentionedMe] sampleAt sampleAt
   , Issue Forge.GitHub "github.com" "abdivasiyev/usta" 1 "Pick a name and a logo"
-      [] "abdivasiyev" "last week" 6 "Oct 29" True [CreatedByMe]
+      [] "abdivasiyev" "last week" 6 "Oct 29" True [CreatedByMe] sampleAt sampleAt
   ]
+  where
+    sampleAt = UTCTime (fromGregorian 2026 11 1) 0
 
 css :: Text
 css = mconcat

@@ -156,6 +156,7 @@ new now account = do
         , F.setMilestone = \_ _ _ -> refuse
         , F.compare = \_ _ _ -> pure ([], [])
         , F.compareDiff = \_ _ _ -> pure []
+        , F.workflows = \_ -> pure []
         , F.jobSteps = \_ _ -> throwIO (F.Refused "The sample has no jobs.")
         , F.tree = \_ _ -> pure []
         , F.file = \_ _ _ -> refuse

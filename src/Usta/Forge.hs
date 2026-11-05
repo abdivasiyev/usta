@@ -125,6 +125,9 @@ data Forge = Forge
     -- repository has with these words.
   , runs :: RepoName -> IO [Run]
     -- ^ A repository's latest CI runs, newest first.
+  , workflows :: RepoName -> IO [Text]
+    -- ^ The workflows the repository has now, by the names its runs give
+    -- them: not those whose file was deleted, whose runs stay.
     -- ^ What happened besides comments, oldest first.
   , react :: RepoName -> Number -> Maybe Int64 -> Feeling -> Bool -> IO ()
     -- ^ Adds a reaction ('True') or takes it back, on a comment by its id

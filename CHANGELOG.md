@@ -20,6 +20,8 @@
 - A merged GitHub pull request whose branch is gone tells its readiness.
 - A new window no longer loads usta's styles again, and a closed one
   stops following the system's theme.
+- A repository deleted on the forge, or one you lost access to, leaves
+  the Repositories page at the next full sync.
 
 ### Added
 

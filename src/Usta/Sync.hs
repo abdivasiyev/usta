@@ -28,10 +28,11 @@ import Usta.DB (Result, run)
 import Usta.DB.Issue (saveIssues)
 import Usta.DB.Notification (saveNotifications)
 import Usta.DB.PullRequest (savePullRequests)
-import Usta.DB.Repository (saveRepositories)
+import Usta.DB.Repository (keepOnly, saveRepositories)
 import Usta.DB.Schema.Account (AccountId)
 import Usta.DB.SyncCursor (Cursor (..), cursor, saveCursor)
 import Usta.Forge (Failure (..), Fetched (..), Forge (..), Known (..))
+import Usta.Types.Repository (Repository (..))
 import Usta.Types.Resource (Resource (..))
 
 type State :: Type
@@ -142,16 +143,17 @@ syncAccount :: Settings -> (Status -> IO ()) -> AccountId -> Forge -> Bool -> IO
 syncAccount settings report key forge full = do
   report Status {accountId = key, state = Syncing}
   outcome <- attempt $ do
-    list Notifications forge.notifications (const (saveNotifications key))
-    list PullRequests forge.pullRequests (savePullRequests key)
-    list Issues forge.issues (saveIssues key)
-    list Repositories forge.repositories (saveRepositories key)
+    list Notifications forge.notifications (const (saveNotifications key)) (const (pure ()))
+    list PullRequests forge.pullRequests (savePullRequests key) (const (pure ()))
+    list Issues forge.issues (saveIssues key) (const (pure ()))
+    list Repositories forge.repositories (saveRepositories key) (keepOnly key . map (.name))
   time <- getCurrentTime
   report Status {accountId = key, state = either Failed (const (Synced time)) outcome}
   pure (either (const False) (const True) outcome)
   where
-    list :: Resource -> (Known -> IO (Fetched [a])) -> (UTCTime -> [a] -> Result ()) -> IO ()
-    list resource fetch save = do
+    -- @prune@ forgets what a whole list no longer has.
+    list :: Resource -> (Known -> IO (Fetched [a])) -> (UTCTime -> [a] -> Result ()) -> ([a] -> Result ()) -> IO ()
+    list resource fetch save prune = do
       known <- run settings.pool (cursor key resource)
       -- As of when this fetch starts, so what changes during it comes next
       -- time; a minute back, for clocks a little apart.
@@ -162,9 +164,10 @@ syncAccount settings report key forge full = do
       case fetched of
         NotModified ->
           run settings.pool (saveCursor key resource Cursor {etag = knownTag, syncedAt = started})
-        Fetched {etag = tag, items = items} -> do
+        Fetched {etag = tag, items = items, whole = whole} -> do
           run settings.pool $ do
             save started items
+            when whole (prune items)
             saveCursor key resource Cursor {etag = tag, syncedAt = started}
           publish settings.changes Change {accountId = key, resource = resource}
 

@@ -23,7 +23,7 @@ import Usta.DB.Account (saveAccount)
 import Usta.DB.Issue (issues)
 import Usta.DB.Notification (InboxItem (..), inbox, setDone)
 import Usta.DB.PullRequest (pullRequests)
-import Usta.DB.Repository (repositories)
+import Usta.DB.Repository (repositories, saveRepositories)
 import Usta.DB.Schema.Account (AccountId)
 import Usta.Forge (Failure (..), Fetched (..), Forge (..), Known (..))
 import qualified Usta.Forge.Sample as Sample
@@ -83,6 +83,12 @@ tests =
         writeIORef t.refetch (Just (Just now))
         again t
         doneOf t.pool "1" >>= (@?= Just False)
+    , testCase "a whole list forgets what the forge no longer has" $
+        withForgeAfter sampleRepositories (\_ f -> f {repositories = \_ -> pure Fetched {etag = Nothing, items = [], whole = True}}) $ \t ->
+          counts t.pool >>= \(_, _, _, n) -> n @?= 0
+    , testCase "a list that is not whole forgets nothing" $
+        withForgeAfter sampleRepositories (\_ f -> f {repositories = \_ -> pure Fetched {etag = Nothing, items = [], whole = False}}) $ \t ->
+          counts t.pool >>= \(_, _, _, n) -> n @?= 1
     , testCase "an account removed reports nothing more" $ synced $ \t -> do
         t.sync.remove t.account
         statuses <- t.sync.latest
@@ -115,10 +121,25 @@ synced = withForge (\_ s -> s)
 -- | Starts syncing the sample forge, changed by @adapt@, and waits for
 -- its first sync.
 withForge :: (Sample.Sample -> Forge -> Forge) -> (Running -> IO ()) -> IO ()
-withForge adapt test = withCache $ \pool -> do
+withForge = withForgeAfter (\_ _ -> pure ())
+
+-- | The sample's repositories, saved as an earlier sync would have.
+sampleRepositories :: ConnectionPool -> AccountId -> IO ()
+sampleRepositories pool key = do
+  now <- getCurrentTime
+  account <- githubAccount
+  sample <- Sample.new now account
+  sample.forge.repositories Known {etag = Nothing, since = Nothing} >>= \case
+    Fetched {items} -> run pool (saveRepositories key now items)
+    NotModified -> pure ()
+
+-- | 'withForge', with the cache given what @before@ saves first.
+withForgeAfter :: (ConnectionPool -> AccountId -> IO ()) -> (Sample.Sample -> Forge -> Forge) -> (Running -> IO ()) -> IO ()
+withForgeAfter before adapt test = withCache $ \pool -> do
   now <- getCurrentTime
   account <- githubAccount
   key <- run pool (saveAccount now account)
+  before pool key
   sample <- Sample.new now account
   refetch <- newIORef Nothing
   changeBus <- newBus
@@ -128,7 +149,7 @@ withForge adapt test = withCache $ \pool -> do
   let forge = (adapt sample sample.forge) {notifications = \known -> readIORef refetch >>= \case
         Nothing -> sample.forge.notifications known
         Just at -> sample.forge.notifications Known {etag = Nothing, since = known.since} >>= \case
-          Fetched {etag, items} -> pure Fetched {etag = etag, items = [maybe n (\time -> n {updatedAt = time}) at | n <- items]}
+          Fetched {etag, items, whole} -> pure Fetched {etag = etag, items = [maybe n (\time -> n {updatedAt = time}) at | n <- items], whole = whole}
           NotModified -> pure NotModified}
       settings = Sync.Settings {pool = pool, changes = changeBus, statuses = statusBus, every = 3600}
   bracket (Sync.start settings [(key, forge)]) (.stop) $ \s -> do

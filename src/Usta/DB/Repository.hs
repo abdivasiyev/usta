@@ -1,6 +1,7 @@
 -- | The repositories each account can see, as last synced.
 module Usta.DB.Repository
   ( saveRepositories
+  , keepOnly
   , repositories
   ) where
 
@@ -26,6 +27,7 @@ import qualified Usta.DB.Schema.Account as Account
 import Usta.DB.Schema.Repository (Unique (..))
 import qualified Usta.DB.Schema.Repository as Schema
 import Usta.Types.Host (Host)
+import Usta.Types.RepoName (RepoName)
 import Usta.Types.Repository (Repository (..))
 
 -- | Adds each repository, or replaces the one already synced with the
@@ -40,6 +42,12 @@ saveRepositories account now found = do
     case existing of
       Nothing -> () <$ Persist.insert row
       Just (Entity key _) -> Persist.replace key row
+
+-- | Forgets the account's repositories not named: the forge listed all
+-- it has, and these were not among them.
+keepOnly :: AccountId -> [RepoName] -> Result ()
+keepOnly account names =
+  Persist.deleteWhere [Schema.RepositoryAccountId Persist.==. account, Schema.RepositoryName Persist./<-. names]
 
 -- | Every synced repository with the account that sees it, most recently
 -- updated first.

@@ -41,7 +41,7 @@ import Servant.API (getResponse, lookupResponseHeader, ResponseHeader (..))
 import Servant.Client (BaseUrl (..), ClientM, Scheme (Https))
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Fork (..), Known (..), LineNote (..))
 import qualified Usta.Forge.GitHub.Api as Api
 import Usta.Forge.Http (Client, connect, run, runChanged, runDone)
 import Usta.Types.Host (Host)
@@ -129,6 +129,14 @@ github manager host token = do
     , repositories = \known -> case known.since of
         Just _ -> pure NotModified
         Nothing -> Fetched Nothing <$> repositoriesOf graph host
+    , forkOwners = do
+        login <- myLogin
+        orgs <- pages Api.api.myOrgs
+        pure (unparse login : [unparse o.login | o <- orgs])
+    , forks = \repo -> map (.fullName) <$> pages (Api.api.forks (owner repo) (shortName repo))
+    , parentOf = \repo -> (.parent) <$> run rest (Api.api.repository (owner repo) (shortName repo))
+    , fork = \repo f -> (.fullName) <$> run rest (Api.api.fork (owner repo) (shortName repo)
+        Api.ForkBody {organization = f.owner, name = f.name, defaultBranchOnly = f.defaultBranchOnly})
     , repository = \repo -> do
         Api.OneRepo found <- asked graph (Api.graph.repository Api.GraphQuery
           {query = Api.repoQuery, variables = object ["owner" .= owner repo, "name" .= shortName repo]})

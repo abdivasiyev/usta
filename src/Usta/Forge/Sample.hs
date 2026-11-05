@@ -74,6 +74,10 @@ new now account = do
         , F.pullRequests = fetch ref PullRequests (.pullRequests)
         , F.issues = fetch ref Issues (.issues)
         , F.repositories = fetch ref Repositories (.repositories)
+        , F.forkOwners = pure [unparse account.login]
+        , F.forks = \_ -> pure []
+        , F.parentOf = \_ -> pure Nothing
+        , F.fork = \_ _ -> throwIO (F.Refused "The samples cannot fork.")
         , F.repository = \repo -> do
             failIfTold ref
             s <- readIORef ref

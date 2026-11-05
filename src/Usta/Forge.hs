@@ -5,6 +5,7 @@ module Usta.Forge
   , Known (..)
   , Fetched (..)
   , CloneUrls (..)
+  , Fork (..)
   , Failure (..)
   , LineNote (..)
   ) where
@@ -65,6 +66,13 @@ data Forge = Forge
   , repositories :: Known -> IO (Fetched [Repository])
   , repository :: RepoName -> IO Repository
     -- ^ Any one you can see, synced or not, as a link or a search finds it.
+  , forkOwners :: IO [Text]
+    -- ^ Where you can fork to: you first, then your organizations.
+  , forks :: RepoName -> IO [RepoName]
+  , parentOf :: RepoName -> IO (Maybe RepoName)
+    -- ^ The repository a fork was made from.
+  , fork :: RepoName -> Fork -> IO RepoName
+    -- ^ The new fork's name; the forge may take a few seconds to fill it.
   , markRead :: ThreadId -> IO ()
   , markUnread :: ThreadId -> IO ()
     -- ^ Puts a notification back among the unread, for "Move to inbox".
@@ -199,6 +207,16 @@ data Forge = Forge
 
 -- | A repository's clone URLs. The forge gives them because only it knows
 -- its address (it may sit under a path) and its ssh port.
+-- | A fork to make: in an organization, or yours when 'Nothing'.
+type Fork :: Type
+data Fork = Fork
+  { owner :: Maybe Text
+  , name :: Text
+  , defaultBranchOnly :: Bool
+    -- ^ GitHub's; Forgejo copies every branch.
+  }
+  deriving stock (Eq, Show)
+
 type CloneUrls :: Type
 data CloneUrls = CloneUrls
   { https :: Text

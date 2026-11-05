@@ -38,7 +38,7 @@ import Servant.Client (BaseUrl (..), ClientM)
 import Data.Traversable (for)
 import Text.Read (readMaybe)
 
-import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Known (..), LineNote (..))
+import Usta.Forge (CloneUrls (..), Failure (..), Fetched (..), Forge (..), Fork (..), Known (..), LineNote (..))
 import qualified Usta.Forge.Forgejo.Api as Api
 import Usta.Forge.Http (Client, connect, run)
 import qualified Data.ByteString.Lazy as BL
@@ -99,6 +99,13 @@ forgejo manager base host token = do
         Just _ -> pure NotModified
         Nothing -> Fetched Nothing <$> repositoriesOf client host
     , repository = \repo -> repositoryOf host <$> run client (Api.api.repository (owner repo) (shortName repo))
+    , forkOwners = do
+        login <- myLogin
+        orgs <- run client (everyPage (\page limit -> Api.api.myOrgs Api.ListQuery {page = page, limit = limit}))
+        pure (unparse login : map (.name) orgs)
+    , forks = \repo -> map (.fullName) <$> run client (everyPage (\page limit -> Api.api.forks (owner repo) (shortName repo) Api.ListQuery {page = page, limit = limit}))
+    , parentOf = \repo -> (.parent) <$> run client (Api.api.repository (owner repo) (shortName repo))
+    , fork = \repo f -> (.fullName) <$> run client (Api.api.fork (owner repo) (shortName repo) Api.ForkBody {organization = f.owner, name = f.name})
     , markRead = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Read)))
     , markUnread = \thread -> () <$ run client (Api.api.markThread thread (Api.ThreadQuery (Named Api.Unread)))
     , discussion = \repo n -> do

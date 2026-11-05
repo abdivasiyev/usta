@@ -28,7 +28,8 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (NominalDiffTime)
-import System.Directory (XdgDirectory (XdgConfig), createDirectoryIfMissing, getXdgDirectory)
+import Control.Applicative ((<|>))
+import System.Directory (XdgDirectory (XdgConfig), XdgDirectoryList (XdgConfigDirs), createDirectoryIfMissing, getXdgDirectory, getXdgDirectoryList)
 import System.FilePath (takeDirectory, (</>))
 
 import Usta.DB (databaseFile)
@@ -131,9 +132,11 @@ save path p = do
   encodeFile path p
 
 -- | Choices fixed outside usta, in @~/.config/usta/config.json@ (Home
--- Manager's @programs.usta.settings@ writes it): the same names as
--- @preferences.json@, each one that is there winning over the user's.
--- usta never writes it.
+-- Manager's @programs.usta.settings@ writes it) or, for every user, in
+-- @/etc/xdg/usta/config.json@ (the NixOS and nix-darwin modules'): the
+-- same names as @preferences.json@, each one that is there winning over
+-- the user's, and the user's file over the system's. usta never writes
+-- them.
 type Managed :: Type
 data Managed = Managed
   { interval :: Maybe Interval
@@ -159,22 +162,39 @@ instance FromJSON Managed where
       fixedAs :: (Show a, Enum a, Bounded a) => Text -> Text -> Parser a
       fixedAs key t = maybe (fail (T.unpack ("Unknown " <> key <> ": " <> t))) pure (lookup t names)
 
-nothing :: Managed
-nothing = Managed Nothing Nothing Nothing Nothing Nothing Nothing
+-- | The first one's choices, and the second's where the first has none.
+instance Semigroup Managed where
+  a <> b = Managed
+    { interval = a.interval <|> b.interval
+    , theme = a.theme <|> b.theme
+    , notify = a.notify <|> b.notify
+    , onlyInBackground = a.onlyInBackground <|> b.onlyInBackground
+    , openLinks = a.openLinks <|> b.openLinks
+    , checkUpdates = a.checkUpdates <|> b.checkUpdates
+    }
 
+instance Monoid Managed where
+  mempty = Managed Nothing Nothing Nothing Nothing Nothing Nothing
+
+-- | The user's file, which Home Manager writes.
 managedFile :: IO FilePath
 managedFile = (</> "config.json") <$> getXdgDirectory XdgConfig "usta"
 
--- | Nothing fixed when the file is missing or wrong; a wrong one is logged
--- by the caller from the 'Left'.
+-- | The user's file over the system's ones; a missing file fixes
+-- nothing. A wrong one is a 'Left', for the caller to log, and then
+-- nothing is fixed.
 loadManaged :: IO (Either Text Managed)
 loadManaged = do
-  path <- managedFile
-  found <- try (eitherDecodeFileStrict path)
-  pure $ case found of
-    Right (Right m) -> Right m
-    Right (Left e) -> Left (T.pack path <> ": " <> T.pack e)
-    Left (_ :: IOException) -> Right nothing
+  own <- managedFile
+  system <- map (</> "usta" </> "config.json") <$> getXdgDirectoryList XdgConfigDirs
+  fmap mconcat . sequence <$> mapM readOne (own : system)
+  where
+    readOne path = do
+      found <- try (eitherDecodeFileStrict path)
+      pure $ case found of
+        Right (Right m) -> Right m
+        Right (Left e) -> Left (T.pack path <> ": " <> T.pack e)
+        Left (_ :: IOException) -> Right mempty
 
 -- | The names of the choices fixed, as Settings marks them.
 fixedKeys :: Managed -> [Text]

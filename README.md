@@ -4,18 +4,25 @@
 
 A desktop client to connect with your forge.
 
-usta shows your pull requests, issues and notifications from GitHub, GitLab
-and Forgejo in one fast native window. It is written in Haskell with GTK 4.
+usta shows your pull requests, issues and notifications from GitHub and
+Forgejo in one fast native window, for macOS and Linux. It is written in
+Haskell with GTK 4. See it at <https://usta.azizovich.uz>.
 
-Forgejo works end to end: inbox, pull request reviews on local git
-diffs, issues, repositories, an offline cache. GitHub and GitLab come
-next. The design lives in [docs/DESIGN.md](docs/DESIGN.md).
+**usta is in beta** (0.1.0). GitHub and Forgejo work end to end: the
+inbox, pull request reviews on local git diffs, checks and workflows,
+issues, repositories, and an offline cache. GitLab comes next. What is in
+each release is in [CHANGELOG.md](CHANGELOG.md); the design lives in
+[docs/DESIGN.md](docs/DESIGN.md).
 
 ## Install
 
 Each [release](https://github.com/abdivasiyev/usta/releases) has
-`usta.dmg` for macOS and `usta-x86_64.AppImage` for Linux. Installed,
-usta opens `usta://<forge link>` links, such as
+`usta.dmg` for macOS, and `usta-x86_64.AppImage`, a `.deb` and an `.rpm`
+for Linux. The macOS app is not signed by Apple yet: the first time,
+open it with right-click › Open, or allow it in System Settings › Privacy
+& Security.
+
+Installed, usta opens `usta://<forge link>` links, such as
 `usta://codeberg.org/forgejo/forgejo/pulls/1`, from anywhere on the
 system. Once a day it checks for a newer release (Settings > Updates).
 

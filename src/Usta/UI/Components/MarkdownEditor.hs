@@ -13,6 +13,7 @@ module Usta.UI.Components.MarkdownEditor
   , draftAt
   , defaults
   , new
+  , sendOn
   , css
   ) where
 
@@ -23,8 +24,10 @@ import Data.Char (isDigit)
 import Data.Int (Int32)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified GI.Gdk as Gdk
 import qualified GI.GLib as GLib
 import qualified GI.Gtk as Gtk
 
@@ -172,6 +175,33 @@ new cfg = do
   forM_ cfg.hint $ \h ->
     GI.new Gtk.Label [#label := h, #xalign := 0, #cssClasses := ["hint"]] >>= #append box
   pure (box, buffer)
+
+-- | What sends the text in the editor @box@: Cmd Enter always, and Enter
+-- too when @enter@, as in a comment, where Shift Enter starts a new line.
+-- While the emoji codes are offered, Enter picks one instead.
+sendOn :: Gtk.Box -> Bool -> IO () -> IO ()
+sendOn box enter send = do
+  keys <- GI.new Gtk.EventControllerKey [#propagationPhase := Gtk.PropagationPhaseCapture]
+  void $ GI.on keys #keyPressed $ \keyval _ state -> do
+    let return' = keyval `elem` [Gdk.KEY_Return, Gdk.KEY_KP_Enter]
+        primary = any (`elem` state) [Gdk.ModifierTypeMetaMask, Gdk.ModifierTypeControlMask]
+        plain = not (any (`elem` state) [Gdk.ModifierTypeShiftMask, Gdk.ModifierTypeMetaMask, Gdk.ModifierTypeControlMask, Gdk.ModifierTypeAltMask])
+    offering <- if return' && plain then choosing else pure False
+    if return' && (primary || (enter && plain && not offering))
+      then send >> pure True
+      else pure False
+  Gtk.widgetAddController box keys
+  where
+    -- A popover shown on the text view in the box: the emoji codes.
+    choosing = do
+      view <- Gtk.widgetGetRoot box >>= maybe (pure Nothing) Gtk.rootGetFocus >>= maybe (pure Nothing) (GI.castTo Gtk.TextView)
+      maybe (pure False) (\v -> Gtk.widgetGetFirstChild v >>= anyShown) view
+    anyShown = \case
+      Nothing -> pure False
+      Just w -> do
+        popover <- GI.castTo Gtk.Popover w
+        shown' <- Gtk.widgetGetVisible w
+        if shown' && isJust popover then pure True else Gtk.widgetGetNextSibling w >>= anyShown
 
 -- * Toolbar
 

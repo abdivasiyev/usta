@@ -104,6 +104,7 @@ new c = do
         save <- Button.new Button.defaults {Button.label = Just "Save", Button.variant = Button.Primary}
         #append buttons cancel >> #append buttons save
         #append slot buttons
+        MarkdownEditor.sendOn editor True (void (Gtk.widgetActivate save))
         Gtk.widgetAddCssClass card "editing"
         void $ GI.on cancel #clicked (Gtk.widgetRemoveCssClass card "editing" >> showText)
         void $ GI.on save #clicked $ do

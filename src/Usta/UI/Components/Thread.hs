@@ -194,9 +194,7 @@ new s = do
               addNote s.me "just now" False text
               Gtk.textBufferSetText replyBuffer "" (-1)
   void $ GI.on send #clicked sendReply
-  replyKeys <- GI.new Gtk.ShortcutController []
-  shortcut replyKeys "<Primary>Return" sendReply
-  Gtk.widgetAddController entry replyKeys
+  MarkdownEditor.sendOn entry True sendReply
   #append card whole
 
   -- Only a resolved thread folds to its bar; Hide puts an outdated one
@@ -324,8 +322,8 @@ writer me w = do
   void $ GI.on cancelButton #clicked w.cancel
   void $ GI.on nowButton #clicked postIt
   void $ GI.on addButton #clicked addIt
+  MarkdownEditor.sendOn editor True addIt
   keys <- GI.new Gtk.ShortcutController []
-  shortcut keys "<Primary>Return" addIt
   shortcut keys "Escape" w.cancel
   Gtk.widgetAddController editor keys
 

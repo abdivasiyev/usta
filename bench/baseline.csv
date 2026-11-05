@@ -1,0 +1,9 @@
+Name,Mean (ps),2*Stdev (ps)
+"All.diff.read 20,000 lines",4890925000,235024718
+"All.diff.color 5,000 lines of Haskell",218888400000,15467776626
+All.diagrams.lay out a flowchart of 200 nodes,18466187500,1754754344
+All.diagrams.lay out a sequence of 300 messages,511963281,30731958
+"All.the graph of 5,000 commits",1818823437,133000624
+"All.cache.save 1,000 pull requests again",90754800000,6937848112
+"All.cache.read the inbox of 1,000",66335725000,5731377636
+"All.cache.read 1,000 pull requests",48749550000,3833067726

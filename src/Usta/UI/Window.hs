@@ -240,16 +240,15 @@ buildWith start crashed given app = do
       openIssue backLabel model = do
         Log.say "ui" ("open " <> model.host <> "/" <> model.repo <> " issue #" <> T.pack (show model.number))
         let (h, r, n) = (model.host, model.repo, model.number)
-            refresh = openIssue backLabel model
-            actionsFor d goals me c = Issue.Actions
+            actionsFor again d goals me c = Issue.Actions
               { comment = source.comment h r n
               , setClosed = source.setClosed h r n
-              , labels = labelPicker source h r n refresh
-              , talk = talkFor source h r n refresh me c
-              , assigning = assignPicker source h r n refresh me d.assignees
-              , milestoning = milestonePicker source h r n refresh c d.milestone
+              , labels = labelPicker source h r n again
+              , talk = talkFor source h r n again me c
+              , assigning = assignPicker source h r n again me d.assignees
+              , milestoning = milestonePicker source h r n again c d.milestone
               , milestoneNow = find (\g -> Just g.title == d.milestone) goals
-              , refresh = refresh
+              , refresh = again
               }
             load = do
               d <- source.discussion h r n
@@ -258,10 +257,10 @@ buildWith start crashed given app = do
               me <- maybe "" (.login) . find (\a -> a.host == h) <$> source.accounts
               pure (fmap (\x -> (x, goals, me, events)) d)
         Issue.new backLabel backToMain (source.editTitle h r n) (Issue.Watch (source.watching h r n) (source.setWatching h r n)) model (\showClosed ->
-          loadLive load $ \(d, goals, me, events) -> do
+          loadLive load $ \again (d, goals, me, events) -> do
             c <- clock
             showClosed d.closed
-            Issue.thread (actionsFor d goals me c) (Issue.fromDiscussion c d model {Issue.timeline = events}))
+            Issue.thread (actionsFor again d goals me c) (Issue.fromDiscussion c d model {Issue.timeline = events}))
           >>= showDetail
       -- In @at@ (host and repository) when given, else the first one.
       openNewIssueIn at = do
@@ -802,7 +801,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
           events <- either (const []) id <$> source.timeline host repo n
           me <- maybe "" (.login) . find (\a -> a.host == host) <$> source.accounts
           pure (fmap (\x -> (x, either (const []) snd commits, either (const (Threads [] Nothing)) id threads, me, (reviewers, ready, goals, events))) d)
-        actionsFor d goals me c = Conversation.Actions
+        actionsFor again d goals me c = Conversation.Actions
           { comment = source.comment host repo n
           , setClosed = source.setClosed host repo n
           , merge = source.merge host repo n
@@ -813,18 +812,18 @@ tabContent source panels reopen fetch summary showState tab = case tab of
           , requestReview = source.requestReview host repo n
           , unrequestReview = source.unrequestReview host repo n
           , candidates = source.reviewCandidates host repo n
-          , labels = labelPicker source host repo n reopen
-          , talk = talkFor source host repo n reopen me c
-          , assigning = assignPicker source host repo n reopen me d.assignees
-          , milestoning = milestonePicker source host repo n reopen c d.milestone
+          , labels = labelPicker source host repo n again
+          , talk = talkFor source host repo n again me c
+          , assigning = assignPicker source host repo n again me d.assignees
+          , milestoning = milestonePicker source host repo n again c d.milestone
           , milestoneNow = find (\g -> Just g.title == d.milestone) goals
-          , refresh = reopen
+          , refresh = again
           }
         checks = case fmap fst summary.checks of
           Just Success -> Just True
           Just Danger -> Just False
           _ -> Nothing
-    loadLive load $ \(d, commits, threads, me, (reviewers, ready, goals, events)) -> do
+    loadLive load $ \again (d, commits, threads, me, (reviewers, ready, goals, events)) -> do
       c <- clock
       showState $ case (d.merged, d.closed) of
         (True, _) -> PullRequest.MergedState
@@ -835,7 +834,7 @@ tabContent source panels reopen fetch summary showState tab = case tab of
             , me = me, clock = c, reply = source.reply host repo n t, upload = Just (source.upload host repo n) }
           model = Conversation.fromDiscussion c d commits summary.branches checks
           running = fmap fst summary.checks == Just Warning
-      Conversation.new (actionsFor d goals me c) model
+      Conversation.new (actionsFor again d goals me c) model
         { Conversation.threads = map shown threads.threads
         , Conversation.timeline = [e | e <- events, not (pushed e)]
         , Conversation.reviewers = reviewers
@@ -859,7 +858,10 @@ tabContent source panels reopen fetch summary showState tab = case tab of
                 cs -> Just (unparse (last cs).sha)
               links = Files.lineLinks summary.forge (pullUrl summary) head' (\p -> fromMaybe "" (lookup p hashes))
           pure ((\f -> (f, either (const (Threads [] Nothing)) id threads, me, c, links)) <$> files)
-    in loadInto withThreads $ \((from, changes), threads, me, c, links) ->
+        -- New commits are offered, not drawn: the files keep their Viewed
+        -- marks and the review being written.
+        latest = fmap (fmap (\(_, cs) -> map (.sha) cs)) (source.pullCommits summary.host summary.repo summary.number)
+    in offerWhenChanged latest reopen =<< loadInto withThreads (\((from, changes), threads, me, c, links) ->
       Files.new Files.Actions
         { review = source.review summary.host summary.repo summary.number
         , merge = source.merge summary.host summary.repo summary.number Squash True
@@ -873,9 +875,9 @@ tabContent source panels reopen fetch summary showState tab = case tab of
         }
         panels
         (Files.fromFileDiffs c (said from "Diff computed locally" "Diff from the forge's API") changes)
-          {Files.threads = threads, Files.me = me, Files.links = links}
+          {Files.threads = threads, Files.me = me, Files.links = links})
   PullRequest.Commits ->
-    loadInto (source.pullCommits summary.host summary.repo summary.number) $ \(from, commits) -> do
+    loadLive (source.pullCommits summary.host summary.repo summary.number) $ \_ (from, commits) -> do
       c <- clock
       let changesOf commit = case parse commit.hash of
             Left _ -> pure (Left "That commit hash is not one usta can read.")
@@ -1190,32 +1192,65 @@ loadInto load render = do
 -- | 'loadInto', then the same load every 30 seconds while it is on
 -- screen: what changed on the forge is drawn again in place, at the same
 -- scroll position. While a text box in it holds unsent words, a button
--- offers the new activity instead, so typing is not lost. It stops once
--- the page is gone.
-loadLive :: forall a. Eq a => IO (Either Text a) -> (a -> IO Gtk.Widget) -> IO Gtk.Widget
+-- offers the new activity instead, so typing is not lost. @render@ gets
+-- what loads and draws again at once, for after a change made here (a
+-- comment, a label), so the page keeps its place. It stops once the page
+-- is gone.
+loadLive :: forall a. Eq a => IO (Either Text a) -> (IO () -> a -> IO Gtk.Widget) -> IO Gtk.Widget
 loadLive load render = do
   slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
   shown <- newIORef Nothing
   asking <- newIORef False
+  self <- newIORef (pure ())
   let draw a = do
         writeIORef shown (Just a)
-        w <- render a
+        again <- readIORef self
+        w <- render again a
         replaceChild slot w
       -- The page's scrolling keeps its place while the content changes.
       keepingPlace act = do
-        scroll <- scrolledAbove slot
-        before <- traverse (\sw -> Gtk.scrolledWindowGetVadjustment sw >>= Gtk.adjustmentGetValue) scroll
+        before <- scrolledIn slot >>= traverse (\sw -> Gtk.scrolledWindowGetVadjustment sw >>= Gtk.adjustmentGetValue)
         act
-        forM_ ((,) <$> scroll <*> before) $ \(sw, v) -> void $ GLib.idleAdd GLib.PRIORITY_DEFAULT_IDLE $ do
-          Gtk.scrolledWindowGetVadjustment sw >>= (`Gtk.adjustmentSetValue` v)
-          pure False
+        -- The new content has a scrolled area of its own: put it back
+        -- there once it is laid out tall enough, which takes a few frames;
+        -- set before, it would stop at the top.
+        forM_ before $ \v -> do
+          tries <- newIORef (0 :: Int)
+          void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 30 $ do
+            n <- (+ 1) <$> readIORef tries
+            writeIORef tries n
+            found <- scrolledIn slot
+            case found of
+              Nothing -> pure (n < 30)
+              Just sw -> do
+                adjustment <- Gtk.scrolledWindowGetVadjustment sw
+                upper <- Gtk.adjustmentGetUpper adjustment
+                page <- Gtk.adjustmentGetPageSize adjustment
+                if upper - page >= v || n >= 30
+                  then Gtk.adjustmentSetValue adjustment v >> pure False
+                  else pure True
       offer a = do
         button <- Button.new Button.defaults {Button.label = Just "New activity · Show", Button.small = True, Button.variant = Button.Primary}
         GI.set button [#halign := Gtk.AlignCenter, #marginTop := 8, #cssClasses := ["u-new-activity"]]
         void $ GI.on button #clicked (keepingPlace (draw a))
         old <- Gtk.widgetGetFirstChild slot
         forM_ old $ \w -> Gtk.widgetHasCssClass w "u-new-activity" >>= \already -> unless already (Gtk.boxPrepend slot button)
-  inner <- loadInto load (\a -> writeIORef shown (Just a) >> render a)
+      -- @forced@ after a change made here: drawn even while typing.
+      fetch forced = do
+        writeIORef asking True
+        void $ forkIO $ do
+          result <- try load :: IO (Either SomeException (Either Text a))
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            writeIORef asking False
+            before <- readIORef shown
+            case result of
+              Right (Right a) | forced || Just a /= before -> do
+                typing <- if forced then pure False else Gtk.toWidget slot >>= unsentText
+                if typing then offer a else keepingPlace (draw a)
+              _ -> pure ()
+            pure False
+  writeIORef self (fetch True)
+  inner <- loadInto load (\a -> writeIORef shown (Just a) >> render (fetch True) a)
   #append slot inner
   void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 30 $ do
     root <- Gtk.widgetGetRoot slot
@@ -1224,23 +1259,11 @@ loadLive load render = do
       Just _ -> do
         mapped <- Gtk.widgetGetMapped slot
         busy <- readIORef asking
-        when (mapped && not busy) $ do
-          writeIORef asking True
-          void $ forkIO $ do
-            result <- try load :: IO (Either SomeException (Either Text a))
-            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-              writeIORef asking False
-              before <- readIORef shown
-              case result of
-                Right (Right a) | Just a /= before -> do
-                  typing <- Gtk.toWidget slot >>= unsentText
-                  if typing then offer a else keepingPlace (draw a)
-                _ -> pure ()
-              pure False
+        when (mapped && not busy) (fetch False)
         pure True
   Gtk.toWidget slot
   where
-    -- Unsent words in any of its text boxes or entries.
+    -- Unsent words in any of its text boxes.
     unsentText w = do
       ws <- below w
       views <- catMaybes <$> mapM (GI.castTo Gtk.TextView) ws
@@ -1254,9 +1277,52 @@ loadLive load render = do
             next <- Gtk.widgetGetNextSibling c
             (c :) . (under <>) <$> go next
       go first
-    scrolledAbove w = do
-      t <- GI.glibType @Gtk.ScrolledWindow
-      Gtk.widgetGetAncestor w t >>= traverse (GI.unsafeCastTo Gtk.ScrolledWindow)
+    -- The page's own scrolled area: the first one inside, else the one
+    -- around it.
+    scrolledIn w = do
+      inside <- Gtk.toWidget w >>= below >>= fmap catMaybes . mapM (GI.castTo Gtk.ScrolledWindow)
+      case inside of
+        sw : _ -> pure (Just sw)
+        [] -> do
+          t <- GI.glibType @Gtk.ScrolledWindow
+          Gtk.widgetGetAncestor w t >>= traverse (GI.unsafeCastTo Gtk.ScrolledWindow)
+
+-- | @widget@ with a "New commits · Reload" button over it that shows
+-- once @probe@, asked every 30 seconds while it is on screen, answers
+-- otherwise than it did first; the button runs @reload@.
+offerWhenChanged :: forall b. Eq b => IO (Either Text b) -> IO () -> Gtk.Widget -> IO Gtk.Widget
+offerWhenChanged probe reload widget = do
+  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+  button <- Button.new Button.defaults {Button.label = Just "New commits · Reload", Button.small = True, Button.variant = Button.Primary}
+  GI.set button [#halign := Gtk.AlignCenter, #marginTop := 8, #marginBottom := 4, #visible := False]
+  void $ GI.on button #clicked reload
+  #append box button
+  #append box widget
+  first <- newIORef Nothing
+  asking <- newIORef False
+  let ask = do
+        writeIORef asking True
+        void $ forkIO $ do
+          result <- try probe :: IO (Either SomeException (Either Text b))
+          void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            writeIORef asking False
+            case result of
+              Right (Right now) -> readIORef first >>= \case
+                Nothing -> writeIORef first (Just now)
+                Just before -> when (before /= now) $ GI.set button [#visible := True]
+              _ -> pure ()
+            pure False
+  ask
+  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 30 $ do
+    root <- Gtk.widgetGetRoot box
+    case root of
+      Nothing -> pure False
+      Just _ -> do
+        mapped <- Gtk.widgetGetMapped box
+        busy <- readIORef asking
+        when (mapped && not busy) ask
+        pure True
+  Gtk.toWidget box
 
 -- | Shows @widget@ as the box's only child.
 replaceChild :: Gtk.Box -> Gtk.Widget -> IO ()

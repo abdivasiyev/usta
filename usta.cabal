@@ -319,6 +319,7 @@ test-suite usta-test
     Usta.LocalFilesTests
     Usta.MermaidTests
     Usta.MigrationTests
+    Usta.MirrorsTests
     Usta.OAuthTests
     Usta.PreferencesTests
     Usta.SecurityTests

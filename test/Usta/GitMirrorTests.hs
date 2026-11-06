@@ -3,7 +3,7 @@
 -- | usta's git commands against a real repository and its mirror: a
 -- temporary origin with commits, branches, a tag, a merge, a pull
 -- request's ref, and files with spaces, accents and quotes in their names.
-module Usta.GitMirrorTests (tests) where
+module Usta.GitMirrorTests (tests, git, gitAt, gitOut, dayAfter) where
 
 import Control.Exception (SomeException, catch)
 import Control.Monad (void)

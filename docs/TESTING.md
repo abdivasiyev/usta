@@ -106,10 +106,12 @@ and commit `test/caches/0.2.0.db`.
 
 ## usta-ui-test
 
-`test-ui/` builds usta's window from the sample data and drives it: every
-page in the light and the dark theme, the search's shortcut, Enter and
-the Emacs keys in text fields, the filters, the dialogs, a pull request's
-files. GTK runs on the main thread; the tests hand it work with
+`test-ui/` builds usta's window and drives it: every page in the light
+and the dark theme, the search's shortcut, Enter and the Emacs keys in
+text fields, the filters, the dialogs, a pull request's files, Markdown's
+blocks. `World.hs` runs usta as it runs with accounts, a cache synced
+from the sample forges, for a pull request's checks and commits,
+comments, issues and the issue form, the search and Settings. GTK runs on the main thread; the tests hand it work with
 `onMain` (`test-ui/Harness.hs`). Keys reach widgets through their own
 controllers, as GTK would send them; `test-ui/keys.c` sends a key and
 reads whether a handler took it.

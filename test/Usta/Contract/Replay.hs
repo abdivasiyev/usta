@@ -115,14 +115,20 @@ data Written = Written
 standIn :: String -> (Written -> (Int, BL.ByteString)) -> IO (Server, IO [Written])
 standIn forge answer = do
   let fixture = "test/contract/" <> forge <> ".json"
-  known <- either (\e -> fail (fixture <> ": " <> e)) pure =<< eitherDecodeFileStrict fixture
+  known <- either (\e -> fail (fixture <> ": " <> e)) pure =<< eitherDecodeFileStrict @[Exchange] fixture
   misses <- newMVar []
   writes <- newMVar []
-  let reads = replay known misses
-      app req respond
-        | Wai.requestMethod req == "GET" = reads req respond
-        | otherwise = do
-            body <- Wai.strictRequestBody req
+  let app req respond = do
+        body <- Wai.strictRequestBody req
+        -- What was recorded is a read (GitHub's GraphQL reads are POSTs).
+        case [e | e <- known, e.request == keyOf req, e.body == normal (decode body)] of
+          e : _ -> respond (Wai.responseLBS (Status e.status "") [(CI.mk (encodeUtf8 k), encodeUtf8 v) | (k, v) <- e.headers] (BL.fromStrict (encodeUtf8 e.answer)))
+          []
+            | Wai.requestMethod req == "GET" -> do
+                modifyMVar_ misses (pure . (keyOf req :))
+                respond (Wai.responseLBS status404 [] "{\"message\":\"not recorded\"}")
+            | otherwise -> written req body respond
+      written req body respond = do
             let w = Written
                   { method = decodeUtf8Lenient (Wai.requestMethod req)
                   , path = decodeUtf8Lenient (Wai.rawPathInfo req)

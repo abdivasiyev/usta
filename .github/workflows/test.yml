@@ -14,8 +14,6 @@ on:
 
 permissions:
   contents: read
-  # The nix cache purges its old entries.
-  actions: write
 
 jobs:
   check:
@@ -34,16 +32,12 @@ jobs:
           sudo docker image prune --all --force
       - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v30
-      # GHC 9.12's packages are not in nixpkgs' cache: what a run builds
-      # is kept in GitHub's, by OS, until the flake or usta.cabal changes.
-      - uses: nix-community/cache-nix-action@v7
+      # GHC 9.12's packages are not in nixpkgs' cache: usta.cachix.org
+      # keeps what a run builds, and pushes go only where the token is.
+      - uses: cachix/cachix-action@v17
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'usta.cabal') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-last-accessed: P7D
-          purge-primary-key: never
+          name: usta
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Build, run usta-test and check what is shipped
         run: nix flake check -L
 
@@ -63,16 +57,12 @@ jobs:
           sudo docker image prune --all --force
       - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v30
-      # GHC 9.12's packages are not in nixpkgs' cache: what a run builds
-      # is kept in GitHub's, by OS, until the flake or usta.cabal changes.
-      - uses: nix-community/cache-nix-action@v7
+      # GHC 9.12's packages are not in nixpkgs' cache: usta.cachix.org
+      # keeps what a run builds, and pushes go only where the token is.
+      - uses: cachix/cachix-action@v17
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'usta.cabal') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-last-accessed: P7D
-          purge-primary-key: never
+          name: usta
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: The window's tests
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
@@ -93,16 +83,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v30
-      # GHC 9.12's packages are not in nixpkgs' cache: what a run builds
-      # is kept in GitHub's, by OS, until the flake or usta.cabal changes.
-      - uses: nix-community/cache-nix-action@v7
+      # GHC 9.12's packages are not in nixpkgs' cache: usta.cachix.org
+      # keeps what a run builds, and pushes go only where the token is.
+      - uses: cachix/cachix-action@v17
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'usta.cabal') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-last-accessed: P7D
-          purge-primary-key: never
+          name: usta
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Benchmarks
         run: nix develop -c cabal bench --benchmark-options='--csv bench.csv'
       - uses: actions/upload-artifact@v4

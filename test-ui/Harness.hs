@@ -12,6 +12,7 @@ module Harness
   , descendants
   , widgetsOf
   , labelsIn
+  , textsIn
   , visibleWithClass
   , fireShortcut
   , triggersIn
@@ -90,6 +91,10 @@ widgetsOf kind w = descendants w >>= fmap catMaybes . mapM (GI.castTo kind) >>= 
 
 labelsIn :: Gtk.IsWidget w => w -> IO [Text]
 labelsIn w = widgetsOf Gtk.Label w >>= mapM Gtk.labelGetLabel
+
+-- | The labels' text as shown, without their markup.
+textsIn :: Gtk.IsWidget w => w -> IO [Text]
+textsIn w = widgetsOf Gtk.Label w >>= mapM Gtk.labelGetText
 
 -- | Whether a widget with the CSS class is visible under @w@.
 visibleWithClass :: Gtk.IsWidget w => Text -> w -> IO Bool

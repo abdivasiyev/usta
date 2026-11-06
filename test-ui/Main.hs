@@ -30,7 +30,9 @@ import qualified Usta.Preferences as Preferences
 import Usta.Details (From (..))
 import Usta.Types.Diff (parseDiff)
 import qualified Usta.Types.Platform as Platform
+import qualified Usta.UI.Components.Markdown as Markdown
 import qualified Usta.UI.Components.MarkdownEditor as MarkdownEditor
+import qualified Data.Maybe
 import qualified Usta.UI.Platform as UIPlatform
 import Usta.UI.Sidebar (Page (..))
 import qualified Usta.UI.Source as Source
@@ -155,6 +157,7 @@ tests app =
               [] -> assertFailure "no search field"
             eventually "the theme kept" 3000 ((/= before) . (.theme) <$> world.source.preferences)
         ]
+    , testCase "Markdown draws every kind of block" markdownBlocks
     , testCase "Enter sends a comment, and Shift Enter starts a line" editorSends
     , testCase "Emacs keys in a text field" emacsKeys
     , testCase "the repositories' forge filter narrows the list" $ withWindow app Source.samples $ \w -> do
@@ -291,3 +294,36 @@ paletteChosen w = do
   pure (case chosen of
     row : _ -> Just row
     [] -> Nothing)
+
+-- | A document of every block Markdown has, drawn in a window: each as
+-- its own widget, in light and dark.
+markdownBlocks :: IO ()
+markdownBlocks = do
+  window <- onMain $ do
+    w <- GI.new Gtk.Window [#defaultWidth GI.:= 900, #defaultHeight GI.:= 1400]
+    doc <- Markdown.new document
+    scroller <- GI.new Gtk.ScrolledWindow [#child GI.:= doc]
+    GI.set w [#child GI.:= scroller]
+    Gtk.widgetSetVisible w True
+    pure w
+  pause 800
+  ls <- onMain (textsIn window)
+  mapM_ (\t -> assertBool ("missing " <> T.unpack t <> " in " <> show ls) (any (t `T.isInfixOf`) ls))
+    ["Getting started", "Install", "nix run", "Name", "usta", "Diagram · mermaid", "a quote", "Done already", "Still to do"]
+  checks <- onMain (descendants window >>= fmap Data.Maybe.catMaybes . mapM (GI.castTo Gtk.CheckButton) >>= mapM Gtk.checkButtonGetActive)
+  checks @?= [True, False]
+  grids <- onMain (widgetsOf Gtk.Grid window)
+  assertBool "no table" (not (null grids))
+  expanders <- onMain (descendants window >>= fmap Data.Maybe.catMaybes . mapM (GI.castTo Gtk.Expander) >>= mapM Gtk.expanderGetLabel)
+  expanders @?= [Just "More"]
+  eventually "drawing it" 3000 (screenshot window "dist-newstyle/ui-shots/markdown.png")
+  onMain (Gtk.windowDestroy window)
+  where
+    document = T.unlines
+      [ "# Getting started", "", "Some *emphasis*, **strong**, `code` and a [link](https://usta.azizovich.uz).", ""
+      , "## Install", "", "```sh", "nix run", "```", ""
+      , "| Name | Kind |", "|------|------|", "| usta | app |", ""
+      , "- [x] Done already", "- [ ] Still to do", ""
+      , "> a quote", "", "---", ""
+      , "```mermaid", "graph LR", "  A --> B", "```", ""
+      , "<details><summary>More</summary>", "", "Hidden text", "", "</details>" ]

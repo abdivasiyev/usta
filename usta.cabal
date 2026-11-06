@@ -286,7 +286,16 @@ executable usta
   import: language
   main-is: Main.hs
   hs-source-dirs: app
-  ghc-options: -threaded
+  -- -xr32G: the heap's address space is 32 GB, not GHC's 1 TB, which
+  -- took (nearly) all of a Mac's and left libffi no page for callback
+  -- stubs: usta aborted at start on macOS 26. -F1.5 -Fd1: the heap grows
+  -- by half, and gives back what it no longer uses. -I1: the idle
+  -- collection after a second of quiet. -rtsopts: more can be tried with
+  -- +RTS or GHCRTS.
+  ghc-options:
+    -threaded
+    -rtsopts
+    "-with-rtsopts=-xr32G -F1.5 -Fd1 -I1"
   build-depends:
     base,
     directory,

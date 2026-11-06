@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- usta no longer aborts at start on some Macs with macOS 26: its runtime
+  reserved a terabyte of address space and left none for GTK's callbacks.
+  It also keeps less memory.
 - The Releases page reads releases published by a bot, such as
   github-actions[bot].
 - Job logs color 256-color and RGB text as plain text, not red.

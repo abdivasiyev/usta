@@ -5,7 +5,7 @@ module Main (main) where
 import System.Environment (getEnv, setEnv)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
-import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty (DependencyType (..), defaultMain, dependentTestGroup, testGroup)
 
 import qualified Usta.Types.ParseTests
 import qualified Usta.Types.LinkTests
@@ -66,7 +66,8 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
       , Usta.UI.HighlightTests.tests
       , Usta.SyncTests.tests
       , Usta.CacheTests.tests
-      , Usta.LocalFilesTests.tests
+      , -- One after the other: both use the file of what waits.
+        dependentTestGroup "Beside the cache" AllFinish [Usta.LocalFilesTests.tests, Usta.WaitingTests.tests]
       , Usta.Contract.ForgeTests.tests
       , Usta.SecurityTests.tests
       , Usta.OAuthTests.tests
@@ -76,5 +77,4 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
       , Usta.GitMirrorTests.tests
       , Usta.MirrorsTests.tests
       , Usta.Contract.WritesTests.tests
-      , Usta.WaitingTests.tests
       ]

@@ -13,7 +13,7 @@ module Usta.UI.Window
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Exception (SomeException, bracket_, try)
 import Control.Monad (forM, forM_, forever, join, void, unless, when, (<=<))
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
@@ -28,6 +28,7 @@ import qualified GI.Gtk as Gtk
 
 import qualified Usta.UI.Browser as Browser
 import qualified Usta.UI.Components.Avatar as Avatar
+import qualified Usta.UI.Gone as Gone
 import qualified Usta.UI.Components.Badge as Badge
 import qualified Usta.UI.Components.Button as Button
 import qualified Usta.UI.Components.Card as Card
@@ -194,7 +195,7 @@ buildWith start crashed given app = do
         void $ Gtk.stackAddNamed screens widget (Just name)
         Gtk.stackSetVisibleChildName screens name
         void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 400 $ do
-          Gtk.stackGetChildByName screens old >>= mapM_ (Gtk.stackRemove screens)
+          Gtk.stackGetChildByName screens old >>= mapM_ (\w -> Gtk.stackRemove screens w >> Gone.letGo w)
           pure False
       openPullRequestWith = openPullRequestOn PullRequest.Conversation
       openPullRequestOn opening fetch backLabel summary = do
@@ -1325,9 +1326,10 @@ loadLive load render = do
           void $ GLib.timeoutAdd GLib.PRIORITY_DEFAULT 30 $ do
             n <- (+ 1) <$> readIORef tries
             writeIORef tries n
-            found <- scrolledIn slot
+            here <- onScreen slot
+            found <- if here then scrolledIn slot else pure Nothing
             case found of
-              Nothing -> pure (n < 30)
+              Nothing -> pure (here && n < 30)
               Just sw -> do
                 adjustment <- Gtk.scrolledWindowGetVadjustment sw
                 upper <- Gtk.adjustmentGetUpper adjustment
@@ -1350,8 +1352,10 @@ loadLive load render = do
           void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
             writeIORef asking False
             before <- readIORef shown
+            -- A page left meanwhile is let go: nothing to draw on.
+            here <- onScreen slot
             case result of
-              Right (Right a) | forced || Just a /= before -> do
+              Right (Right a) | here && (forced || Just a /= before) -> do
                 typing <- if forced then pure False else Gtk.toWidget slot >>= unsentText
                 if typing then offer a else keepingPlace (draw a)
               _ -> pure ()
@@ -1370,6 +1374,7 @@ loadLive load render = do
         pure True
   Gtk.toWidget slot
   where
+    onScreen w = isJust <$> Gtk.widgetGetRoot w
     -- Unsent words in any of its text boxes.
     unsentText w = do
       ws <- below w

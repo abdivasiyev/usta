@@ -180,6 +180,7 @@ library
     Usta.UI.Components.UpdateBanner
     Usta.UI.Components.WaitingChip
     Usta.UI.Format
+    Usta.UI.Gone
     Usta.UI.Highlight
     Usta.UI.Gallery
     Usta.UI.Page

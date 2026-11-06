@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
 
@@ -17,9 +18,10 @@ module Usta.UI.Highlight
   , plain
   ) where
 
-import Control.Monad (forM_, void)
+import Control.Monad (forM_, void, when)
 import qualified Data.GI.Base as GI
 import Data.GI.Base.Signals (disconnectSignalHandler)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
@@ -59,16 +61,28 @@ currentPalette = do
   pure (if scheme == Gtk.InterfaceColorSchemeDark || dark then DarkPalette else LightPalette)
 
 -- | Runs @paint@ with the current palette now and again whenever the
--- theme changes, until @widget@ is destroyed: markup colors are fixed,
--- so highlighted text is painted anew for the other theme.
+-- theme changes while @widget@ is on screen, and when it comes back:
+-- markup colors are fixed, so highlighted text is painted anew for the
+-- other theme. The settings outlive every page, so it listens to them
+-- only while on screen; a handler left on them kept @widget@, and all a
+-- diff's lines with it, alive for good.
 follow :: Gtk.IsWidget w => w -> (Palette -> IO ()) -> IO ()
 follow widget paint = do
   currentPalette >>= paint
   settings <- Gtk.settingsGetDefault
   forM_ settings $ \s -> do
-    handler <- GI.on s (GI.PropertyNotify #gtkInterfaceColorScheme) (const (currentPalette >>= paint))
     w <- Gtk.toWidget widget
-    void $ GI.on w #destroy (disconnectSignalHandler s handler)
+    handler <- newIORef Nothing
+    let listen = readIORef handler >>= \case
+          Just _ -> pure ()
+          Nothing -> do
+            h <- GI.on s (GI.PropertyNotify #gtkInterfaceColorScheme) (const (currentPalette >>= paint))
+            writeIORef handler (Just h)
+        stop = readIORef handler >>= mapM_ (disconnectSignalHandler s) >> writeIORef handler Nothing
+    void $ GI.on w #realize (currentPalette >>= paint >> listen)
+    void $ GI.on w #unrealize stop
+    realized <- Gtk.widgetGetRealized w
+    when realized listen
 
 -- | One line of Pango markup per line of @text@. Without a language, or
 -- when Skylighting gives up, the lines are only escaped.

@@ -31,6 +31,15 @@ what usta keeps beside its cache never touches yours.
   answers recorded from the real forges, in `test/contract/`. Every
   reading operation reads its answer to the end, and a request that was
   not recorded fails.
+- **Write tests** (`Contract/WritesTests`): every write usta sends either
+  forge (comments, reviews, merges, labels, forks, workflows…) is one
+  the forge's own description of its API takes: Forgejo 13's swagger and
+  GitHub's OpenAPI description and GraphQL schema, the parts usta uses,
+  in `test/contract/`. A stand-in answers the reads as recorded and keeps
+  the writes, so nothing changes on a real forge.
+- **Git tests** (`GitMirrorTests`, `MirrorsTests`): usta's git commands
+  on a real repository made for each test, its mirrors, and reads that
+  take the mirror or the forge.
 - **Security tests**: tokens stay with their forge and out of errors.
 - **Golden tests**: every diagram's layout and the syntax colors, in
   `test/golden/`.
@@ -76,6 +85,13 @@ USTA_RECORD=github cabal test usta-test --test-options='-p /Contract.github/'
 ```
 
 Read the diff of `test/contract/` before committing it.
+
+### GitHub's API descriptions
+
+`test/contract/github-openapi.json` and `github-schema.graphql` are cut
+from GitHub's published ones down to what usta's writes use. When usta
+sends GitHub something new, cut them again as
+`test/contract/trim-github.py` says.
 
 ### A cache for each release
 

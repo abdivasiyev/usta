@@ -282,8 +282,9 @@ readme path ref = do
 -- | Every folder and file on a ref, with the files' sizes.
 tree :: FilePath -> Text -> IO [Entry]
 tree path ref = do
-  out <- git ["-C", path, "ls-tree", "-r", "-t", "-l", "--full-tree", "--end-of-options", T.unpack ref]
-  traverse entry (filter (not . T.null) (T.lines out))
+  -- NUL-separated: a name with a quote or a tab in it is not quoted.
+  out <- git ["-C", path, "ls-tree", "-z", "-r", "-t", "-l", "--full-tree", "--end-of-options", T.unpack ref]
+  traverse entry (filter (not . T.null) (T.splitOn "\0" out))
   where
     -- "<mode> <type> <object> <size>\t<path>"; the size is "-" for a tree.
     entry line = case (T.words meta, T.drop 1 name) of

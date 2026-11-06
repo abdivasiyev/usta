@@ -40,6 +40,10 @@ tests =
         fmap (map (\f -> (f.path, f.binary, f.lines))) (parseDiff binary) @?= Right [("logo.png", True, [])]
     , testCase "quoted paths" $
         fmap (map (.path)) (parseDiff quoted) @?= Right ["with space.txt"]
+    , testCase "a quoted path with escapes" $
+        fmap (map (.path)) (parseDiff escaped) @?= Right ["say \"hi\"\tcaf\233.txt"]
+    , testCase "a quoted binary file, known only by its git line" $
+        fmap (map (.path)) (parseDiff quotedBinary) @?= Right ["my \"logo\".png"]
     , testCase "no newline at the end" $
         fmap (map (length . (.lines))) (parseDiff noNewline) @?= Right [3]
     , testCase "several files" $
@@ -52,7 +56,7 @@ tests =
     , testProperty "numbers lines as the hunk says" numbering
     ]
 
-modified, added, deleted, renamed, binary, quoted, noNewline :: Text
+modified, added, deleted, renamed, binary, quoted, noNewline, escaped, quotedBinary :: Text
 modified =
   T.unlines
     [ "diff --git a/src/A.hs b/src/A.hs"
@@ -78,6 +82,11 @@ binary =
 quoted =
   T.unlines
     ["diff --git \"a/with space.txt\" \"b/with space.txt\"", "--- \"a/with space.txt\"", "+++ \"b/with space.txt\"", "@@ -1 +1 @@", "-a", "+b"]
+escaped =
+  T.unlines
+    ["diff --git \"a/say \\\"hi\\\"\\tcaf\\303\\251.txt\" \"b/say \\\"hi\\\"\\tcaf\\303\\251.txt\"", "--- \"a/say \\\"hi\\\"\\tcaf\\303\\251.txt\"", "+++ \"b/say \\\"hi\\\"\\tcaf\\303\\251.txt\"", "@@ -1 +1 @@", "-a", "+b"]
+quotedBinary =
+  T.unlines ["diff --git \"a/my \\\"logo\\\".png\" \"b/my \\\"logo\\\".png\"", "index 1..2 100644", "Binary files differ"]
 noNewline =
   T.unlines
     ["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1 +1 @@", "-a", "\\ No newline at end of file", "+b", "\\ No newline at end of file"]

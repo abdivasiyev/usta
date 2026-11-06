@@ -10,11 +10,13 @@ module Usta.Types.Diff
   ) where
 
 import Control.Applicative ((<|>))
-import Data.Char (isDigit)
+import qualified Data.ByteString as B
+import Data.Char (digitToInt, isDigit, isOctDigit)
 import Data.Kind (Type)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8Lenient, encodeUtf8)
 import Text.Read (readMaybe)
 
 type FileDiff :: Type
@@ -95,18 +97,37 @@ pathOf raw
 gitPaths :: Text -> Maybe (Text, Text)
 gitPaths line = do
   rest <- T.stripPrefix "diff --git " line
-  let (before, after) = T.breakOn " b/" rest
-  if T.null after then Nothing else Just (stripSide before, T.drop 3 after)
+  case T.breakOn "\" \"b/" rest of
+    -- Both quoted: "a/x y" "b/x y".
+    (before, after) | not (T.null after) -> Just (stripSide (unquote (before <> "\"")), stripSide (unquote (T.drop 2 after)))
+    _ -> do
+      let (before, after) = T.breakOn " b/" rest
+      if T.null after then Nothing else Just (stripSide before, T.drop 3 after)
 
 stripSide :: Text -> Text
 stripSide name = fromMaybe name (T.stripPrefix "a/" name <|> T.stripPrefix "b/" name)
 
--- | Git quotes paths with unusual characters; usta asks it not to, but a
--- forge may still send them quoted.
+-- | Git quotes a path with a quote, a backslash or a control character
+-- in it, C-style: "say \"hi\".txt". Its bytes come back as written.
 unquote :: Text -> Text
 unquote t
-  | T.length t >= 2 && T.head t == '"' && T.last t == '"' = T.init (T.tail t)
+  | T.length t >= 2 && T.head t == '"' && T.last t == '"' = decodeUtf8Lenient (B.pack (go (T.unpack (T.init (T.tail t)))))
   | otherwise = t
+  where
+    go s = case s of
+      [] -> []
+      '\\' : a : b : c : rest | all isOctDigit [a, b, c] -> fromIntegral (digitToInt a * 64 + digitToInt b * 8 + digitToInt c) : go rest
+      '\\' : c : rest -> fromIntegral (fromEnum (escaped c)) : go rest
+      c : rest -> B.unpack (encodeUtf8 (T.singleton c)) <> go rest
+    escaped c = case c of
+      'n' -> '\n'
+      't' -> '\t'
+      'r' -> '\r'
+      'a' -> '\a'
+      'b' -> '\b'
+      'f' -> '\f'
+      'v' -> '\v'
+      _ -> c
 
 hunkLines :: [Text] -> Either Text [Line]
 hunkLines = go 0 0

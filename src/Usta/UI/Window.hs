@@ -10,9 +10,9 @@ module Usta.UI.Window
   , buildWith
   ) where
 
-import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Exception (SomeException, bracket_, try)
-import Control.Monad (forM, forM_, forever, join, void, unless, when)
+import Control.Monad (forM, forM_, forever, join, void, unless, when, (<=<))
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
@@ -575,7 +575,10 @@ buildWith start crashed given app = do
     }
   writeIORef showFork showRepository
   writeIORef pageRef (source.repositories >>= repositoryPage.update)
-  source.onMirrorStatus (source.repositories >>= repositoryPage.update)
+  -- What keeps this window up to date stops when it closes.
+  stops <- newIORef []
+  let whileOpen stop = modifyIORef' stops (stop :)
+  source.onMirrorStatus (source.repositories >>= repositoryPage.update) >>= whileOpen
   pages <- GI.new Gtk.Stack [ #hexpand := True
                             , #vexpand := True
                             , #transitionType := Gtk.StackTransitionTypeCrossfade
@@ -665,8 +668,8 @@ buildWith start crashed given app = do
         Gtk.toWidget footer >>= replaceChild footerSlot
   writeIORef inboxRef (reloadInbox >> drawSidebar)
   -- Signing in or out changes the lists and the accounts at once.
-  source.onChange $ \resource -> reload resource >> drawSyncChip >> drawFooter
-  source.onStatus $ \status -> do
+  source.onChange (\resource -> reload resource >> drawSyncChip >> drawFooter) >>= whileOpen
+  whileOpen <=< source.onStatus $ \status -> do
     case status.state of
       Sync.Failed f -> do
         accounts <- source.accounts
@@ -678,13 +681,14 @@ buildWith start crashed given app = do
     drawSidebar
     drawFooter
   -- What waits is sent again each minute, as the forge may answer by then.
-  void $ GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $ do
+  minutely <- GLib.timeoutAddSeconds GLib.PRIORITY_DEFAULT 60 $ do
     mapM_ reload [minBound .. maxBound]
     drawSyncChip
     queued <- source.waiting
     unless (null queued) $ void $ forkIO $
       source.sendWaiting >> void (GLib.idleAdd GLib.PRIORITY_DEFAULT (drawSyncChip >> pure False))
     pure True
+  whileOpen (void (GLib.sourceRemove minutely))
   drawSyncChip
 
   forM_ [minBound .. maxBound] $ \page -> do
@@ -727,7 +731,7 @@ buildWith start crashed given app = do
   -- At start and then once a day, unless Settings turned it off; a newer
   -- usta shows a banner under the header, once.
   told <- newIORef False
-  void $ forkIO $ forever $ do
+  checking <- forkIO $ forever $ do
     wanted <- (.checkUpdates) <$> source.preferences
     found <- if wanted then Updates.latest else pure (Left "off")
     case found of
@@ -741,6 +745,7 @@ buildWith start crashed given app = do
         pure False
       _ -> pure ()
     threadDelay (24 * 3600 * 1000000)
+  whileOpen (killThread checking)
 
   -- GTK hides the titlebar widget in fullscreen, and ours holds search and
   -- sync. So the header lives in the content, and an empty hidden titlebar
@@ -844,7 +849,7 @@ buildWith start crashed given app = do
                                          , #cssClasses := ["usta"]
                                          ]
   Gtk.toWidget window >>= \w -> Style.install w styles
-  void $ GI.on window #destroy stopThemes
+  void $ GI.on window #destroy (stopThemes >> readIORef stops >>= sequence_)
   #present window
   -- GTK focuses the first entry; start with nothing focused so single-key
   -- shortcuts (j, k, e) work instead of typing into the search field.

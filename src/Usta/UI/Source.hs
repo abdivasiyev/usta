@@ -120,10 +120,10 @@ data Source = Source
   , createRepository :: Text -> Forge.NewRepo -> IO (Either Text Text)
     -- ^ On a forge, by host: the new repository's full name.
   , accounts :: IO [Connected]
-  , onChange :: (Resource -> IO ()) -> IO ()
+  , onChange :: (Resource -> IO ()) -> IO (IO ())
     -- ^ Runs the action on the GTK main thread whenever a list was saved
-    -- anew.
-  , onStatus :: (Status -> IO ()) -> IO ()
+    -- anew, until what it gives back is run.
+  , onStatus :: (Status -> IO ()) -> IO (IO ())
     -- ^ Likewise for each account's sync state, starting with the last
     -- one each account reported before.
   , syncNow :: IO ()
@@ -147,9 +147,9 @@ data Source = Source
   , remove :: AccountId -> IO (Either Text ())
   , mirror :: Text -> Text -> Choice -> IO (Either Text ())
     -- ^ The user's mirror answer for the repository on a host, by name.
-  , onMirrorStatus :: IO () -> IO ()
+  , onMirrorStatus :: IO () -> IO (IO ())
     -- ^ Runs the action on the GTK main thread whenever a mirror's state
-    -- changes.
+    -- changes, until what it gives back is run.
   , mirrorOrigins :: Text -> Text -> IO (Either Text Repositories.Origins)
     -- ^ Where a mirror of the repository on a host, by name, would clone
     -- from; for the mirror dialog.
@@ -314,7 +314,10 @@ fromDatabase pool changes statuses sync = Source
       rows <- run pool listAccounts
       pure [Connected {accountId = key, forge = a.forge, host = unparse a.host, login = unparse a.login, byBrowser = a.authMethod == BrowserSignIn} | (key, a) <- rows]
   , onChange = \act -> subscribe changes (act . (.resource))
-  , onStatus = \act -> subscribe statuses act >> (sync.latest >>= mapM_ act)
+  , onStatus = \act -> do
+      stop <- subscribe statuses act
+      sync.latest >>= mapM_ act
+      pure stop
   , syncNow = sync.syncNow
   , clearCache = do
       cleared <- try (run pool Cache.clear)
@@ -345,7 +348,7 @@ fromDatabase pool changes statuses sync = Source
   , browserSignIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
-  , onMirrorStatus = const (pure ())
+  , onMirrorStatus = const (pure (pure ()))
   , mirrorOrigins = \_ _ -> pure (Left unavailable)
   , pullFiles = \_ _ _ -> pure (Left unavailable)
   , pullCommits = \_ _ _ -> pure (Left unavailable)
@@ -449,8 +452,8 @@ samples = Source
   , ownersOn = \_ -> pure (Right ["abdivasiyev"])
   , createRepository = \_ _ -> pure (Left "The samples cannot create repositories.")
   , accounts = pure [Connected {accountId = toSqlKey n, forge = f, host = h, login = "abdivasiyev", byBrowser = False} | (n, (f, h)) <- zip [1 ..] Sidebar.sample.forges]
-  , onChange = const (pure ())
-  , onStatus = const (pure ())
+  , onChange = const (pure (pure ()))
+  , onStatus = const (pure (pure ()))
   , syncNow = pure ()
   , clearCache = pure (Left unavailable)
   , mirrorsFolder = Mirrors.defaultRoot
@@ -462,7 +465,7 @@ samples = Source
   , browserSignIn = \_ _ _ -> pure (Left unavailable)
   , remove = \_ -> pure (Left unavailable)
   , mirror = \_ _ _ -> pure (Left unavailable)
-  , onMirrorStatus = const (pure ())
+  , onMirrorStatus = const (pure (pure ()))
   , mirrorOrigins = \_ _ -> pure (Left unavailable)
   , pullFiles = \_ _ _ -> pure (Left unavailable)
   , pullCommits = \_ _ _ -> pure (Left unavailable)

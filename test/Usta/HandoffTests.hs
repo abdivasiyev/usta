@@ -11,7 +11,7 @@ import Control.Monad (void)
 import Data.Text (Text)
 import qualified GI.GLib as GLib
 import System.Timeout (timeout)
-import Test.Tasty (TestTree, testGroup, withResource)
+import Test.Tasty (DependencyType (..), TestTree, dependentTestGroup, testGroup, withResource)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 
 import Usta.Git.Credential (Request (..), parseRequest, respond)
@@ -25,8 +25,10 @@ tests =
   testGroup
     "Handoff and credentials"
     [ withResource startLoop GLib.mainLoopQuit $ \_ ->
-        testGroup
+        -- One after another: they share the one socket.
+        dependentTestGroup
           "handoff"
+          AllFinish
           [ testCase "with no usta running, nothing is handed" $
               Handoff.send ["https://github.com/abdivasiyev/usta"] >>= (@?= False)
           , testCase "the running usta gets each link, and is shown" $ do

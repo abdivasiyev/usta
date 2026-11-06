@@ -162,8 +162,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: master
-          # git subtree splits site/ out of the whole history.
-          fetch-depth: 0
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -188,4 +186,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Site: downloads from $TAG"
           git push origin HEAD:master
-          git subtree push --prefix site origin gh-pages
+          ./scripts/publish-site.sh

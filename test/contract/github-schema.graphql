@@ -1,0 +1,206 @@
+type Mutation {
+  """
+  Disable auto merge on the given pull request
+  """
+  disablePullRequestAutoMerge(
+    """
+    Parameters for DisablePullRequestAutoMerge
+    """
+    input: DisablePullRequestAutoMergeInput!
+  ): DisablePullRequestAutoMergePayload @docsCategory(name: "pulls")
+
+  """
+  Enable the default auto-merge on a pull request.
+  """
+  enablePullRequestAutoMerge(
+    """
+    Parameters for EnablePullRequestAutoMerge
+    """
+    input: EnablePullRequestAutoMergeInput!
+  ): EnablePullRequestAutoMergePayload @docsCategory(name: "pulls")
+
+  """
+  Marks a pull request ready for review.
+  """
+  markPullRequestReadyForReview(
+    """
+    Parameters for MarkPullRequestReadyForReview
+    """
+    input: MarkPullRequestReadyForReviewInput!
+  ): MarkPullRequestReadyForReviewPayload @docsCategory(name: "pulls")
+
+  """
+  Merge or Rebase HEAD from upstream branch into pull request branch
+  """
+  updatePullRequestBranch(
+    """
+    Parameters for UpdatePullRequestBranch
+    """
+    input: UpdatePullRequestBranchInput!
+  ): UpdatePullRequestBranchPayload @docsCategory(name: "pulls")
+
+  """
+  Updates the state for subscribable subjects.
+  """
+  updateSubscription(
+    """
+    Parameters for UpdateSubscription
+    """
+    input: UpdateSubscriptionInput!
+  ): UpdateSubscriptionPayload @docsCategory(name: "activity")
+}
+
+input UpdateSubscriptionInput {
+  """
+  A unique identifier for the client performing the mutation.
+  """
+  clientMutationId: String
+
+  """
+  The new state of the subscription.
+  """
+  state: SubscriptionState!
+
+  """
+  The Node ID of the subscribable object to modify.
+  """
+  subscribableId: ID!
+    @possibleTypes(
+      concreteTypes: ["Commit", "Discussion", "Issue", "PullRequest", "Repository", "Team"]
+      abstractType: "Subscribable"
+    )
+}
+
+enum SubscriptionState @docsCategory(name: "activity") {
+  """
+  The User is never notified.
+  """
+  IGNORED
+
+  """
+  The User is notified of all conversations.
+  """
+  SUBSCRIBED
+
+  """
+  The User is only notified when participating or @mentioned.
+  """
+  UNSUBSCRIBED
+}
+
+input UpdatePullRequestBranchInput {
+  """
+  A unique identifier for the client performing the mutation.
+  """
+  clientMutationId: String
+
+  """
+  The head ref oid for the upstream branch.
+  """
+  expectedHeadOid: GitObjectID
+
+  """
+  The Node ID of the pull request.
+  """
+  pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
+
+  """
+  The update branch method to use. If omitted, defaults to 'MERGE'
+  """
+  updateMethod: PullRequestBranchUpdateMethod
+}
+
+enum PullRequestBranchUpdateMethod @docsCategory(name: "pulls") {
+  """
+  Update branch via merge
+  """
+  MERGE
+
+  """
+  Update branch via rebase
+  """
+  REBASE
+}
+
+input MarkPullRequestReadyForReviewInput {
+  """
+  A unique identifier for the client performing the mutation.
+  """
+  clientMutationId: String
+
+  """
+  ID of the pull request to be marked as ready for review.
+  """
+  pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
+}
+
+input EnablePullRequestAutoMergeInput {
+  """
+  The email address to associate with this merge.
+  """
+  authorEmail: String
+
+  """
+  A unique identifier for the client performing the mutation.
+  """
+  clientMutationId: String
+
+  """
+  Commit body to use for the commit when the PR is mergable; if omitted, a
+  default message will be used. NOTE: when merging with a merge queue any input
+  value for commit message is ignored.
+  """
+  commitBody: String
+
+  """
+  Commit headline to use for the commit when the PR is mergable; if omitted, a
+  default message will be used. NOTE: when merging with a merge queue any input
+  value for commit headline is ignored.
+  """
+  commitHeadline: String
+
+  """
+  The expected head OID of the pull request.
+  """
+  expectedHeadOid: GitObjectID
+
+  """
+  The merge method to use. If omitted, defaults to `MERGE`. NOTE: when merging
+  with a merge queue any input value for merge method is ignored.
+  """
+  mergeMethod: PullRequestMergeMethod = MERGE
+
+  """
+  ID of the pull request to enable auto-merge on.
+  """
+  pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
+}
+
+enum PullRequestMergeMethod @docsCategory(name: "pulls") {
+  """
+  Add all commits from the head branch to the base branch with a merge commit.
+  """
+  MERGE
+
+  """
+  Add all commits from the head branch onto the base branch individually.
+  """
+  REBASE
+
+  """
+  Combine all commits from the head branch into a single commit in the base branch.
+  """
+  SQUASH
+}
+
+input DisablePullRequestAutoMergeInput {
+  """
+  A unique identifier for the client performing the mutation.
+  """
+  clientMutationId: String
+
+  """
+  ID of the pull request to disable auto merge on.
+  """
+  pullRequestId: ID! @possibleTypes(concreteTypes: ["PullRequest"])
+}

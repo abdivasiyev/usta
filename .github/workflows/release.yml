@@ -66,7 +66,7 @@ jobs:
 
   macos:
     needs: release
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       SIGNING: ${{ secrets.MACOS_CERTIFICATE != '' }}
       NOTARIZING: ${{ secrets.APPLE_ID != '' }}

@@ -113,6 +113,7 @@
           gi-graphene
           gi-gsk
           gi-gtk4
+          gi-pango
           haskell-gi-base
           hedgehog
           http-client

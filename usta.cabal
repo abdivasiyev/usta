@@ -352,6 +352,7 @@ test-suite usta-test
     directory,
     filepath,
     gi-glib,
+    gi-pango,
     hedgehog,
     http-client,
     http-types,

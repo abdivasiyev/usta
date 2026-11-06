@@ -99,14 +99,14 @@ withForgeKeyring makeKeyring takes test = do
     statuses <- newBus
     mirrorStatuses <- newBus
     bracket (Sync.start Sync.Settings {pool = pool, changes = changes, statuses = statuses, every = 3600} []) (.stop) $ \sync -> do
-      mirrors <- Mirrors.start Mirrors.Settings {pool = pool, changes = changes, statuses = mirrorStatuses, root = root </> "mirrors"}
-      accounts <- Accounts.connect Accounts.Settings
-        { manager = manager, keyring = keyring, pool = pool, changes = changes, sync = sync, mirrors = mirrors
-        , forgejoApi = \h -> BaseUrl Http (T.unpack (T.takeWhile (/= ':') (unparse h))) (portOf h) "/api/v1"
-        , githubApi = GitHub.urlsOf
-        }
-      host <- parseM ("127.0.0.1:" <> T.pack (show port))
-      token <- parseM "token-for-tests"
-      test Running {accounts = accounts, keyring = keyring, pool = pool, host = host, token = token, login = parseM "tester"}
+      bracket (Mirrors.start Mirrors.Settings {pool = pool, changes = changes, statuses = mirrorStatuses, root = root </> "mirrors"}) (.stop) $ \mirrors -> do
+        accounts <- Accounts.connect Accounts.Settings
+          { manager = manager, keyring = keyring, pool = pool, changes = changes, sync = sync, mirrors = mirrors
+          , forgejoApi = \h -> BaseUrl Http (T.unpack (T.takeWhile (/= ':') (unparse h))) (portOf h) "/api/v1"
+          , githubApi = GitHub.urlsOf
+          }
+        host <- parseM ("127.0.0.1:" <> T.pack (show port))
+        token <- parseM "token-for-tests"
+        test Running {accounts = accounts, keyring = keyring, pool = pool, host = host, token = token, login = parseM "tester"}
   where
     portOf h = read (T.unpack (T.drop 1 (T.dropWhile (/= ':') (unparse h))))

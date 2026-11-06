@@ -143,6 +143,8 @@
           text
           time
         ];
+        # The tests make git repositories and mirror them.
+        testToolDepends = [pkgs.git];
         # The UI tests need a display; the build runs the others.
         testTargets = ["usta-test"];
         # The keyring: Keychain Services ship with macOS's SDK.

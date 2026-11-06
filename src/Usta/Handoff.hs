@@ -11,6 +11,7 @@ module Usta.Handoff
 
 import Control.Exception (SomeException, try)
 import Control.Monad (forM_, void)
+import qualified Data.ByteString as B
 import qualified Data.GI.Base as GI
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -19,7 +20,8 @@ import Data.Text.Encoding (decodeUtf8Lenient, encodeUtf8)
 import qualified GI.Gio as Gio
 import qualified GI.GLib as GLib
 import qualified GI.GObject as GObject
-import System.Directory (removeFile)
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
 
 import Usta.DB (databaseFile)
@@ -59,5 +61,17 @@ listen each shown = do
         pure True
       Gio.socketServiceStart service
 
+-- | Beside the cache; when that path is too long for a socket (macOS
+-- takes 104 bytes), in the user's own runtime or temporary folder (not a
+-- shared /tmp, where another user could answer), under a name made from
+-- the cache's folder, so each usta's data has its own.
 socketPath :: IO FilePath
-socketPath = (</> "usta.sock") . takeDirectory <$> databaseFile
+socketPath = do
+  folder <- takeDirectory <$> databaseFile
+  let beside = folder </> "usta.sock"
+  if B.length (encodeUtf8 (T.pack beside)) <= 100
+    then pure beside
+    else do
+      digest <- maybe "" (T.take 16) <$> GLib.computeChecksumForString GLib.ChecksumTypeSha256 (T.pack folder) (-1)
+      temporary <- lookupEnv "XDG_RUNTIME_DIR" >>= maybe getTemporaryDirectory pure
+      pure (temporary </> "usta-" <> T.unpack digest <> ".sock")

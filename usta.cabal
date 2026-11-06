@@ -312,6 +312,7 @@ test-suite usta-test
     Usta.Contract.ForgeTests
     Usta.Contract.Replay
     Usta.DiagramTests
+    Usta.GitMirrorTests
     Usta.GitTests
     Usta.GoldenTests
     Usta.GraphTests

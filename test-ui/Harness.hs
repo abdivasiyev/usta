@@ -21,6 +21,9 @@ module Harness
   , withWindow
   , showPage
   , click
+  , clickIcon
+  , weakly
+  , alive
   , labelsReading
   , placeIn
   , scrollLongest
@@ -40,7 +43,7 @@ import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Word (Word32)
 import Foreign.C.Types (CInt (..))
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, castPtr)
 import qualified GI.GLib as GLib
 import qualified GI.Gdk as Gdk
 import qualified GI.Gio as Gio
@@ -260,3 +263,28 @@ scrollLongest w by = do
   case reverse (sortOn snd sized) of
     (a, _) : _ -> Gtk.adjustmentGetValue a >>= \now -> Gtk.adjustmentSetValue a (now + by) >> pure True
     [] -> pure False
+
+-- | Clicks the button under @w@ showing the icon @icon@, on screen.
+clickIcon :: Gtk.IsWidget w => w -> Text -> IO Bool
+clickIcon w icon = do
+  buttons <- widgetsOf Gtk.Button w
+  found <- filterM (\b -> do
+    images <- descendants b >>= fmap catMaybes . mapM (GI.castTo Gtk.Image)
+    names <- mapM Gtk.imageGetIconName images
+    own <- Gtk.buttonGetIconName b
+    pure (Just icon `elem` (own : names))) buttons
+  case found of
+    b : _ -> Gtk.widgetActivate b
+    [] -> pure False
+
+-- | Weak references to the first of @ws@ (none for none): they keep
+-- nothing alive, and say whether it still is.
+weakly :: GObject o => [o] -> IO [Ptr ()]
+weakly ws = forM (take 1 ws) $ \w -> withManagedPtr w (c_weak . castPtr)
+
+-- | Whether what a weak reference was made to is still alive.
+alive :: [Ptr ()] -> IO Bool
+alive refs = or <$> forM refs (fmap (/= 0) . c_alive)
+
+foreign import ccall "usta_test_weak" c_weak :: Ptr () -> IO (Ptr ())
+foreign import ccall "usta_test_alive" c_alive :: Ptr () -> IO CInt

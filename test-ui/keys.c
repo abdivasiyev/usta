@@ -13,3 +13,27 @@ gboolean usta_test_press(void *controller, unsigned int keyval, unsigned int sta
   g_signal_emit_by_name(controller, "key-pressed", keyval, 0u, state, &handled);
   return handled;
 }
+
+/* A weak reference to an object, for telling whether it was freed: GLib's
+ * GWeakRef, one pointer wide. Its calls are declared here too. */
+#include <stdlib.h>
+
+extern void g_weak_ref_init(void *weak_ref, void *object);
+extern void *g_weak_ref_get(void *weak_ref);
+extern void g_object_unref(void *object);
+
+void *usta_test_weak(void *object)
+{
+  void *ref = calloc(1, sizeof(void *));
+  g_weak_ref_init(ref, object);
+  return ref;
+}
+
+int usta_test_alive(void *ref)
+{
+  void *object = g_weak_ref_get(ref);
+  if (object == NULL)
+    return 0;
+  g_object_unref(object);
+  return 1;
+}

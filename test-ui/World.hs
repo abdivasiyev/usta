@@ -15,7 +15,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime)
 import System.FilePath ((</>))
-import System.IO.Temp (withSystemTempDirectory)
+import System.Directory (getHomeDirectory)
+import System.IO.Temp (createTempDirectory)
 import System.Timeout (timeout)
 
 import Usta.Accounts (Accounts (..), Problem (..))
@@ -46,8 +47,14 @@ data World = World
     -- ^ What the forges were sent, oldest first.
   }
 
+-- | A world's folder, in the run's home, which goes when the run ends:
+-- a window's last loads may still read its cache after its test ends,
+-- and a callback failing on a removed cache ends the run.
+worldDirectory :: IO FilePath
+worldDirectory = getHomeDirectory >>= (`createTempDirectory` "usta-world")
+
 withWorld :: (World -> IO a) -> IO a
-withWorld act = withSystemTempDirectory "usta-world" $ \dir -> withDatabase (dir </> "usta.db") $ \pool -> do
+withWorld act = worldDirectory >>= \dir -> withDatabase (dir </> "usta.db") $ \pool -> do
   now <- getCurrentTime
   github <- Account Kind.GitHub <$> parseM "github.com" <*> parseM "abdivasiyev" <*> pure AccessToken
   forgejo <- Account Kind.Forgejo <$> parseM "git.azizovich.uz" <*> parseM "abdivasiyev" <*> pure AccessToken

@@ -10,6 +10,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (catch)
 import Control.Monad (forM_, void, when)
+import System.Mem (performMajorGC)
 import qualified Data.GI.Base as GI
 import qualified Data.Text as T
 import qualified GI.Gdk as Gdk
@@ -144,6 +145,27 @@ tests app =
             -- Enter runs the result chosen, the first.
             onMain (chosenResult w) >>= assertBool "nothing chosen"
             eventually "the pull request's page" 3000 ((\ls -> "Conversation" `elem` ls && "Mark all done" `notElem` ls) <$> labelsIn w)
+        , testCase "a pull request's diff is let go after leaving it" $ inWorld app $ \_ w -> do
+            let toFiles = do
+                  openReview w
+                  onMain (click w "Files") >>= assertBool "no Files tab"
+                  eventually "the diff" 3000 (onScreen w ["usta.cabal"])
+                back = do
+                  onMain (clickIcon w "go-previous-symbolic") >>= assertBool "no way back"
+                  eventually "the inbox" 3000 (onScreen w ["Mark all done"])
+            toFiles
+            -- A line of this diff, held weakly: freed, it reads as Nothing.
+            line <- onMain (weakly =<< labelsReading "line 7" w)
+            back
+            -- Opening the next pull request takes the last one's page away.
+            toFiles
+            back
+            pause 800
+            performMajorGC
+            pause 500
+            performMajorGC
+            stillThere <- onMain (alive line)
+            assertBool "the left pull request's diff is still alive" (not stillThere)
         , testCase "settings show the accounts, try a link, and mark what Nix fixed" $ do
             config <- (</> "usta" </> "config.json") <$> getEnv "XDG_CONFIG_HOME"
             createDirectoryIfMissing True (takeDirectory config)

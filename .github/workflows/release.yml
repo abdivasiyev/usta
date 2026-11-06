@@ -52,14 +52,16 @@ jobs:
           # downloads and the update check go by it.
           title="usta $version"
           case "$version" in 0.*) title="$title (beta)";; esac
-          # The notes are the version's part of CHANGELOG.md.
+          # The notes are the version's part of CHANGELOG.md. It starts as
+          # a draft: "latest", which the site's download links and the
+          # update check go by, moves to it once its files are there.
           awk -v v="$version" '/^## / {on = index($0, "## " v) == 1; next} on' CHANGELOG.md > notes.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "$TAG has a release already; its files are built again."
           elif [ -s notes.md ]; then
-            gh release create "$TAG" --title "$title" --notes-file notes.md
+            gh release create "$TAG" --draft --title "$title" --notes-file notes.md
           else
-            gh release create "$TAG" --title "$title" --generate-notes
+            gh release create "$TAG" --draft --title "$title" --generate-notes
           fi
 
   macos:
@@ -149,3 +151,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" usta-x86_64.AppImage ./*.deb ./*.rpm --clobber
+
+  # Every file is attached: the release is published and becomes the
+  # latest. A failed build leaves it a draft, and the site keeps the
+  # release before it.
+  publish:
+    needs: [macos, linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false

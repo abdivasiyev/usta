@@ -34,10 +34,12 @@ tests =
           waiting <- begin manager site
           callback manager waiting [("state", "someone-else"), ("code", "c")]
           fmap (const ()) <$> waiting.answer >>= (@?= Left "The forge's answer did not match this sign-in.")
+          stopped waiting
       , testCase "the forge's refusal is said" $ withForge $ \manager site _ -> do
           waiting <- begin manager site
           callback manager waiting [("state", stateOf waiting), ("error", "access_denied")]
           fmap (const ()) <$> waiting.answer >>= (@?= Left "The forge said: access_denied")
+          stopped waiting
       , testCase "the code is traded with the verifier the challenge was made from" $ withForge $ \manager site asked -> do
           waiting <- begin manager site
           -- A browser may ask for the page's icon first.
@@ -51,11 +53,12 @@ tests =
           case lookup "code_verifier" form of
             Just (Just verifier) -> challengeOf waiting @?= decodeUtf8 (B8.filter (/= '=') (Base64.encode (SHA256.hash verifier)))
             _ -> assertFailure "no verifier"
+          stopped waiting
       , testCase "the authorize page asks for this client, with PKCE" $ withForge $ \manager site _ -> do
           waiting <- begin manager site
           (param "client_id" waiting, param "response_type" waiting, param "code_challenge_method" waiting)
             @?= ("usta-test", "code", "S256")
-          waiting.stop
+          stopped waiting
       , testCase "the refresh token is kept with the client" $ do
           r <- either (fail . T.unpack) pure (parse "refresh-me")
           fmap (fmap unparse) (OAuth.stored (OAuth.storing "client" r)) @?= Just ("client", "refresh-me")
@@ -90,6 +93,13 @@ begin manager site = do
   -- On the main loop's thread, as the sign-in wants.
   _ <- GLib.idleAdd GLib.PRIORITY_DEFAULT (OAuth.begin manager site "usta-test" >>= putMVar started >> pure False)
   readMVar started >>= either (fail . T.unpack) pure
+
+-- | Stops listening, on the main loop's thread, where it listens.
+stopped :: OAuth.Waiting -> IO ()
+stopped waiting = do
+  done <- newEmptyMVar
+  _ <- GLib.idleAdd GLib.PRIORITY_DEFAULT (waiting.stop >> putMVar done () >> pure False)
+  readMVar done
 
 -- | The browser coming back to usta.
 callback :: Manager -> OAuth.Waiting -> [(Text, Text)] -> IO ()

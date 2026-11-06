@@ -378,6 +378,7 @@ test-suite usta-ui-test
   hs-source-dirs: test-ui
   other-modules:
     Harness
+    World
   c-sources: test-ui/keys.c
   ghc-options: -threaded
   build-depends:
@@ -391,10 +392,12 @@ test-suite usta-ui-test
     gi-gsk,
     gi-gtk4,
     haskell-gi-base,
+    persistent,
     tasty,
     tasty-hunit,
     temporary,
     text,
+    time,
     usta
 
 benchmark usta-bench

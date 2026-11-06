@@ -23,6 +23,8 @@ import Test.Tasty (DependencyType (..), TestTree, defaultMain, dependentTestGrou
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Harness
+import World (World (..), withWorld)
+import Data.IORef (readIORef)
 import Usta.Preferences (Theme (..))
 import qualified Usta.Preferences as Preferences
 import Usta.Details (From (..))
@@ -86,6 +88,73 @@ tests app =
         pause 400
         after <- onMain nameAt
         assertBool ("the file's name went with its lines: " <> show after) (any (maybe False (\(x, y) -> x > 280 && y > 150 && y < 320)) after)
+    , dependentTestGroup "with accounts" AllFinish
+        [ testCase "a pull request's checks" $ inWorld app $ \_ w -> do
+            openReview w
+            onMain (click w "Checks") >>= assertBool "no Checks tab"
+            eventually "the checks" 3000 (onScreen w ["build (push)", "test (push)"])
+        , testCase "a pull request's commits" $ inWorld app $ \_ w -> do
+            openReview w
+            onMain (click w "Commits") >>= assertBool "no Commits tab"
+            eventually "the commit" 3000 (onScreen w ["Add the GTK 4 window"])
+        , testCase "Enter in the comment box sends the comment" $ inWorld app $ \world w -> do
+            openReview w
+            views <- onMain (widgetsOf Gtk.TextView w)
+            case views of
+              v : _ -> onMain (Gtk.textViewGetBuffer v >>= \b -> Gtk.textBufferSetText b "Looks good" (-1))
+              [] -> assertFailure "no comment box"
+            boxes <- onMain (widgetsOf Gtk.Box w)
+            _ <- onMain (or <$> mapM (\b -> pressKey b (fromIntegral Gdk.KEY_Return) []) boxes)
+            eventually "the comment sent" 3000 (elem "comment #2: Looks good" <$> readIORef world.sent)
+        , testCase "an issue opens from the inbox" $ inWorld app $ \_ w -> do
+            rows <- onMain (widgetsOf Gtk.ListBoxRow w)
+            issueRows <- onMain (filterM' (\r -> elem "Diff view: keep scroll position when switching files" <$> labelsIn r) rows)
+            case issueRows of
+              r : _ -> onMain (Gtk.widgetActivate r) >> pure ()
+              [] -> assertFailure "no issue in the inbox"
+            onMain (click w "Open issue") >>= assertBool "no Open issue"
+            eventually "the issue's page" 3000 ((\ls -> "Conversation" `notElem` ls && "Mark all done" `notElem` ls && "Diff view: keep scroll position when switching files" `elem` ls) <$> labelsIn w)
+        , testCase "a new issue is filed from its form" $ inWorld app $ \world w -> do
+            onMain (showPage w Issues)
+            pause 500
+            onMain (click w "New issue") >>= assertBool "no New issue"
+            eventually "the form" 3000 ((/= Nothing) <$> dialogTitled "New issue")
+            Just form <- onMain (dialogTitled "New issue")
+            entries <- onMain (widgetsOf Gtk.Entry form)
+            titles <- onMain (filterM' (\e -> (== Just "Short summary of the problem or idea") <$> Gtk.entryGetPlaceholderText e) entries)
+            case titles of
+              e : _ -> onMain (Gtk.editableSetText e "Filed from the tests")
+              [] -> assertFailure "no title field"
+            onMain (click form "Create issue") >>= assertBool "no Create issue"
+            eventually "the issue filed" 3000 (any ("issue: Filed from the tests" ==) <$> readIORef world.sent)
+        , testCase "the search finds a pull request by its words, and Enter opens it" $ inWorld app $ \_ w -> do
+            wanted <- onMain (Gtk.shortcutTriggerParseString (UIPlatform.keys "<Primary>k") >>= maybe (pure "") Gtk.shortcutTriggerToString)
+            onMain (fireShortcut w wanted) >>= assertBool "no search"
+            entries <- onMain (widgetsOf Gtk.SearchEntry w)
+            palette <- onMain (filterM' (\e -> (== Just "Search everything, or type > for commands") <$> Gtk.searchEntryGetPlaceholderText e) entries)
+            entry <- case palette of
+              e : _ -> pure e
+              [] -> assertFailure "no search field" >> fail "no search field"
+            onMain (Gtk.editableSetText entry "gi-gtk4")
+            eventually "the pull request chosen" 3000 (elem "feat: add gi-gtk4 dependency" <$> chosenLabels w)
+            -- Enter runs the result chosen, the first.
+            onMain (chosenResult w) >>= assertBool "nothing chosen"
+            eventually "the pull request's page" 3000 ((\ls -> "Conversation" `elem` ls && "Mark all done" `notElem` ls) <$> labelsIn w)
+        , testCase "the theme switches from the search, and is kept" $ inWorld app $ \world w -> do
+            before <- (.theme) <$> world.source.preferences
+            wanted <- onMain (Gtk.shortcutTriggerParseString (UIPlatform.keys "<Primary>k") >>= maybe (pure "") Gtk.shortcutTriggerToString)
+            onMain (fireShortcut w wanted) >>= assertBool "no search"
+            entries <- onMain (widgetsOf Gtk.SearchEntry w)
+            palette <- onMain (filterM' (\e -> (== Just "Search everything, or type > for commands") <$> Gtk.searchEntryGetPlaceholderText e) entries)
+            case palette of
+              e : _ -> do
+                onMain (Gtk.editableSetText e ">theme")
+                eventually "the theme's command" 3000 (any ("theme" `T.isInfixOf`) <$> labelsIn w)
+                eventually "the theme's command chosen" 3000 (any ("theme" `T.isInfixOf`) <$> chosenLabels w)
+                onMain (chosenResult w) >>= assertBool "nothing chosen"
+              [] -> assertFailure "no search field"
+            eventually "the theme kept" 3000 ((/= before) . (.theme) <$> world.source.preferences)
+        ]
     , testCase "Enter sends a comment, and Shift Enter starts a line" editorSends
     , testCase "Emacs keys in a text field" emacsKeys
     , testCase "the repositories' forge filter narrows the list" $ withWindow app Source.samples $ \w -> do
@@ -185,3 +254,40 @@ withDiff = Source.samples {Source.pullFiles = \_ _ _ -> pure ((,) FromForge <$> 
         <> [" line " <> T.pack (show n) | n <- [43 .. 80 :: Int]]
         <> [ "diff --git a/README.md b/README.md", "--- a/README.md", "+++ b/README.md", "@@ -1 +1 @@", "-usta", "+usta, a forge client" ]
 
+
+-- | usta's window in a 'World', while @act@ runs.
+inWorld :: Gtk.Application -> (World -> Gtk.ApplicationWindow -> IO ()) -> IO ()
+inWorld app act = withWorld $ \world -> do
+  withWindow app world.source (act world)
+  -- Loads the window started finish before its cache closes.
+  pause 1500
+
+-- | Opens the inbox's first item, a pull request, and waits for its page.
+openReview :: Gtk.ApplicationWindow -> IO ()
+openReview w = do
+  onMain (click w "Open review") >>= assertBool "no Open review"
+  eventually "the pull request's page" 3000 ((\ls -> "Conversation" `elem` ls && "Mark all done" `notElem` ls) <$> labelsIn w)
+
+-- | Whether every one of @texts@ is on screen.
+onScreen :: Gtk.ApplicationWindow -> [T.Text] -> IO Bool
+onScreen w texts = (\ls -> all (`elem` ls) texts) <$> labelsIn w
+
+filterM' :: (a -> IO Bool) -> [a] -> IO [a]
+filterM' p = fmap concat . mapM (\x -> p x >>= \keep -> pure [x | keep])
+
+-- | The search's chosen result, its words.
+chosenLabels :: Gtk.ApplicationWindow -> IO [T.Text]
+chosenLabels w = paletteChosen w >>= maybe (pure []) labelsIn
+
+-- | Runs the search's chosen result, as Enter in its field does.
+chosenResult :: Gtk.ApplicationWindow -> IO Bool
+chosenResult w = paletteChosen w >>= maybe (pure False) Gtk.widgetActivate
+
+paletteChosen :: Gtk.ApplicationWindow -> IO (Maybe Gtk.ListBoxRow)
+paletteChosen w = do
+  palettes <- descendants w >>= filterM' (`Gtk.widgetHasCssClass` "u-palette")
+  lists <- concat <$> mapM (widgetsOf Gtk.ListBox) palettes
+  chosen <- concat <$> mapM (\l -> maybe [] pure <$> Gtk.listBoxGetSelectedRow l) lists
+  pure (case chosen of
+    row : _ -> Just row
+    [] -> Nothing)

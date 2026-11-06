@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Keeps the chosen mirrors up to date: one background thread clones or
@@ -14,10 +15,10 @@ module Usta.Mirrors
   , prune
   ) where
 
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIO, killThread)
 import Control.Concurrent.STM (atomically, modifyTVar', newTQueueIO, newTVarIO, readTQueue, readTVarIO, writeTQueue)
-import Control.Exception (try)
-import Control.Monad (filterM, forM_, forever, void, when)
+import Control.Exception (SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
+import Control.Monad (filterM, forM_, forever, when)
 import qualified Data.Map.Strict as Map
 import Data.Kind (Type)
 import Data.Text (Text)
@@ -75,6 +76,8 @@ data Mirrors = Mirrors
     -- ^ The mirror's path once it has been cloned; 'Nothing' before, or
     -- when the repository is not mirrored, so the API is used instead.
   , latest :: IO [Status]
+  , stop :: IO ()
+    -- ^ Stops updating mirrors; one being cloned is left as it is.
   }
 
 -- | The platform's cache folder: macOS may empty it when the disk is full,
@@ -95,9 +98,9 @@ start settings = do
   let report status = do
         atomically (modifyTVar' known (Map.insert (status.accountId, status.repo) status))
         publish settings.statuses status
-  void $ forkIO $ forever $ atomically (readTQueue jobs) >>= work settings report
+  worker <- forkIO $ forever $ atomically (readTQueue jobs) >>= work settings report
   next <- listen settings.changes
-  void $ forkIO $ forever $ do
+  watcher <- forkIO $ forever $ do
     change <- next
     when (change.resource == PullRequests) $ atomically (writeTQueue jobs (OfAccount change.accountId))
   atomically (writeTQueue jobs Everything)
@@ -112,6 +115,7 @@ start settings = do
             pure (if cloned then Just path else Nothing)
           [] -> pure Nothing
     , latest = Map.elems <$> readTVarIO known
+    , stop = killThread watcher >> killThread worker
     }
 
 -- | Brings the job's mirrors up to date, one after another. A failure is
@@ -122,20 +126,31 @@ work settings report job = do
   forM_ (filter chosen wanted) $ \w -> do
     let path = pathOf settings.root w.host w.repo
         tell state = report Status {accountId = w.accountId, repo = w.repo, state = state}
-    cloned <- doesFileExist (path </> "HEAD")
-    tell (if cloned then Fetching else Cloning)
-    outcome <- try (if cloned then Git.fetch path else Git.clone w.kind w.url path)
-    case outcome of
-      Left (Git.GitError message) -> tell (Failed message)
-      Right () -> do
-        now <- getCurrentTime
-        run settings.pool (markFetched now w.accountId w.repo)
-        tell (Ready now)
+    -- Whatever fails (git, the disk, the cache) fails this mirror only:
+    -- the worker goes on with the next one and the next job.
+    outcome <- tryAny $ do
+      cloned <- doesFileExist (path </> "HEAD")
+      tell (if cloned then Fetching else Cloning)
+      if cloned then Git.fetch path else Git.clone w.kind w.url path
+      now <- getCurrentTime
+      run settings.pool (markFetched now w.accountId w.repo)
+      pure now
+    tell (either Failed Ready outcome)
   where
     chosen w = case job of
       Everything -> True
       OfAccount key -> w.accountId == key
       One key repo -> w.accountId == key && w.repo == repo
+
+-- | Its words for whatever failed; git's own for git. Stopping passes
+-- through.
+tryAny :: IO a -> IO (Either Text a)
+tryAny act = try act >>= \case
+  Right a -> pure (Right a)
+  Left (e :: SomeException)
+    | Just (async :: SomeAsyncException) <- fromException e -> throwIO async
+    | Just (Git.GitError message) <- fromException e -> pure (Left message)
+    | otherwise -> pure (Left (T.pack (displayException e)))
 
 -- | Deletes the clones under @root@ that no chosen mirror uses any more,
 -- such as those of a removed account or a repository set to the API, and

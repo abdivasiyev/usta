@@ -33,6 +33,7 @@ import qualified Usta.MigrationTests
 import qualified Usta.GoldenTests
 import qualified Usta.GitMirrorTests
 import qualified Usta.MirrorsTests
+import qualified Usta.Contract.WritesTests
 
 -- | The tests run with a home of their own: what usta keeps beside its
 -- cache (drafts, viewed files, the log) never touches the real one.
@@ -73,4 +74,5 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
       , Usta.GoldenTests.tests
       , Usta.GitMirrorTests.tests
       , Usta.MirrorsTests.tests
+      , Usta.Contract.WritesTests.tests
       ]

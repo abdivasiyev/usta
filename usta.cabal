@@ -311,6 +311,8 @@ test-suite usta-test
     Usta.CacheTests
     Usta.Contract.ForgeTests
     Usta.Contract.Replay
+    Usta.Contract.Swagger
+    Usta.Contract.WritesTests
     Usta.DiagramTests
     Usta.GitMirrorTests
     Usta.GitTests

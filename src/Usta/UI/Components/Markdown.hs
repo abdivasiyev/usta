@@ -21,11 +21,18 @@ module Usta.UI.Components.Markdown
   , suggesting
   , openLinksWith
   , slug
+  , Destination (..)
+  , destinationOf
+  , inlineMarkup
+  , htmlMarkup
+  , plainOf
+  , withoutLinks
   , css
   ) where
 
-import Control.Exception (SomeException, try)
-import Control.Monad (forM_, void, when)
+import Control.Concurrent.MVar (MVar, newMVar, withMVar)
+import Control.Exception (SomeException, evaluate, try)
+import Control.Monad (forM_, unless, void, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
@@ -73,7 +80,7 @@ newAt follow anchor = build follow anchor []
 
 build :: Follow -> Maybe Text -> [Text] -> Text -> IO Gtk.Widget
 build follow anchor replaced text = do
-  let root = commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text
+  let root = parsed text
   anchors <- newIORef []
   let doc = Doc {follow, diagrams = diagramsOf root, anchors, replaced}
   w <- block doc root
@@ -92,6 +99,21 @@ build follow anchor replaced text = do
       n <- readIORef tries
       pure (n < 40 && (at == Nothing || at /= before))
   pure w
+
+-- | Markdown read by cmark-gfm, one text at a time: two reads at once
+-- can lose an extension (a table read as text), and two first reads
+-- abort the process as they register them.
+parsed :: Text -> Node
+parsed text = unsafePerformIO $ withMVar cmark $ \() -> do
+  let root = commonmarkToNode [] [extTable, extStrikethrough, extAutolink] text
+  -- All of it, while the lock is held.
+  _ <- evaluate (length (show root))
+  pure root
+{-# NOINLINE parsed #-}
+
+cmark :: MVar ()
+cmark = unsafePerformIO (newMVar ())
+{-# NOINLINE cmark #-}
 
 -- | What the blocks of one document share.
 type Doc :: Type
@@ -247,15 +269,35 @@ htmlBlock doc raw
     centred = or [n == "center" || lookup "align" a == Just "center" | Tag {name = n, closing = False, attributes = a} <- ps]
 
 paragraph :: Doc -> [Text] -> [Node] -> IO Gtk.Widget
-paragraph doc classes children = text' doc (foldMap inline children) classes
+paragraph doc classes children = text' doc (balanced (foldMap inline children)) classes
+
+-- | Markup whose tags pair up: a tag the text left open (a comment's
+-- "<i>" never closed) closes at its end, and a closing tag with nothing
+-- open is dropped. Unbalanced, Pango takes none of it, and the text
+-- would lose its links and emphasis.
+balanced :: Text -> Text
+balanced markup = go [] (pieces markup)
+  where
+    go open [] = foldMap closer open
+    go open (p : rest) = case p of
+      Words w -> w <> go open rest
+      Tag {name = n, closing = False, attributes = a} -> opener n a <> go (n : open) rest
+      Tag {name = n, closing = True}
+        | n `elem` open ->
+            -- Tags opened inside it close with it.
+            let (inner, outer) = break (== n) open
+             in foldMap closer inner <> closer n <> go (drop 1 outer) rest
+        | otherwise -> go open rest
+    opener n a = "<" <> n <> foldMap (\(k, v) -> " " <> k <> "=\"" <> v <> "\"") a <> ">"
+    closer n = "</" <> n <> ">"
 
 -- | Selectable, wrapping text from Pango markup; markup that does not
 -- parse, as from HTML left unclosed, shows as its plain text.
 text' :: Doc -> Text -> [Text] -> IO Gtk.Widget
 text' doc markup classes = do
   -- Links are the label's own markup, which Pango's parser does not know.
-  parsed <- try (Pango.parseMarkup (withoutLinks markup) (-1) '\0')
-  let shown = either (\(_ :: SomeException) -> Highlight.plain (plainOf markup)) (const markup) parsed
+  pango <- try (Pango.parseMarkup (withoutLinks markup) (-1) '\0')
+  let shown = either (\(_ :: SomeException) -> Highlight.plain (plainOf markup)) (const markup) pango
   l <- GI.new Gtk.Label [ #xalign := 0
                         , #wrap := True
                         , #wrapMode := Pango.WrapModeWordChar
@@ -277,21 +319,55 @@ forgeLinks = unsafePerformIO (newIORef (const (pure False)))
 openLinksWith :: (Text -> IO Bool) -> IO ()
 openLinksWith = writeIORef forgeLinks
 
--- | A label's links with a scheme (https:, mailto:) go to 'forgeLinks',
--- else open as GTK opens them; the others go to the document's 'Follow'.
+-- | Where a clicked link goes.
+type Destination :: Type
+data Destination
+  = Heading Text
+    -- ^ "#name": a heading of the same text.
+  | Web Text
+    -- ^ http or https: usta, for a forge's page, or the browser.
+  | Mail Text
+    -- ^ mailto: the system's mail app.
+  | Relative Text
+    -- ^ No scheme: a file beside the text, as its 'Follow' says.
+  | Ignored
+    -- ^ Any other scheme. A comment is anyone's text, and a link to
+    -- file:, smb: or an app's own scheme would open it without asking.
+  deriving stock (Eq, Show)
+
+destinationOf :: Text -> Destination
+destinationOf uri = case T.stripPrefix "#" uri of
+  Just name -> Heading name
+  Nothing -> case T.breakOn ":" uri of
+    (s, rest)
+      | not (T.null s), not (T.null rest), T.all (\c -> isAlphaNum c || c `elem` ("+-." :: String)) s ->
+          case T.toLower s of
+            scheme | scheme `elem` ["http", "https"] -> Web uri
+                   | scheme == "mailto" -> Mail uri
+                   | otherwise -> Ignored
+    _ -> Relative uri
+
+-- | A label's links: a heading's jumps there, a web link goes to
+-- 'forgeLinks' and else the browser (which may not be the system's
+-- default when that is usta), mail to the mail app, a relative one to
+-- the document's 'Follow'; any other is not opened.
 links :: Doc -> Gtk.Label -> IO ()
-links doc l = void $ GI.on l #activateLink $ \uri -> case T.stripPrefix "#" uri of
-  Just name -> jump doc name >> pure True
-  Nothing | hasScheme uri -> do
-              handled <- readIORef forgeLinks >>= ($ uri)
-              -- A web link usta does not take goes to the browser, which
-              -- may not be the system's default when that is usta.
-              let web = any (`T.isPrefixOf` uri) ["http://", "https://"]
-              if not handled && web then Browser.open uri >> pure True else pure handled
-          | otherwise -> doc.follow uri >> pure True
-  where
-    hasScheme u = case T.breakOn ":" u of
-      (s, rest) -> not (T.null s) && not (T.null rest) && T.all (\c -> isAlphaNum c || c `elem` ("+-." :: String)) s
+links doc l = void $ GI.on l #activateLink $ \uri -> case destinationOf uri of
+  Heading name -> jump doc name >> pure True
+  Web url -> do
+    handled <- readIORef forgeLinks >>= ($ url)
+    unless handled (Browser.open url)
+    pure True
+  -- GTK opens it.
+  Mail _ -> pure False
+  Relative path -> doc.follow path >> pure True
+  Ignored -> pure True
+
+-- | Markdown's inline text as Pango markup, the paragraphs' one after
+-- another; for tests.
+inlineMarkup :: Text -> Text
+inlineMarkup text = case parsed text of
+  Node _ _ blocks -> T.intercalate "\n" [balanced (foldMap inline children) | Node _ PARAGRAPH children <- blocks]
 
 inline :: Node -> Text
 inline (Node _ kind children) = case kind of

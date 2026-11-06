@@ -319,6 +319,7 @@ test-suite usta-test
     Usta.GitTests
     Usta.GoldenTests
     Usta.GraphTests
+    Usta.HandoffTests
     Usta.LocalFilesTests
     Usta.MermaidTests
     Usta.MigrationTests

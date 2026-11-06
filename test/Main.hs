@@ -35,6 +35,7 @@ import qualified Usta.GitMirrorTests
 import qualified Usta.MirrorsTests
 import qualified Usta.Contract.WritesTests
 import qualified Usta.WaitingTests
+import qualified Usta.HandoffTests
 
 -- | The tests run with a home of their own: what usta keeps beside its
 -- cache (drafts, viewed files, the log) never touches the real one.
@@ -70,7 +71,8 @@ main = withSystemTempDirectory "usta-test" $ \home -> do
         dependentTestGroup "Beside the cache" AllFinish [Usta.LocalFilesTests.tests, Usta.WaitingTests.tests]
       , Usta.Contract.ForgeTests.tests
       , Usta.SecurityTests.tests
-      , Usta.OAuthTests.tests
+      , -- One after the other: each runs GLib's one main loop.
+        dependentTestGroup "On GLib's loop" AllFinish [Usta.OAuthTests.tests, Usta.HandoffTests.tests]
       , Usta.AccountsTests.tests
       , Usta.MigrationTests.tests
       , Usta.GoldenTests.tests

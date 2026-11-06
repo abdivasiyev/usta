@@ -15,7 +15,9 @@ import qualified Data.Text as T
 import qualified GI.Gdk as Gdk
 import qualified GI.Gio as Gio
 import qualified GI.Gtk as Gtk
-import System.Environment (setEnv)
+import System.Directory (createDirectoryIfMissing, removeFile)
+import System.Environment (getEnv, setEnv)
+import System.FilePath (takeDirectory)
 import System.Exit (ExitCode (..), exitWith)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
@@ -142,6 +144,23 @@ tests app =
             -- Enter runs the result chosen, the first.
             onMain (chosenResult w) >>= assertBool "nothing chosen"
             eventually "the pull request's page" 3000 ((\ls -> "Conversation" `elem` ls && "Mark all done" `notElem` ls) <$> labelsIn w)
+        , testCase "settings show the accounts, try a link, and mark what Nix fixed" $ do
+            config <- (</> "usta" </> "config.json") <$> getEnv "XDG_CONFIG_HOME"
+            createDirectoryIfMissing True (takeDirectory config)
+            writeFile config "{\"theme\": \"Dark\"}"
+            inWorld app $ \_ w -> do
+              runCommand w ">settings"
+              eventually "the settings" 3000 (onScreen w ["Appearance", "Links", "Accounts"])
+              texts <- onMain (textsIn w)
+              assertBool "no accounts listed" (any ("github.com" `T.isInfixOf`) texts && any ("git.azizovich.uz" `T.isInfixOf`) texts)
+              assertBool "the theme not marked as Nix's" (any ("Set in Nix" `T.isInfixOf`) texts)
+              entries <- onMain (widgetsOf Gtk.Entry w)
+              tries <- onMain (filterM' (\e -> (== Just "Paste a link") <$> Gtk.entryGetPlaceholderText e) entries)
+              case tries of
+                e : _ -> onMain (Gtk.editableSetText e "https://github.com/abdivasiyev/usta/pull/2/files")
+                [] -> assertFailure "no link to try"
+              eventually "where the link opens" 3000 (any ("Opens in usta: pull request #2, Files tab" `T.isInfixOf`) <$> textsIn w)
+            removeFile config
         , testCase "the theme switches from the search, and is kept" $ inWorld app $ \world w -> do
             before <- (.theme) <$> world.source.preferences
             wanted <- onMain (Gtk.shortcutTriggerParseString (UIPlatform.keys "<Primary>k") >>= maybe (pure "") Gtk.shortcutTriggerToString)
@@ -327,3 +346,18 @@ markdownBlocks = do
       , "> a quote", "", "---", ""
       , "```mermaid", "graph LR", "  A --> B", "```", ""
       , "<details><summary>More</summary>", "", "Hidden text", "", "</details>" ]
+
+-- | Types @words@ in the search and runs what it chose.
+runCommand :: Gtk.ApplicationWindow -> T.Text -> IO ()
+runCommand w words' = do
+  wanted <- onMain (Gtk.shortcutTriggerParseString (UIPlatform.keys "<Primary>k") >>= maybe (pure "") Gtk.shortcutTriggerToString)
+  onMain (fireShortcut w wanted) >>= assertBool "no search"
+  entries <- onMain (widgetsOf Gtk.SearchEntry w)
+  palette <- onMain (filterM' (\e -> (== Just "Search everything, or type > for commands") <$> Gtk.searchEntryGetPlaceholderText e) entries)
+  case palette of
+    e : _ -> do
+      onMain (Gtk.editableSetText e words')
+      let wantedWord = T.toLower (T.dropWhile (== '>') words')
+      eventually ("the search choosing " <> T.unpack words') 3000 (any ((wantedWord `T.isInfixOf`) . T.toLower) <$> chosenLabels w)
+      onMain (chosenResult w) >>= assertBool "nothing chosen"
+    [] -> assertFailure "no search field"

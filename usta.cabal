@@ -337,6 +337,7 @@ test-suite usta-test
     Usta.UI.HighlightTests
     Usta.UI.Pages.PullRequest.ChecksTests
     Usta.UpdatesTests
+    Usta.WaitingTests
   ghc-options: -threaded
   build-depends:
     aeson,

@@ -58,9 +58,11 @@ tests app =
     [ dependentTestGroup "every page shows, light and dark" AllFinish [testCase (show page) (pageShows app page) | page <- [minBound .. maxBound]]
     , testCase "the search opens with the platform's own shortcut" $ withWindow app Source.samples $ \w -> do
         triggers <- onMain (triggersIn w)
-        assertBool (show triggers) (UIPlatform.keys "<Primary>k" `elem` triggers)
+        -- As GTK writes it: "<Meta>k" on macOS, "<Control>k" elsewhere.
+        wanted <- onMain (Gtk.shortcutTriggerParseString (UIPlatform.keys "<Primary>k") >>= maybe (pure "") Gtk.shortcutTriggerToString)
+        assertBool (show triggers) (wanted `elem` triggers)
         onMain (visibleWithClass "u-palette-backdrop" w) >>= (@?= False)
-        onMain (fireShortcut w (UIPlatform.keys "<Primary>k")) >>= assertBool "no shortcut took it"
+        onMain (fireShortcut w wanted) >>= assertBool "no shortcut took it"
         eventually "the search opening" 2000 (visibleWithClass "u-palette-backdrop" w)
     , testCase "on macOS the search's shortcut is Command K" $
         if Platform.current == Platform.MacOS then UIPlatform.keys "<Primary>k" @?= "<Meta>k" else pure ()

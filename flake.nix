@@ -3,6 +3,12 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+  # GHC 9.12's packages are not in nixpkgs' cache; CI keeps them here.
+  nixConfig = {
+    extra-substituters = ["https://usta.cachix.org"];
+    extra-trusted-public-keys = ["usta.cachix.org-1:ZhJ4ndv7DSFbVjAL+7p2AdXiD8fz1BOLKZZIV6j02EE="];
+  };
+
   outputs = {
     self,
     nixpkgs,

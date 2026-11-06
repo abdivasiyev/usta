@@ -310,6 +310,7 @@ test-suite usta-test
     Usta.AccountsTests
     Usta.CacheTests
     Usta.Contract.ForgeTests
+    Usta.Contract.GraphQL
     Usta.Contract.Replay
     Usta.Contract.Swagger
     Usta.Contract.WritesTests

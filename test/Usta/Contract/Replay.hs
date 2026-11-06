@@ -17,6 +17,8 @@ module Usta.Contract.Replay
   , Recorded
   , Server (..)
   , start
+  , Written (..)
+  , standIn
   , recording
   ) where
 
@@ -95,6 +97,44 @@ start forge = do
       misses <- newMVar []
       (url, stop) <- serve (replay known misses)
       pure Server {base = url, missed = reverse <$> readMVar misses, finish = stop}
+
+-- | A request that would change something on the forge.
+data Written = Written
+  { method :: Text
+  , path :: Text
+    -- ^ Without the query.
+  , query :: [(Text, Text)]
+  , contentType :: Text
+  , sent :: BL.ByteString
+  }
+  deriving stock (Show)
+
+-- | A forge that answers reads as @forge@ did when recorded and keeps
+-- every write it is sent, answering it with @answer@; for checking what
+-- usta sends without changing a real forge.
+standIn :: String -> (Written -> (Int, BL.ByteString)) -> IO (Server, IO [Written])
+standIn forge answer = do
+  let fixture = "test/contract/" <> forge <> ".json"
+  known <- either (\e -> fail (fixture <> ": " <> e)) pure =<< eitherDecodeFileStrict fixture
+  misses <- newMVar []
+  writes <- newMVar []
+  let reads = replay known misses
+      app req respond
+        | Wai.requestMethod req == "GET" = reads req respond
+        | otherwise = do
+            body <- Wai.strictRequestBody req
+            let w = Written
+                  { method = decodeUtf8Lenient (Wai.requestMethod req)
+                  , path = decodeUtf8Lenient (Wai.rawPathInfo req)
+                  , query = [(decodeUtf8Lenient k, maybe "" decodeUtf8Lenient v) | (k, v) <- Wai.queryString req]
+                  , contentType = maybe "" decodeUtf8Lenient (lookup "Content-Type" (Wai.requestHeaders req))
+                  , sent = body
+                  }
+                (code, reply) = answer w
+            modifyMVar_ writes (pure . (w :))
+            respond (Wai.responseLBS (Status code "") [("Content-Type", "application/json")] reply)
+  (url, stop) <- serve app
+  pure (Server {base = url, missed = reverse <$> readMVar misses, finish = stop}, reverse <$> readMVar writes)
 
 serve :: Wai.Application -> IO (BaseUrl, IO ())
 serve app = do

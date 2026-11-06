@@ -26,14 +26,13 @@ gh api -X POST repos/abdivasiyev/usta/pages/builds
 
 ## The download links
 
-The download buttons go to
-`https://github.com/abdivasiyev/usta/releases/latest/download/<file>`,
-which GitHub sends to the newest release's `usta.dmg` or
-`usta-x86_64.AppImage`, so a release needs no change here. The release
-workflow keeps a new release a draft until all its files are attached,
-so the links never point at a release without them. The page
-reads the newest release from GitHub's API for its number and the
-`.deb` and `.rpm`, whose names carry the version.
+The download buttons go to a release's own files,
+`https://github.com/abdivasiyev/usta/releases/download/<tag>/<file>`.
+The release workflow keeps a new release a draft until all its files
+are attached, then publishes it, points these links at it, commits that
+to `master` and copies `site/` to `gh-pages`: a release needs no change
+here by hand. The page reads the newest release from GitHub's API for
+its number and the `.deb` and `.rpm`, whose names carry the version.
 
 ## The domain
 

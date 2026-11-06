@@ -101,7 +101,11 @@ begin manager site client = do
         if isCallback (fromMaybe "" bytes) then void (tryPutMVar result said) else pure ()
         pure True
       Gio.socketServiceStart service
-      let stopping = Gio.socketServiceStop service >> Gio.socketListenerClose service
+      -- Stopping cancels the wait for a connection on the main loop's next
+      -- turn; the socket closes after it, or GLib polls a closed one.
+      let stopping = do
+            Gio.socketServiceStop service
+            void (GLib.idleAdd GLib.PRIORITY_DEFAULT_IDLE (Gio.socketListenerClose service >> pure False))
           page = site <> "/login/oauth/authorize?" <> form
             [ ("client_id", client), ("redirect_uri", redirect), ("response_type", "code")
             , ("state", state), ("code_challenge", challenge), ("code_challenge_method", "S256") ]

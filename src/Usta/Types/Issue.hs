@@ -1,8 +1,8 @@
-
 -- | An issue, as the Issues page and the issue screen use it.
 module Usta.Types.Issue
-  ( Issue (..)
-  ) where
+    ( Issue (..)
+    )
+where
 
 import Data.Kind (Type)
 import Data.Text (Text)
@@ -17,14 +17,14 @@ import Usta.Types.Ref (Ref)
 -- | One issue. It is open until 'closedAt' says when it was closed.
 type Issue :: Type
 data Issue = Issue
-  { ref :: Ref
-  , title :: Text
-  , author :: Login
-  , labels :: [Label]
-  , comments :: Count
-  , involvement :: [Involvement]
-  , createdAt :: UTCTime
-  , updatedAt :: UTCTime
-  , closedAt :: Maybe UTCTime
-  }
-  deriving stock (Eq, Show)
+    { ref :: Ref
+    , title :: Text
+    , author :: Login
+    , labels :: [Label]
+    , comments :: Count
+    , involvement :: [Involvement]
+    , createdAt :: UTCTime
+    , updatedAt :: UTCTime
+    , closedAt :: Maybe UTCTime
+    }
+    deriving stock (Eq, Show)

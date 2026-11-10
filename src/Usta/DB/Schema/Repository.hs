@@ -3,14 +3,16 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | The @repositories@ table: the repositories an account can see, as last
--- synced. The host comes from the account.
+{- | The @repositories@ table: the repositories an account can see, as last
+synced. The host comes from the account.
+-}
 module Usta.DB.Schema.Repository
-  ( Repository (..)
-  , RepositoryId
-  , EntityField (..)
-  , Unique (..)
-  ) where
+    ( Repository (..)
+    , RepositoryId
+    , EntityField (..)
+    , Unique (..)
+    )
+where
 
 import Data.Kind (Type)
 import Data.Text (Text)
@@ -26,8 +28,8 @@ import Usta.Types.RepoName (RepoName)
 -- table), so the account reference becomes a foreign key; without it
 -- persistent drops the reference silently.
 share
-  [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
-  [persistLowerCase|
+    [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
+    [persistLowerCase|
 Repository sql=repositories
     accountId         AccountId OnDeleteCascade
     name              RepoName

@@ -1,8 +1,8 @@
-
 -- | A repository, as the Repositories page shows it.
 module Usta.Types.Repository
-  ( Repository (..)
-  ) where
+    ( Repository (..)
+    )
+where
 
 import Data.Kind (Type)
 import Data.Text (Text)
@@ -15,13 +15,13 @@ import Usta.Types.RepoName (RepoName)
 -- | One repository you can see on a forge.
 type Repository :: Type
 data Repository = Repository
-  { host :: Host
-  , name :: RepoName
-  , description :: Maybe Text
-  , defaultBranch :: Text
-  , private :: Bool
-  , openPullRequests :: Count
-  , openIssues :: Count
-  , updatedAt :: UTCTime
-  }
-  deriving stock (Eq, Show)
+    { host :: Host
+    , name :: RepoName
+    , description :: Maybe Text
+    , defaultBranch :: Text
+    , private :: Bool
+    , openPullRequests :: Count
+    , openIssues :: Count
+    , updatedAt :: UTCTime
+    }
+    deriving stock (Eq, Show)

@@ -4,8 +4,9 @@
 
 -- | A pull request's or issue's number within its repository.
 module Usta.Types.Number
-  ( Number
-  ) where
+    ( Number
+    )
+where
 
 import Data.Aeson (FromJSON)
 import Data.Kind (Type)
@@ -18,12 +19,12 @@ import Usta.Types.Parse (Parse (..), Parsed (..))
 -- | A pull request's or issue's number within its repository.
 type Number :: Type
 newtype Number = Number Int
-  deriving stock (Eq, Ord, Show)
-  deriving (FromJSON, PersistField, PersistFieldSql, ToHttpApiData) via Parsed Number
+    deriving stock (Eq, Ord, Show)
+    deriving (FromJSON, PersistField, PersistFieldSql, ToHttpApiData) via Parsed Number
 
 instance Parse Number where
-  type Raw Number = Int
-  parse n
-    | n > 0 = Right (Number n)
-    | otherwise = Left "a positive number"
-  unparse (Number n) = n
+    type Raw Number = Int
+    parse n
+        | n > 0 = Right (Number n)
+        | otherwise = Left "a positive number"
+    unparse (Number n) = n

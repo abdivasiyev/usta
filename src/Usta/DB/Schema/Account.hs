@@ -3,14 +3,16 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | The @accounts@ table: one row per forge account usta is signed in to.
--- The token is not stored here; it lives in the system keyring.
+{- | The @accounts@ table: one row per forge account usta is signed in to.
+The token is not stored here; it lives in the system keyring.
+-}
 module Usta.DB.Schema.Account
-  ( Account (..)
-  , AccountId
-  , EntityField (..)
-  , Unique (..)
-  ) where
+    ( Account (..)
+    , AccountId
+    , EntityField (..)
+    , Unique (..)
+    )
+where
 
 import Data.Kind (Type)
 import Data.Time (UTCTime)
@@ -23,8 +25,8 @@ import Usta.Types.Host (Host)
 import Usta.Types.Login (Login)
 
 share
-  [mkPersist sqlSettings {mpsFieldLabelModifier = \_ field -> field}]
-  [persistLowerCase|
+    [mkPersist sqlSettings {mpsFieldLabelModifier = \_ field -> field}]
+    [persistLowerCase|
 Account sql=accounts
     forge       Kind
     host        Host

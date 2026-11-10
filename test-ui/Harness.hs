@@ -1,41 +1,42 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Driving usta's GTK window from tests. GTK lives on the main thread,
--- where its main loop runs; the tests run on their own and hand it work
--- with 'onMain'. Keys reach widgets as GTK would send them: through
--- their shortcut and key controllers.
+{- | Driving usta's GTK window from tests. GTK lives on the main thread,
+where its main loop runs; the tests run on their own and hand it work
+with 'onMain'. Keys reach widgets as GTK would send them: through
+their shortcut and key controllers.
+-}
 module Harness
-  ( onMain
-  , pause
-  , eventually
-  , descendants
-  , widgetsOf
-  , labelsIn
-  , textsIn
-  , visibleWithClass
-  , fireShortcut
-  , triggersIn
-  , pressKey
-  , screenshot
-  , withWindow
-  , showPage
-  , click
-  , clickIcon
-  , weakly
-  , alive
-  , labelsReading
-  , placeIn
-  , scrollLongest
-  , openMenu
-  , dialogTitled
-  ) where
+    ( onMain
+    , pause
+    , eventually
+    , descendants
+    , widgetsOf
+    , labelsIn
+    , textsIn
+    , visibleWithClass
+    , fireShortcut
+    , triggersIn
+    , pressKey
+    , screenshot
+    , withWindow
+    , showPage
+    , click
+    , clickIcon
+    , weakly
+    , alive
+    , labelsReading
+    , placeIn
+    , scrollLongest
+    , openMenu
+    , dialogTitled
+    )
+where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, throwIO, try)
 import Control.Monad (filterM, forM, forM_, void, when)
-import qualified Data.GI.Base as GI
 import Data.GI.Base.BasicTypes (GObject, ManagedPtr)
 import Data.GI.Base.ManagedPtr (withManagedPtr)
 import Data.List (sortOn)
@@ -44,52 +45,57 @@ import Data.Text (Text)
 import Data.Word (Word32)
 import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (Ptr, castPtr)
-import qualified GI.GLib as GLib
-import qualified GI.Gdk as Gdk
-import qualified GI.Gio as Gio
-import qualified GI.Graphene as Graphene
-import qualified GI.Gsk as Gsk
-import qualified GI.Gtk as Gtk
 import System.Directory (createDirectoryIfMissing, getFileSize)
 import System.FilePath (takeDirectory)
 import Test.Tasty.HUnit (assertFailure)
 
+import Data.GI.Base qualified as GI
+import GI.GLib qualified as GLib
+import GI.Gdk qualified as Gdk
+import GI.Gio qualified as Gio
+import GI.Graphene qualified as Graphene
+import GI.Gsk qualified as Gsk
+import GI.Gtk qualified as Gtk
+
 import Usta.UI.Sidebar (Page, pageName)
 import Usta.UI.Source (Source)
-import qualified Usta.UI.Window as Window
 
--- | Runs @act@ on GTK's thread and waits for it; what it throws comes
--- back here.
+import Usta.UI.Window qualified as Window
+
+{- | Runs @act@ on GTK's thread and waits for it; what it throws comes
+back here.
+-}
 onMain :: IO a -> IO a
 onMain act = do
-  done <- newEmptyMVar
-  void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (try act >>= putMVar done >> pure False)
-  takeMVar done >>= either (\(e :: SomeException) -> throwIO e) pure
+    done <- newEmptyMVar
+    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (try act >>= putMVar done >> pure False)
+    takeMVar done >>= either (\(e :: SomeException) -> throwIO e) pure
 
 -- | Lets GTK work for @ms@.
 pause :: Int -> IO ()
 pause ms = threadDelay (ms * 1000)
 
--- | Waits up to @ms@ for @check@, asked on GTK's thread; fails saying
--- @what@ did not happen.
+{- | Waits up to @ms@ for @check@, asked on GTK's thread; fails saying
+@what@ did not happen.
+-}
 eventually :: String -> Int -> IO Bool -> IO ()
 eventually what ms check = go (ms `div` 50)
-  where
-    go n = do
-      ok <- onMain check
-      if ok then pure () else if n <= 0 then assertFailure (what <> " did not happen") else pause 50 >> go (n - 1)
+    where
+        go n = do
+            ok <- onMain check
+            if ok then pure () else if n <= 0 then assertFailure (what <> " did not happen") else pause 50 >> go (n - 1)
 
 descendants :: Gtk.IsWidget w => w -> IO [Gtk.Widget]
 descendants w = Gtk.widgetGetFirstChild w >>= go
-  where
-    go Nothing = pure []
-    go (Just c) = do
-      below <- descendants c
-      next <- Gtk.widgetGetNextSibling c
-      (c :) . (below <>) <$> go next
+    where
+        go Nothing = pure []
+        go (Just c) = do
+            below <- descendants c
+            next <- Gtk.widgetGetNextSibling c
+            (c :) . (below <>) <$> go next
 
 -- | The widgets of one type under @w@ that are on screen.
-widgetsOf :: (Gtk.IsWidget w, GObject t, Gtk.IsWidget t) => (ManagedPtr t -> t) -> w -> IO [t]
+widgetsOf :: (GObject t, Gtk.IsWidget t, Gtk.IsWidget w) => (ManagedPtr t -> t) -> w -> IO [t]
 widgetsOf kind w = descendants w >>= fmap catMaybes . mapM (GI.castTo kind) >>= filterM Gtk.widgetGetMapped
 
 labelsIn :: Gtk.IsWidget w => w -> IO [Text]
@@ -102,144 +108,150 @@ textsIn w = widgetsOf Gtk.Label w >>= mapM Gtk.labelGetText
 -- | Whether a widget with the CSS class is visible under @w@.
 visibleWithClass :: Gtk.IsWidget w => Text -> w -> IO Bool
 visibleWithClass cls w = do
-  found <- descendants w >>= filterM (`Gtk.widgetHasCssClass` cls)
-  or <$> mapM Gtk.widgetGetVisible found
+    found <- descendants w >>= filterM (`Gtk.widgetHasCssClass` cls)
+    or <$> mapM Gtk.widgetGetVisible found
 
 -- | Every shortcut trigger under @w@ (and on it), as GTK writes them.
 triggersIn :: Gtk.IsWidget w => w -> IO [Text]
 triggersIn w = do
-  self <- Gtk.toWidget w
-  ws <- (self :) <$> descendants w
-  concat <$> forM ws (\x -> map fst <$> shortcutsOf x)
+    self <- Gtk.toWidget w
+    ws <- (self :) <$> descendants w
+    concat <$> forM ws (\x -> map fst <$> shortcutsOf x)
 
 shortcutsOf :: Gtk.Widget -> IO [(Text, (Gtk.ShortcutAction, Gtk.Widget))]
 shortcutsOf w = do
-  ctrls <- Gtk.widgetObserveControllers w
-  n <- Gio.listModelGetNItems ctrls
-  fmap concat $ forM (takeWhile (< n) [0 ..]) $ \i -> do
-    found <- Gio.listModelGetItem ctrls i >>= maybe (pure Nothing) (GI.castTo Gtk.ShortcutController)
-    case found of
-      Nothing -> pure []
-      Just c -> do
-        model <- Gio.toListModel c
-        k <- Gio.listModelGetNItems model
-        fmap catMaybes $ forM (takeWhile (< k) [0 ..]) $ \j -> do
-          s <- Gio.listModelGetItem model j >>= maybe (pure Nothing) (GI.castTo Gtk.Shortcut)
-          case s of
-            Nothing -> pure Nothing
-            Just sc -> do
-              t <- Gtk.shortcutGetTrigger sc
-              a <- Gtk.shortcutGetAction sc
-              case (t, a) of
-                (Just t', Just a') -> Gtk.shortcutTriggerToString t' >>= \str -> pure (Just (str, (a', w)))
-                _ -> pure Nothing
+    ctrls <- Gtk.widgetObserveControllers w
+    n <- Gio.listModelGetNItems ctrls
+    fmap concat $ forM (takeWhile (< n) [0 ..]) $ \i -> do
+        found <- Gio.listModelGetItem ctrls i >>= maybe (pure Nothing) (GI.castTo Gtk.ShortcutController)
+        case found of
+            Nothing -> pure []
+            Just c -> do
+                model <- Gio.toListModel c
+                k <- Gio.listModelGetNItems model
+                fmap catMaybes $ forM (takeWhile (< k) [0 ..]) $ \j -> do
+                    s <- Gio.listModelGetItem model j >>= maybe (pure Nothing) (GI.castTo Gtk.Shortcut)
+                    case s of
+                        Nothing -> pure Nothing
+                        Just sc -> do
+                            t <- Gtk.shortcutGetTrigger sc
+                            a <- Gtk.shortcutGetAction sc
+                            case (t, a) of
+                                (Just t', Just a') -> Gtk.shortcutTriggerToString t' >>= \str -> pure (Just (str, (a', w)))
+                                _ -> pure Nothing
 
--- | Activates the shortcut written @trigger@ under @w@, as pressing it
--- would; 'False' when there is none.
+{- | Activates the shortcut written @trigger@ under @w@, as pressing it
+would; 'False' when there is none.
+-}
 fireShortcut :: Gtk.IsWidget w => w -> Text -> IO Bool
 fireShortcut w trigger = do
-  self <- Gtk.toWidget w
-  ws <- (self :) <$> descendants w
-  found <- concat <$> mapM shortcutsOf ws
-  case [x | (t, x) <- found, t == trigger] of
-    (action, owner) : _ -> Gtk.shortcutActionActivate action [] owner Nothing
-    [] -> pure False
+    self <- Gtk.toWidget w
+    ws <- (self :) <$> descendants w
+    found <- concat <$> mapM shortcutsOf ws
+    case [x | (t, x) <- found, t == trigger] of
+        (action, owner) : _ -> Gtk.shortcutActionActivate action [] owner Nothing
+        [] -> pure False
 
 -- | Sends a key to @w@'s key controllers until one takes it.
 pressKey :: Gtk.IsWidget w => w -> Word32 -> [Gdk.ModifierType] -> IO Bool
 pressKey w keyval mods = do
-  model <- Gtk.widgetObserveControllers w
-  n <- Gio.listModelGetNItems model
-  ctrls <- catMaybes <$> forM (takeWhile (< n) [0 ..]) (\i -> Gio.listModelGetItem model i >>= maybe (pure Nothing) (GI.castTo Gtk.EventControllerKey))
-  let state = fromIntegral (sum [fromEnum m | m <- mods])
-      go [] = pure False
-      go (c : rest) = do
-        took <- withManagedPtr c $ \p -> c_press p keyval state
-        if took /= 0 then pure True else go rest
-  go ctrls
+    model <- Gtk.widgetObserveControllers w
+    n <- Gio.listModelGetNItems model
+    ctrls <- catMaybes <$> forM (takeWhile (< n) [0 ..]) (\i -> Gio.listModelGetItem model i >>= maybe (pure Nothing) (GI.castTo Gtk.EventControllerKey))
+    let
+        state = fromIntegral (sum [fromEnum m | m <- mods])
+        go [] = pure False
+        go (c : rest) = do
+            took <- withManagedPtr c $ \p -> c_press p keyval state
+            if took /= 0 then pure True else go rest
+    go ctrls
 
 foreign import ccall "usta_test_press" c_press :: Ptr Gtk.EventControllerKey -> Word32 -> Word32 -> IO CInt
 
 -- | The widget as drawn, saved to @path@; 'False' when nothing was drawn.
 screenshot :: Gtk.IsWidget w => w -> FilePath -> IO Bool
 screenshot target path = do
-  w <- Gtk.toWidget target
-  -- A window behind others may not be drawn anew: bring it up first.
-  Gtk.widgetGetRoot w >>= maybe (pure Nothing) (GI.castTo Gtk.Window) >>= mapM_ Gtk.windowPresent
-  width <- Gtk.widgetGetWidth w
-  height <- Gtk.widgetGetHeight w
-  paintable <- Gtk.widgetPaintableNew (Just w)
-  snap <- Gtk.snapshotNew
-  Gdk.paintableSnapshot paintable snap (fromIntegral width) (fromIntegral height)
-  node <- Gtk.snapshotToNode snap
-  native <- Gtk.widgetGetNative w
-  renderer <- maybe (pure Nothing) Gtk.nativeGetRenderer native
-  case (node, renderer) of
-    (Just n, Just r) -> do
-      texture <- Gsk.rendererRenderTexture r n (Nothing :: Maybe Graphene.Rect)
-      createDirectoryIfMissing True (takeDirectory path)
-      saved <- Gdk.textureSaveToPng texture path
-      -- An empty window's picture is a few hundred bytes.
-      (saved &&) . (> 4000) <$> getFileSize path
-    _ -> pure False
+    w <- Gtk.toWidget target
+    -- A window behind others may not be drawn anew: bring it up first.
+    Gtk.widgetGetRoot w >>= maybe (pure Nothing) (GI.castTo Gtk.Window) >>= mapM_ Gtk.windowPresent
+    width <- Gtk.widgetGetWidth w
+    height <- Gtk.widgetGetHeight w
+    paintable <- Gtk.widgetPaintableNew (Just w)
+    snap <- Gtk.snapshotNew
+    Gdk.paintableSnapshot paintable snap (fromIntegral width) (fromIntegral height)
+    node <- Gtk.snapshotToNode snap
+    native <- Gtk.widgetGetNative w
+    renderer <- maybe (pure Nothing) Gtk.nativeGetRenderer native
+    case (node, renderer) of
+        (Just n, Just r) -> do
+            texture <- Gsk.rendererRenderTexture r n (Nothing :: Maybe Graphene.Rect)
+            createDirectoryIfMissing True (takeDirectory path)
+            saved <- Gdk.textureSaveToPng texture path
+            -- An empty window's picture is a few hundred bytes.
+            (saved &&) . (> 4000) <$> getFileSize path
+        _ -> pure False
 
 -- | usta's window on @source@, shown, while @act@ runs.
 withWindow :: Gtk.Application -> Source -> (Gtk.ApplicationWindow -> IO a) -> IO a
 withWindow app source act = do
-  window <- onMain $ do
-    w <- Window.build source app
-    Gtk.windowSetDefaultSize w 1280 800
-    Gtk.widgetSetVisible w True
-    pure w
-  pause 1200
-  result <- try (act window)
-  onMain (Gtk.windowDestroy window)
-  either (\(e :: SomeException) -> throwIO e) pure result
+    window <- onMain $ do
+        w <- Window.build source app
+        Gtk.windowSetDefaultSize w 1280 800
+        Gtk.widgetSetVisible w True
+        pure w
+    pause 1200
+    result <- try (act window)
+    onMain (Gtk.windowDestroy window)
+    either (\(e :: SomeException) -> throwIO e) pure result
 
 -- | Shows a page, as a click in the sidebar does.
 showPage :: Gtk.IsWidget w => w -> Page -> IO ()
 showPage w page = do
-  stacks <- descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Stack)
-  forM_ stacks $ \s -> do
-    child <- Gtk.stackGetChildByName s (pageName page)
-    when (maybe False (const True) child) $ Gtk.stackSetVisibleChildName s (pageName page)
+    stacks <- descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Stack)
+    forM_ stacks $ \s -> do
+        child <- Gtk.stackGetChildByName s (pageName page)
+        when (maybe False (const True) child) $ Gtk.stackSetVisibleChildName s (pageName page)
 
--- | Clicks the button under @w@ that reads @text@, shown or not (as one
--- in a closed menu); 'False' when there is none.
+{- | Clicks the button under @w@ that reads @text@, shown or not (as one
+in a closed menu); 'False' when there is none.
+-}
 click :: Gtk.IsWidget w => w -> Text -> IO Bool
 click w text = do
-  buttons <- descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Button)
-  -- Its label, or one of the labels in it, as a tab with a count has.
-  let reads b = do
-        own <- Gtk.buttonGetLabel b
-        inside <- labelsUnder b
-        pure (own == Just text || text `elem` inside)
-  found <- filterM reads buttons
-  -- One on screen before one on a page behind it.
-  shown <- filterM Gtk.widgetGetMapped found
-  case shown <> found of
-    b : _ -> Gtk.widgetActivate b
-    [] -> pure False
+    buttons <- descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Button)
+    -- Its label, or one of the labels in it, as a tab with a count has.
+    let
+        reads b = do
+            own <- Gtk.buttonGetLabel b
+            inside <- labelsUnder b
+            pure (own == Just text || text `elem` inside)
+    found <- filterM reads buttons
+    -- One on screen before one on a page behind it.
+    shown <- filterM Gtk.widgetGetMapped found
+    case shown <> found of
+        b : _ -> Gtk.widgetActivate b
+        [] -> pure False
 
 -- | The open window titled @title@, if there is one.
 dialogTitled :: Text -> IO (Maybe Gtk.Window)
 dialogTitled title = do
-  model <- Gtk.windowGetToplevels
-  n <- Gio.listModelGetNItems model
-  windows <- catMaybes <$> forM (takeWhile (< n) [0 ..]) (\i -> Gio.listModelGetItem model i >>= maybe (pure Nothing) (GI.castTo Gtk.Window))
-  found <- filterM (\x -> (== Just title) <$> Gtk.windowGetTitle x) windows
-  pure (case found of
-    x : _ -> Just x
-    [] -> Nothing)
+    model <- Gtk.windowGetToplevels
+    n <- Gio.listModelGetNItems model
+    windows <- catMaybes <$> forM (takeWhile (< n) [0 ..]) (\i -> Gio.listModelGetItem model i >>= maybe (pure Nothing) (GI.castTo Gtk.Window))
+    found <- filterM (\x -> (== Just title) <$> Gtk.windowGetTitle x) windows
+    pure
+        ( case found of
+            x : _ -> Just x
+            [] -> Nothing
+        )
 
 -- | Opens the menu button under @w@ whose tooltip is @tip@.
 openMenu :: Gtk.IsWidget w => w -> Text -> IO Bool
 openMenu w tip = do
-  menus <- widgetsOf Gtk.MenuButton w
-  found <- filterM (\m -> (== Just tip) <$> Gtk.widgetGetTooltipText m) menus
-  case found of
-    m : _ -> Gtk.menuButtonPopup m >> pure True
-    [] -> pure False
+    menus <- widgetsOf Gtk.MenuButton w
+    found <- filterM (\m -> (== Just tip) <$> Gtk.widgetGetTooltipText m) menus
+    case found of
+        m : _ -> Gtk.menuButtonPopup m >> pure True
+        [] -> pure False
 
 labelsUnder :: Gtk.IsWidget w => w -> IO [Text]
 labelsUnder w = descendants w >>= fmap catMaybes . mapM (GI.castTo Gtk.Label) >>= mapM Gtk.labelGetLabel
@@ -251,34 +263,39 @@ labelsReading text w = widgetsOf Gtk.Label w >>= filterM (fmap (== text) . Gtk.l
 -- | Where in @within@ the widget's top left corner is.
 placeIn :: (Gtk.IsWidget a, Gtk.IsWidget b) => a -> b -> IO (Maybe (Float, Float))
 placeIn widget within = do
-  origin <- Graphene.newZeroPoint
-  (ok, p) <- Gtk.widgetComputePoint widget within origin
-  if ok then (\x y -> Just (x, y)) <$> Graphene.getPointX p <*> Graphene.getPointY p else pure Nothing
+    origin <- Graphene.newZeroPoint
+    (ok, p) <- Gtk.widgetComputePoint widget within origin
+    if ok then (\x y -> Just (x, y)) <$> Graphene.getPointX p <*> Graphene.getPointY p else pure Nothing
 
 -- | Scrolls the longest view on screen under @w@ down by @by@ pixels.
 scrollLongest :: Gtk.IsWidget w => w -> Double -> IO Bool
 scrollLongest w by = do
-  views <- widgetsOf Gtk.ScrolledWindow w
-  sized <- forM views $ \v -> Gtk.scrolledWindowGetVadjustment v >>= \a -> (,) a <$> Gtk.adjustmentGetUpper a
-  case reverse (sortOn snd sized) of
-    (a, _) : _ -> Gtk.adjustmentGetValue a >>= \now -> Gtk.adjustmentSetValue a (now + by) >> pure True
-    [] -> pure False
+    views <- widgetsOf Gtk.ScrolledWindow w
+    sized <- forM views $ \v -> Gtk.scrolledWindowGetVadjustment v >>= \a -> (,) a <$> Gtk.adjustmentGetUpper a
+    case reverse (sortOn snd sized) of
+        (a, _) : _ -> Gtk.adjustmentGetValue a >>= \now -> Gtk.adjustmentSetValue a (now + by) >> pure True
+        [] -> pure False
 
 -- | Clicks the button under @w@ showing the icon @icon@, on screen.
 clickIcon :: Gtk.IsWidget w => w -> Text -> IO Bool
 clickIcon w icon = do
-  buttons <- widgetsOf Gtk.Button w
-  found <- filterM (\b -> do
-    images <- descendants b >>= fmap catMaybes . mapM (GI.castTo Gtk.Image)
-    names <- mapM Gtk.imageGetIconName images
-    own <- Gtk.buttonGetIconName b
-    pure (Just icon `elem` (own : names))) buttons
-  case found of
-    b : _ -> Gtk.widgetActivate b
-    [] -> pure False
+    buttons <- widgetsOf Gtk.Button w
+    found <-
+        filterM
+            ( \b -> do
+                images <- descendants b >>= fmap catMaybes . mapM (GI.castTo Gtk.Image)
+                names <- mapM Gtk.imageGetIconName images
+                own <- Gtk.buttonGetIconName b
+                pure (Just icon `elem` (own : names))
+            )
+            buttons
+    case found of
+        b : _ -> Gtk.widgetActivate b
+        [] -> pure False
 
--- | Weak references to the first of @ws@ (none for none): they keep
--- nothing alive, and say whether it still is.
+{- | Weak references to the first of @ws@ (none for none): they keep
+nothing alive, and say whether it still is.
+-}
 weakly :: GObject o => [o] -> IO [Ptr ()]
 weakly ws = forM (take 1 ws) $ \w -> withManagedPtr w (c_weak . castPtr)
 
@@ -287,4 +304,5 @@ alive :: [Ptr ()] -> IO Bool
 alive refs = or <$> forM refs (fmap (/= 0) . c_alive)
 
 foreign import ccall "usta_test_weak" c_weak :: Ptr () -> IO (Ptr ())
+
 foreign import ccall "usta_test_alive" c_alive :: Ptr () -> IO CInt

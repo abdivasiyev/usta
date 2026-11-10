@@ -1,10 +1,11 @@
 -- | The checks on a commit: CI jobs, and statuses other services post.
 module Usta.Types.Check
-  ( Check (..)
-  , State (..)
-  , Job (..)
-  , Run (..)
-  ) where
+    ( Check (..)
+    , State (..)
+    , Job (..)
+    , Run (..)
+    )
+where
 
 import Data.Int (Int64)
 import Data.Kind (Type)
@@ -13,49 +14,51 @@ import Data.Time (UTCTime)
 
 type State :: Type
 data State = Waiting | Running | Passed | Failed | Skipped
-  deriving stock (Eq, Show, Enum, Bounded)
+    deriving stock (Bounded, Enum, Eq, Show)
 
--- | A job of the forge's own CI, whose log the forge gives: its run, and
--- where it is in the run.
+{- | A job of the forge's own CI, whose log the forge gives: its run, and
+where it is in the run.
+-}
 type Job :: Type
-data Job = Job { run :: Int, index :: Int }
-  deriving stock (Eq, Show)
+data Job = Job {run :: Int, index :: Int}
+    deriving stock (Eq, Show)
 
 type Check :: Type
 data Check = Check
-  { name :: Text
+    { name :: Text
     -- ^ e.g. "test (pull_request)".
-  , state :: State
-  , description :: Text
+    , state :: State
+    , description :: Text
     -- ^ What the check says of itself, e.g. "Failing after 48s".
-  , url :: Maybe Text
+    , url :: Maybe Text
     -- ^ Its page, absolute.
-  , job :: Maybe Job
+    , job :: Maybe Job
     -- ^ 'Nothing' for a status another service posted.
-  }
-  deriving stock (Eq, Show)
+    }
+    deriving stock (Eq, Show)
 
--- | A run of the forge's own CI: one workflow on one commit, with its
--- jobs as checks.
+{- | A run of the forge's own CI: one workflow on one commit, with its
+jobs as checks.
+-}
 type Run :: Type
 data Run = Run
-  { id :: Int64
+    { id :: Int64
     -- ^ The forge's own id of the run, to re-run or cancel it.
-  , number :: Int
+    , number :: Int
     -- ^ As the forge's pages number it.
-  , workflow :: Text
+    , workflow :: Text
     -- ^ Its file, e.g. "ci.yml".
-  , title :: Text
+    , title :: Text
     -- ^ The commit's or pull request's title.
-  , branch :: Text
-  , event :: Text
+    , branch :: Text
+    , event :: Text
     -- ^ What started it, e.g. "push" or "pull_request".
-  , sha :: Text
-  , state :: State
-  , started :: UTCTime
-  , updated :: UTCTime
+    , sha :: Text
+    , state :: State
+    , started :: UTCTime
+    , updated :: UTCTime
     -- ^ When its last job changed; how long it took, once it is done.
-  , url :: Text
-  , jobs :: [Check]
-  }
-  deriving stock (Eq, Show)
+    , url :: Text
+    , jobs :: [Check]
+    }
+    deriving stock (Eq, Show)

@@ -303,6 +303,7 @@
           hsPkgs.cabal-install
           hsPkgs.haskell-language-server
           hsPkgs.cabal-gild
+          hsPkgs.fourmolu
         ];
         buildInputs = [pkgs.adwaita-icon-theme];
         shellHook = ''

@@ -57,8 +57,13 @@ call query = do
         else do
             let
                 inside = T.takeWhile (/= '}') (T.drop (T.length "(input: {") after)
-                pairs = [(T.strip k, T.strip (T.drop 1 v)) | part <- T.splitOn "," inside, let
-                                                                                            (k, v) = T.breakOn ":" part, not (T.null (T.strip k))]
+                pairs =
+                    [ (T.strip k, T.strip (T.drop 1 v))
+                    | part <- T.splitOn "," inside
+                    , let
+                        (k, v) = T.breakOn ":" part
+                    , not (T.null (T.strip k))
+                    ]
             Just (name, pairs)
 
 -- | The input type a mutation takes.

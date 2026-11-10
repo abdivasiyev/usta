@@ -32,8 +32,13 @@ conforms spec w = do
     let
         base = text (field "basePath" spec)
         wanted = fromMaybe w.path (T.stripPrefix base w.path)
-        templates = [(t, v) | (k, v) <- objectPairs (field "paths" spec), let
-                                                                            t = Key.toText k, fits (segments t) (segments wanted)]
+        templates =
+            [ (t, v)
+            | (k, v) <- objectPairs (field "paths" spec)
+            , let
+                t = Key.toText k
+            , fits (segments t) (segments wanted)
+            ]
     (template, item) <- case sortOn (Down . literals . fst) templates of
         best : _ -> Right best
         [] -> Left ("no such path: " <> wanted)

@@ -133,8 +133,16 @@ draw measure diagram = do
             natural <- for pieces (piece depth)
             let
                 n = fromMaybe (max 1 (sum (map spanOf pieces))) cols
-                cellW = maximum ((room - gap * fromIntegral (n - 1)) / fromIntegral n : 60 : [(l.size.w - gap * fromIntegral (k - 1)) / fromIntegral k | (p, Just l) <- zip pieces natural, let
-                                                                                                                                                                                                k = min n (spanOf p)])
+                cellW =
+                    maximum
+                        ( (room - gap * fromIntegral (n - 1)) / fromIntegral n
+                            : 60
+                            : [ (l.size.w - gap * fromIntegral (k - 1)) / fromIntegral k
+                              | (p, Just l) <- zip pieces natural
+                              , let
+                                    k = min n (spanOf p)
+                              ]
+                        )
                 placed = place n (zip pieces natural)
                 rows = maximum (0 : [r + 1 | (_, r, _, _) <- placed])
                 rowH r = maximum (0 : [l.size.h | (_, r', _, Just l) <- placed, r' == r])

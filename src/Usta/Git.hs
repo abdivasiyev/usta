@@ -260,8 +260,14 @@ graph path scope firstParent skip n = do
                             , author = author
                             , at = t
                             , subject = subject
-                            , refs = [r | d <- map T.strip (T.splitOn "," decorations), let
-                                                                                            r = maybe d id (T.stripPrefix "HEAD -> " d), not (T.null r), r /= "HEAD"]
+                            , refs =
+                                [ r
+                                | d <- map T.strip (T.splitOn "," decorations)
+                                , let
+                                    r = maybe d id (T.stripPrefix "HEAD -> " d)
+                                , not (T.null r)
+                                , r /= "HEAD"
+                                ]
                             }
                         ]
             _ -> pure []

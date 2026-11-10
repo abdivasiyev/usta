@@ -217,8 +217,12 @@ new content model = do
                     | asked /= term = [("On the forges · searching…", [])]
                     | otherwise = case answer of
                         Nothing -> [("On the forges · searching…", [])]
-                        Just found -> [("On the forges", xs) | let
-                                                                xs = [i | i <- found, maybe True (== i.kind) kind, (i.title, i.detail) `notElem` cached], not (null xs)]
+                        Just found ->
+                            [ ("On the forges", xs)
+                            | let
+                                xs = [i | i <- found, maybe True (== i.kind) kind, (i.title, i.detail) `notElem` cached]
+                            , not (null xs)
+                            ]
                 local = [("Link", [i]) | Just i <- [m.link (T.strip text)]] <> sections selected (parseQuery text) m
                 cached = [(i.title, i.detail) | (_, xs) <- local, i <- xs]
             rows <- fmap concat $ forM (local <> forgeSection) $ \(name, xs) -> do

@@ -142,7 +142,11 @@ draw measure m = do
                         | otherwise -> [Rect {at = Point l top, size = z, radius = z.h / 2, fill = Just fill', edge = Just (pen line' 1.4)}]
             in
                 body <> [Text {at = c, text = t.tree.label, font = if null t.kids then regular 12 else bold 13, color = Ink, anchor = Middle}]
-        star c z = [Point (c.x + (z.w / 2 + bump i) * cos a) (c.y + (z.h / 2 + bump i) * sin a) | i <- [0 .. 23 :: Int], let
-                                                                                                                            a = 2 * pi * fromIntegral i / 24]
+        star c z =
+            [ Point (c.x + (z.w / 2 + bump i) * cos a) (c.y + (z.h / 2 + bump i) * sin a)
+            | i <- [0 .. 23 :: Int]
+            , let
+                a = 2 * pi * fromIntegral i / 24
+            ]
             where
                 bump i = if even i then 6 else -2

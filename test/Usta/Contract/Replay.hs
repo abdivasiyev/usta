@@ -249,8 +249,13 @@ gh args input = do
         code = case map B8.words ls of
             (_ : c : _) : _ -> maybe 500 fst (B8.readInt c)
             _ -> 500
-        hs = [(CI.mk k, B8.dropWhile (== ' ') (B.drop 1 v)) | l <- drop 1 ls, let
-                                                                                (k, v) = B8.break (== ':') l, not (B.null v)]
+        hs =
+            [ (CI.mk k, B8.dropWhile (== ' ') (B.drop 1 v))
+            | l <- drop 1 ls
+            , let
+                (k, v) = B8.break (== ':') l
+            , not (B.null v)
+            ]
     pure (code, [h | h@(k, _) <- hs, CI.foldedCase k `elem` ["content-type", "etag", "link"]], BL.fromStrict rest)
     where
         breakOnBlank s = case B.breakSubstring "\r\n\r\n" s of

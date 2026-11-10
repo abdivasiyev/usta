@@ -110,8 +110,13 @@ parse source = go (drop 1 lines') [Open Nothing []] (C4 Nothing [] [] 4 2)
                 fields = map T.strip (splitArgs (T.dropEnd 1 inner))
                 isNamed f = "$" `T.isPrefixOf` f
                 plain = [unquote f | f <- fields, not (isNamed f)]
-                named = [(T.drop 1 (T.strip k), unquote (T.strip (T.drop 1 v))) | f <- fields, isNamed f, let
-                                                                                                            (k, v) = T.breakOn "=" f]
+                named =
+                    [ (T.drop 1 (T.strip k), unquote (T.strip (T.drop 1 v)))
+                    | f <- fields
+                    , isNamed f
+                    , let
+                        (k, v) = T.breakOn "=" f
+                    ]
             in
                 (T.strip name, plain, named)
         splitArgs t
@@ -217,8 +222,15 @@ draw measure c4 = do
                     in
                         (y + h + gapY, acc <> zipWith (\x l -> shift x y l) xs row)
                 (bottom, placed) = foldl placeRow (0, []) rows
-                width = maximum (0 : [x | row <- rows, let
-                                                        x = sum [l.size.w + gapX | l <- row] - gapX])
+                width =
+                    maximum
+                        ( 0
+                            : [ x
+                              | row <- rows
+                              , let
+                                    x = sum [l.size.w + gapX | l <- row] - gapX
+                              ]
+                        )
             pure Laid {framed = False, size = Size width (max 0 (bottom - gapY)), items = concatMap (.items) placed, spots = concatMap (.spots) placed}
         gapX = 136
         gapY = 72

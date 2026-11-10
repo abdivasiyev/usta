@@ -859,8 +859,12 @@ matches rule name = case T.splitOn "*" rule of
 unDraft :: Text -> Text
 unDraft title = T.stripStart (go (T.stripStart title))
     where
-        go t = case [rest | p <- ["wip:", "[wip]"], let
-                                                        (h, rest) = T.splitAt (T.length p) t, T.toLower h == p] of
+        go t = case [ rest
+                    | p <- ["wip:", "[wip]"]
+                    , let
+                        (h, rest) = T.splitAt (T.length p) t
+                    , T.toLower h == p
+                    ] of
             rest : _ -> rest
             [] -> t
 

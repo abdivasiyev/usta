@@ -512,8 +512,11 @@ new actions panels m = do
                 := T.intercalate
                     " · "
                     ( [counted (length open') "open"]
-                        <> [counted n "resolved" | let
-                                                    n = length [() | (_, o, d) <- placed, not o, d.resolved], n > 0]
+                        <> [ counted n "resolved"
+                           | let
+                                n = length [() | (_, o, d) <- placed, not o, d.resolved]
+                           , n > 0
+                           ]
                         <> [counted (length [() | (_, o, _) <- placed, o]) "outdated" | any (\(_, o, _) -> o) placed]
                         <> [counted newOnes (if newOnes == 1 then "new reply" else "new replies") <> " since your last review" | newOnes > 0]
                     )
@@ -672,10 +675,16 @@ fileRow f markBox threads' = do
         opened = length [() | (o, d) <- threads', not o, not d.resolved]
         parts =
             [T.pack (show opened) <> " open" | opened > 0]
-                <> [T.pack (show n) <> " resolved" | let
-                                                        n = length [() | (o, d) <- threads', not o, d.resolved], n > 0]
-                <> [T.pack (show n) <> " outdated" | let
-                                                        n = length [() | (o, _) <- threads', o], n > 0]
+                <> [ T.pack (show n) <> " resolved"
+                   | let
+                        n = length [() | (o, d) <- threads', not o, d.resolved]
+                   , n > 0
+                   ]
+                <> [ T.pack (show n) <> " outdated"
+                   | let
+                        n = length [() | (o, _) <- threads', o]
+                   , n > 0
+                   ]
     unless (null parts) $ label (T.intercalate " · " parts) ["muted", "tiny"] >>= #append names
     #append content names
     label ("+" <> count isAdded) ["mono", "small", "added"] >>= #append content

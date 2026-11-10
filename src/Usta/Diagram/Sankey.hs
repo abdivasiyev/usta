@@ -56,8 +56,15 @@ draw _ s = pure (scene 12 (bands <> boxes <> labels))
         gap = 12 :: Double
         inColumn c = [n | n <- names, colOf n == c]
         scale = minimum [(height - gap * fromIntegral (length (inColumn c) - 1)) / max 0.0001 (sum (map through (inColumn c))) | c <- [0 .. columns]]
-        tops = Map.fromList (concat [zip ns (scanl (\y n -> y + through n * scale + gap) 0 ns) | c <- [0 .. columns], let
-                                                                                                                        ns = inColumn c])
+        tops =
+            Map.fromList
+                ( concat
+                    [ zip ns (scanl (\y n -> y + through n * scale + gap) 0 ns)
+                    | c <- [0 .. columns]
+                    , let
+                        ns = inColumn c
+                    ]
+                )
         xOf n = fromIntegral (colOf n) * 200
         nodeW = 14
         colorIx n = length (takeWhile (/= n) names)
@@ -71,8 +78,12 @@ draw _ s = pure (scene 12 (bands <> boxes <> labels))
                 y0 = tops Map.! a + leaving Map.! (a, b)
                 y1 = tops Map.! b + entering Map.! (a, b)
                 h = v * scale
-                curve ya yb = [Point (x0 + (x1 - x0) * t) (ya + (yb - ya) * (3 * t * t - 2 * t * t * t)) | k <- [0 .. 20 :: Int], let
-                                                                                                                                    t = fromIntegral k / 20]
+                curve ya yb =
+                    [ Point (x0 + (x1 - x0) * t) (ya + (yb - ya) * (3 * t * t - 2 * t * t * t))
+                    | k <- [0 .. 20 :: Int]
+                    , let
+                        t = fromIntegral k / 20
+                    ]
               in
                 Polygon {points = curve y0 y1 <> reverse (curve (y0 + h) (y1 + h)), fill = Just (Tint (colorIx a)), edge = Nothing}
             | (a, b, v) <- s.flows

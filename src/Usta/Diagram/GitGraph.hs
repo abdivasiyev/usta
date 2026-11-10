@@ -184,5 +184,10 @@ draw measure g = do
                 , let
                     y = 30 + fromIntegral (lane b) * 50
                 ]
-        ids = [Text {at = Point p.x (p.y + 18), text = c.key, font = regular 10, color = Muted, anchor = Middle} | c <- g.commits, c.shown, let
-                                                                                                                                                p = pointOf c]
+        ids =
+            [ Text {at = Point p.x (p.y + 18), text = c.key, font = regular 10, color = Muted, anchor = Middle}
+            | c <- g.commits
+            , c.shown
+            , let
+                p = pointOf c
+            ]

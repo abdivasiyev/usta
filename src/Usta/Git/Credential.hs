@@ -52,8 +52,13 @@ parseRequest input = do
             login <- field "username" >>= either (const Nothing) Just . parse
             pure Request {host = host, login = login}
     where
-        pairs = [(k, T.drop 1 v) | line <- T.lines input, let
-                                                            (k, v) = T.breakOn "=" line, not (T.null v)]
+        pairs =
+            [ (k, T.drop 1 v)
+            | line <- T.lines input
+            , let
+                (k, v) = T.breakOn "=" line
+            , not (T.null v)
+            ]
         field key = lookup key pairs
 
 {- | The answer to @get@: the user and the token, or nothing when usta has

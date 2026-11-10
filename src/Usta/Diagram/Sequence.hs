@@ -116,8 +116,13 @@ note line =
 -- | "A->>+B: text" and every arrow Mermaid has.
 message :: Text -> Either Text Event
 message line =
-    case [(a, T.drop (T.length arrow) rest, arrow) | arrow <- arrows, let
-                                                                        (a, rest) = T.breakOn arrow spec, not (T.null rest), not (T.null (T.strip a))] of
+    case [ (a, T.drop (T.length arrow) rest, arrow)
+         | arrow <- arrows
+         , let
+            (a, rest) = T.breakOn arrow spec
+         , not (T.null rest)
+         , not (T.null (T.strip a))
+         ] of
         (a, b, arrow) : _ ->
             let
                 (sign, target) = case T.uncons (T.strip b) of

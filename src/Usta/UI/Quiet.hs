@@ -1,10 +1,12 @@
--- | Forge calls that show their own progress, as a button's spinner or a
--- conversation drawn again in place: while one runs, the window's thin
--- activity bar stays away, so the page does not flicker for it.
+{- | Forge calls that show their own progress, as a button's spinner or a
+conversation drawn again in place: while one runs, the window's thin
+activity bar stays away, so the page does not flicker for it.
+-}
 module Usta.UI.Quiet
-  ( quietly
-  , hushed
-  ) where
+    ( quietly
+    , hushed
+    )
+where
 
 import Control.Exception (bracket_)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)

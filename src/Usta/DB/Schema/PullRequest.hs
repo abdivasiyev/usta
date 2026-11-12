@@ -3,14 +3,16 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | The @pull_requests@ table: the pull requests each account has synced.
--- The host comes from the account.
+{- | The @pull_requests@ table: the pull requests each account has synced.
+The host comes from the account.
+-}
 module Usta.DB.Schema.PullRequest
-  ( PullRequest (..)
-  , PullRequestId
-  , EntityField (..)
-  , Unique (..)
-  ) where
+    ( PullRequest (..)
+    , PullRequestId
+    , EntityField (..)
+    , Unique (..)
+    )
+where
 
 import Data.Kind (Type)
 import Data.Text (Text)
@@ -28,8 +30,8 @@ import Usta.Types.RepoName (RepoName)
 -- 'discoverEntities' passes the entities already in scope (the accounts
 -- table), so the account reference becomes a foreign key.
 share
-  [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
-  [persistLowerCase|
+    [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
+    [persistLowerCase|
 PullRequest sql=pull_requests
     accountId     AccountId OnDeleteCascade
     repo          RepoName

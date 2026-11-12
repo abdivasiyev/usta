@@ -1,10 +1,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 
--- | The whole cache schema: every table under "Usta.DB.Schema", migrated
--- together. Code that reads or writes a table imports that table's module.
+{- | The whole cache schema: every table under "Usta.DB.Schema", migrated
+together. Code that reads or writes a table imports that table's module.
+-}
 module Usta.DB.Schema
-  ( migrateAll
-  ) where
+    ( migrateAll
+    )
+where
 
 import Database.Persist.Sql (Migration)
 import Database.Persist.TH (discoverEntities, migrateModels)

@@ -3,14 +3,16 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | The @issue_labels@ table: the labels on an issue, one row each.
--- Deleted with the issue.
+{- | The @issue_labels@ table: the labels on an issue, one row each.
+Deleted with the issue.
+-}
 module Usta.DB.Schema.IssueLabel
-  ( IssueLabel (..)
-  , IssueLabelId
-  , EntityField (..)
-  , Unique (..)
-  ) where
+    ( IssueLabel (..)
+    , IssueLabelId
+    , EntityField (..)
+    , Unique (..)
+    )
+where
 
 import Data.Kind (Type)
 import Data.Text (Text)
@@ -23,8 +25,8 @@ import Usta.Types.Label (Color)
 -- 'discoverEntities' passes the entities already in scope (the issues
 -- table), so the reference becomes a foreign key.
 share
-  [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
-  [persistLowerCase|
+    [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
+    [persistLowerCase|
 IssueLabel sql=issue_labels
     issueId  IssueId OnDeleteCascade
     name     Text

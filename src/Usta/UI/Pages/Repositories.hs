@@ -1,29 +1,30 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 
--- | Repositories across every forge: a filterable list on the left, the
--- selected repository's overview on the right.
+{- | Repositories across every forge: a filterable list on the left, the
+selected repository's overview on the right.
+-}
 module Usta.UI.Pages.Repositories
-  ( Commit (..)
-  , Repository (..)
-  , fromRepository
-  , Actions (..)
-  , Tab (..)
-  , ChooseMirror
-  , Origins (..)
-  , LookUpOrigins
-  , Contents (..)
-  , LoadContents
-  , sample
-  , new
-  , css
-  ) where
+    ( Commit (..)
+    , Repository (..)
+    , fromRepository
+    , Actions (..)
+    , Tab (..)
+    , ChooseMirror
+    , Origins (..)
+    , LookUpOrigins
+    , Contents (..)
+    , LoadContents
+    , sample
+    , new
+    , css
+    )
+where
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, displayException, try)
 import Control.Monad (forM, forM_, void, when)
-import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)))
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
@@ -31,95 +32,102 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import System.Directory (getHomeDirectory)
 import System.FilePath ((</>))
-import qualified Data.Text as T
-import qualified GI.Gio as Gio
-import qualified GI.GLib as GLib
-import qualified GI.Gtk as Gtk
-import qualified GI.Pango as Pango
 
-import qualified Usta.UI.Components.Choices as Choices
-import qualified Usta.UI.Components.BranchPicker as BranchPicker
-import Usta.UI.Format (clock)
-import qualified Usta.UI.Components.Button as Button
-import qualified Usta.UI.Components.Card as Card
-import qualified Usta.UI.Components.Markdown as Markdown
-import Usta.UI.Pages.RepositoryFiles (linkTarget)
-import qualified Usta.UI.Components.Forge as Forge
-import qualified Usta.UI.Components.SearchField as SearchField
-import qualified Usta.UI.Components.Segmented as Segmented
-import qualified Usta.UI.Components.Skeleton as Skeleton
-import qualified Usta.UI.Platform as Platform
-import Usta.UI.Page (Page (..), refill)
-import Usta.UI.Style (Tone (..))
-import qualified Usta.Git as Git
-import Usta.Types.Mirror (Choice (..), Transport (..))
+import Data.GI.Base qualified as GI
+import Data.Text qualified as T
+import GI.GLib qualified as GLib
+import GI.Gio qualified as Gio
+import GI.Gtk qualified as Gtk
+import GI.Pango qualified as Pango
+
 import Usta.Types.Branch (Branch (..), Tag)
+import Usta.Types.Mirror (Choice (..), Transport (..))
 import Usta.Types.Parse (unparse)
-import qualified Usta.Types.Repository as R
-import qualified Usta.Types.Link as Link
+import Usta.UI.Format (clock)
+import Usta.UI.Page (Page (..), refill)
+import Usta.UI.Pages.RepositoryFiles (linkTarget)
+import Usta.UI.Style (Tone (..))
+
+import Usta.Git qualified as Git
+import Usta.Types.Link qualified as Link
+import Usta.Types.Repository qualified as R
+import Usta.UI.Components.BranchPicker qualified as BranchPicker
+import Usta.UI.Components.Button qualified as Button
+import Usta.UI.Components.Card qualified as Card
+import Usta.UI.Components.Choices qualified as Choices
+import Usta.UI.Components.Forge qualified as Forge
+import Usta.UI.Components.Markdown qualified as Markdown
+import Usta.UI.Components.SearchField qualified as SearchField
+import Usta.UI.Components.Segmented qualified as Segmented
+import Usta.UI.Components.Skeleton qualified as Skeleton
+import Usta.UI.Platform qualified as Platform
 
 type Commit :: Type
 data Commit = Commit
-  { hash :: Text
-  , message :: Text
-  , age :: Text
-  }
+    { hash :: Text
+    , message :: Text
+    , age :: Text
+    }
 
 -- | The README, already parsed from Markdown into the blocks we show.
-
 type Repository :: Type
 data Repository = Repository
-  { forge :: Forge.Kind
-  , host :: Text
-  , name :: Text
+    { forge :: Forge.Kind
+    , host :: Text
+    , name :: Text
     -- ^ Full name, e.g. "abdivasiyev/usta".
-  , description :: Text
-  , pullRequests :: Int
-  , issues :: Int
-  , defaultBranch :: Text
-  , mirror :: (Tone, Text)
+    , description :: Text
+    , pullRequests :: Int
+    , issues :: Int
+    , defaultBranch :: Text
+    , mirror :: (Tone, Text)
     -- ^ State of the local mirror, e.g. (Success, "Up to date").
-  , mirrorDetail :: Maybe Text
+    , mirrorDetail :: Maybe Text
     -- ^ More about that state, such as why a fetch failed.
-  , canMirror :: Bool
-    -- ^ Offers "Mirror…": the repository has no mirror yet, or its mirror
-    -- failed.
-  , recentCommits :: [Commit]
-  , readme :: Text
+    , canMirror :: Bool
+    {- ^ Offers "Mirror…": the repository has no mirror yet, or its mirror
+    failed.
+    -}
+    , recentCommits :: [Commit]
+    , readme :: Text
     -- ^ The README's Markdown; empty when there is none, or until loaded.
-  }
+    }
 
--- | @onNewIssue@ and @onNewPullRequest@ run for the header buttons, with the
--- repository shown.
--- | The selected repository stays selected when the list is updated; the
--- first one is selected when it is gone.
--- | Records the user's answer for a repository's mirror; 'Left' says why
--- it did not work. Runs off the GTK main thread, since it asks the forge.
+{- | @onNewIssue@ and @onNewPullRequest@ run for the header buttons, with the
+repository shown.
+| The selected repository stays selected when the list is updated; the
+first one is selected when it is gone.
+| Records the user's answer for a repository's mirror; 'Left' says why
+it did not work. Runs off the GTK main thread, since it asks the forge.
+-}
 type ChooseMirror :: Type
 type ChooseMirror = Repository -> Choice -> IO (Either Text ())
 
--- | Where a mirror of the repository would clone from over each transport,
--- or why it cannot, and the folder mirrors are kept in.
+{- | Where a mirror of the repository would clone from over each transport,
+or why it cannot, and the folder mirrors are kept in.
+-}
 type Origins :: Type
 data Origins = Origins
-  { https :: Either Text Text
-  , ssh :: Either Text Text
-  , keptIn :: Text
-  }
+    { https :: Either Text Text
+    , ssh :: Either Text Text
+    , keptIn :: Text
+    }
 
--- | Asks the forge for 'Origins'; 'Left' says why it could not. Runs off
--- the GTK main thread.
+{- | Asks the forge for 'Origins'; 'Left' says why it could not. Runs off
+the GTK main thread.
+-}
 type LookUpOrigins :: Type
 type LookUpOrigins = Repository -> IO (Either Text Origins)
 
 -- | A repository's recent commits and README, loaded when it is shown.
 type Contents :: Type
 data Contents = Contents
-  { commits :: [Commit]
-  , readme :: Maybe (Text, Text)
-    -- ^ The README's file name and text.
-    -- ^ The README's file name and blocks.
-  }
+    { commits :: [Commit]
+    , readme :: Maybe (Text, Text)
+    {- ^ The README's file name and text.
+    ^ The README's file name and blocks.
+    -}
+    }
 
 -- | Loads 'Contents'; 'Left' says why not. Runs off the GTK main thread.
 type LoadContents :: Type
@@ -128,291 +136,340 @@ type LoadContents = Repository -> IO (Either Text Contents)
 -- | What the page's buttons and overview do.
 type Actions :: Type
 data Actions = Actions
-  { newIssue :: Repository -> IO ()
-  , newPullRequest :: Repository -> IO ()
-  , chooseMirror :: ChooseMirror
-  , lookUpOrigins :: LookUpOrigins
-  , loadContents :: LoadContents
-  , files :: Repository -> Maybe Text -> IO Gtk.Widget
-    -- ^ The Files tab, built the first time it is chosen, or again to
-    -- open a file or folder a README links to.
-  , tabs :: Repository -> [Tab]
-    -- ^ The tabs after Files, such as Pull requests; @defaultBranch@ is
-    -- the branch chosen in the picker.
-  , branches :: Repository -> Text -> IO (Either Text [Branch])
-    -- ^ With how far each is from the default branch given; off the main
-    -- thread.
-  , tags :: Repository -> IO (Either Text [Tag])
-  , starred :: Repository -> IO (Either Text Bool)
-  , setStarred :: Repository -> Bool -> IO (Either Text ())
+    { newIssue :: Repository -> IO ()
+    , newPullRequest :: Repository -> IO ()
+    , chooseMirror :: ChooseMirror
+    , lookUpOrigins :: LookUpOrigins
+    , loadContents :: LoadContents
+    , files :: Repository -> Maybe Text -> IO Gtk.Widget
+    {- ^ The Files tab, built the first time it is chosen, or again to
+    open a file or folder a README links to.
+    -}
+    , tabs :: Repository -> [Tab]
+    {- ^ The tabs after Files, such as Pull requests; @defaultBranch@ is
+    the branch chosen in the picker.
+    -}
+    , branches :: Repository -> Text -> IO (Either Text [Branch])
+    {- ^ With how far each is from the default branch given; off the main
+    thread.
+    -}
+    , tags :: Repository -> IO (Either Text [Tag])
+    , starred :: Repository -> IO (Either Text Bool)
+    , setStarred :: Repository -> Bool -> IO (Either Text ())
     -- ^ Both off the main thread.
-  , pinned :: Repository -> IO Bool
-  , setPinned :: Repository -> Bool -> IO ()
+    , pinned :: Repository -> IO Bool
+    , setPinned :: Repository -> Bool -> IO ()
     -- ^ Pins it to the sidebar, or takes it off.
-  , fork :: Bool -> Repository -> Gtk.Widget -> IO ()
-    -- ^ Opens the Fork dialog over the button; 'True' before a pull
-    -- request, which then opens from the fork.
-  , canPush :: Repository -> IO (Either Text Bool)
+    , fork :: Bool -> Repository -> Gtk.Widget -> IO ()
+    {- ^ Opens the Fork dialog over the button; 'True' before a pull
+    request, which then opens from the fork.
+    -}
+    , canPush :: Repository -> IO (Either Text Bool)
     -- ^ Off the main thread.
-  , clone :: Repository -> Text -> FilePath -> IO (Either Text ())
-    -- ^ By url, into a new folder, on its default branch; off the main
-    -- thread.
-  , newRepository :: Gtk.Widget -> IO ()
+    , clone :: Repository -> Text -> FilePath -> IO (Either Text ())
+    {- ^ By url, into a new folder, on its default branch; off the main
+    thread.
+    -}
+    , newRepository :: Gtk.Widget -> IO ()
     -- ^ Opens the New repository dialog over the button.
-  , visit :: (Text, Text) -> IO (Either Text Repository)
-    -- ^ One that is not listed, by host and name, as a link opens it; off
-    -- the main thread.
-  }
+    , visit :: (Text, Text) -> IO (Either Text Repository)
+    {- ^ One that is not listed, by host and name, as a link opens it; off
+    the main thread.
+    -}
+    }
 
 -- | A tab after Files, built the first time it is chosen.
 type Tab :: Type
 data Tab = Tab
-  { title :: Text
+    { title :: Text
     -- ^ With its count, e.g. "Pull requests  3".
-  , build :: IO Gtk.Widget
-  , followsBranch :: Bool
+    , build :: IO Gtk.Widget
+    , followsBranch :: Bool
     -- ^ Shows the chosen branch, so the picker shows beside the tabs.
-  }
+    }
 
--- | The page, and what shows one repository (host and name), or a file
--- in it ("branch/path", "#L12" for a line) on its Files tab.
+{- | The page, and what shows one repository (host and name), or a file
+in it ("branch/path", "#L12" for a line) on its Files tab.
+-}
 new :: Actions -> [Repository] -> IO (Page Repository, (Text, Text) -> Maybe Text -> IO ())
 new actions repositories = do
-  items <- newIORef repositories
-  -- Those opened by a link or a search, not synced: they stay listed.
-  visited <- newIORef []
-  page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
+    items <- newIORef repositories
+    -- Those opened by a link or a search, not synced: they stay listed.
+    visited <- newIORef []
+    page <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #hexpand := True]
 
-  detail <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+    detail <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
 
-  list <- GI.new Gtk.ListBox [ #selectionMode := Gtk.SelectionModeSingle
-                             , #cssClasses := ["u-repo-list"]
-                             ]
-  refill list repositoryRow repositories
+    list <-
+        GI.new
+            Gtk.ListBox
+            [ #selectionMode := Gtk.SelectionModeSingle
+            , #cssClasses := ["u-repo-list"]
+            ]
+    refill list repositoryRow repositories
 
-  listPane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                             , #widthRequest := 288
-                             , #hexpand := False
-                             , #cssClasses := ["u-repo-pane"]
-                             ]
-  selectedKey <- newIORef Nothing
-  -- What opens a file in the repository shown.
-  opener <- newIORef (const (pure ()))
-  -- A sync refills the list, which drops the selection for a moment and
-  -- selects the same repository again: its detail stays as it is, on the
-  -- tab, file and scroll position the user left it.
-  void $ GI.on list #rowSelected $ \selected -> forM_ selected $ \row -> do
-      index <- Gtk.listBoxRowGetIndex row
-      shown <- readIORef items
-      before <- readIORef selectedKey
-      when (index >= 0 && fromIntegral index < length shown && before /= Just (key (shown !! fromIntegral index))) $ do
-        let r = shown !! fromIntegral index
-        writeIORef selectedKey (Just (key r))
-        clear detail
-        GI.set listPane [#visible := True]
-        -- Every tab but Overview takes the list's room, as the design draws it.
-        (shown', openFile) <- repositoryDetail actions r (\wide -> GI.set listPane [#visible := not wide])
-        writeIORef opener openFile
-        #append detail shown'
-
-  (search, entry) <- SearchField.new SearchField.defaults
-    { SearchField.placeholder = "Filter repositories"
-    , SearchField.shortcut = Nothing
-    , SearchField.width = -1
-    }
-  -- The forge and the owner, a user or an organization, narrow the list
-  -- with the words; the owners are those on the forge chosen.
-  forges <- Choices.new "All forges"
-  owners <- Choices.new "All owners"
-  query <- newIORef ""
-  Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
-    q <- readIORef query
-    host <- Choices.chosen forges
-    owner <- Choices.chosen owners
-    index <- Gtk.listBoxRowGetIndex row
-    shown <- readIORef items
-    let r = shown !! fromIntegral index
-    pure (matches q r && maybe True (== r.host) host && maybe True (== ownerOf r) owner)
-  void $ GI.on entry #searchChanged $ do
-    text <- Gtk.editableGetText entry
-    writeIORef query (T.toLower text)
-    Gtk.listBoxInvalidateFilter list
-  let offerOwners = do
+    listPane <-
+        GI.new
+            Gtk.Box
+            [ #orientation := Gtk.OrientationVertical
+            , #widthRequest := 288
+            , #hexpand := False
+            , #cssClasses := ["u-repo-pane"]
+            ]
+    selectedKey <- newIORef Nothing
+    -- What opens a file in the repository shown.
+    opener <- newIORef (const (pure ()))
+    -- A sync refills the list, which drops the selection for a moment and
+    -- selects the same repository again: its detail stays as it is, on the
+    -- tab, file and scroll position the user left it.
+    void $ GI.on list #rowSelected $ \selected -> forM_ selected $ \row -> do
+        index <- Gtk.listBoxRowGetIndex row
         shown <- readIORef items
+        before <- readIORef selectedKey
+        when (index >= 0 && fromIntegral index < length shown && before /= Just (key (shown !! fromIntegral index))) $ do
+            let
+                r = shown !! fromIntegral index
+            writeIORef selectedKey (Just (key r))
+            clear detail
+            GI.set listPane [#visible := True]
+            -- Every tab but Overview takes the list's room, as the design draws it.
+            (shown', openFile) <- repositoryDetail actions r (\wide -> GI.set listPane [#visible := not wide])
+            writeIORef opener openFile
+            #append detail shown'
+
+    (search, entry) <-
+        SearchField.new
+            SearchField.defaults
+                { SearchField.placeholder = "Filter repositories"
+                , SearchField.shortcut = Nothing
+                , SearchField.width = -1
+                }
+    -- The forge and the owner, a user or an organization, narrow the list
+    -- with the words; the owners are those on the forge chosen.
+    forges <- Choices.new "All forges"
+    owners <- Choices.new "All owners"
+    query <- newIORef ""
+    Gtk.listBoxSetFilterFunc list $ Just $ \row -> do
+        q <- readIORef query
         host <- Choices.chosen forges
-        Choices.offer owners [ownerOf r | r <- shown, maybe True (== r.host) host]
-      offerAll = do
+        owner <- Choices.chosen owners
+        index <- Gtk.listBoxRowGetIndex row
         shown <- readIORef items
-        Choices.offer forges (map (.host) shown)
-        offerOwners
-  void $ GI.on forges (GI.PropertyNotify #selected) (const (offerOwners >> Gtk.listBoxInvalidateFilter list))
-  void $ GI.on owners (GI.PropertyNotify #selected) (const (Gtk.listBoxInvalidateFilter list))
-  offerAll
+        let
+            r = shown !! fromIntegral index
+        pure (matches q r && maybe True (== r.host) host && maybe True (== ownerOf r) owner)
+    void $ GI.on entry #searchChanged $ do
+        text <- Gtk.editableGetText entry
+        writeIORef query (T.toLower text)
+        Gtk.listBoxInvalidateFilter list
+    let
+        offerOwners = do
+            shown <- readIORef items
+            host <- Choices.chosen forges
+            Choices.offer owners [ownerOf r | r <- shown, maybe True (== r.host) host]
+        offerAll = do
+            shown <- readIORef items
+            Choices.offer forges (map (.host) shown)
+            offerOwners
+    void $ GI.on forges (GI.PropertyNotify #selected) (const (offerOwners >> Gtk.listBoxInvalidateFilter list))
+    void $ GI.on owners (GI.PropertyNotify #selected) (const (Gtk.listBoxInvalidateFilter list))
+    offerAll
 
-  searchBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["search-bar"]]
-  searchRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  GI.set search [#hexpand := True]
-  #append searchRow search
-  newButton <- Button.new Button.defaults {Button.label = Just "+ New", Button.small = True, Button.tooltip = Just "New repository"}
-  void $ GI.on newButton #clicked $ Gtk.toWidget newButton >>= actions.newRepository
-  #append searchRow newButton
-  #append searchBar searchRow
-  choices <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #homogeneous := True]
-  mapM_ (#append choices) [forges, owners]
-  #append searchBar choices
+    searchBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["search-bar"]]
+    searchRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+    GI.set search [#hexpand := True]
+    #append searchRow search
+    newButton <- Button.new Button.defaults {Button.label = Just "+ New", Button.small = True, Button.tooltip = Just "New repository"}
+    void $ GI.on newButton #clicked $ Gtk.toWidget newButton >>= actions.newRepository
+    #append searchRow newButton
+    #append searchBar searchRow
+    choices <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #homogeneous := True]
+    mapM_ (#append choices) [forges, owners]
+    #append searchBar choices
 
-  listScroll <- GI.new Gtk.ScrolledWindow [ #child := list
-                                          , #vexpand := True
-                                          , #hscrollbarPolicy := Gtk.PolicyTypeNever
-                                          ]
-  #append listPane searchBar
-  #append listPane listScroll
+    listScroll <-
+        GI.new
+            Gtk.ScrolledWindow
+            [ #child := list
+            , #vexpand := True
+            , #hscrollbarPolicy := Gtk.PolicyTypeNever
+            ]
+    #append listPane searchBar
+    #append listPane listScroll
 
-  #append page listPane
-  #append page detail
+    #append page listPane
+    #append page detail
 
-  let select = do
-        shown <- readIORef items
-        wanted <- readIORef selectedKey
-        let index = maybe 0 (\k -> length (takeWhile ((/= k) . key) shown)) wanted
-            at = if index < length shown then index else 0
-        row <- Gtk.listBoxGetRowAtIndex list (fromIntegral at)
-        Gtk.listBoxSelectRow list row
-  select
-  let list' synced = do
-        others <- readIORef visited
-        pure (synced <> [v | v <- others, key v `notElem` map key synced])
-      showAt wanted file = do
-        shown <- readIORef items
-        forM_ (lookup wanted (zip (map key shown) [0 :: Int ..])) $ \i -> do
-          Gtk.listBoxGetRowAtIndex list (fromIntegral i) >>= Gtk.listBoxSelectRow list
-          forM_ file $ \place -> readIORef opener >>= ($ place)
-      -- One not listed is asked of its forge first.
-      show' wanted file = do
-        shown <- readIORef items
-        if wanted `elem` map key shown then showAt wanted file else do
-          clear detail
-          GI.new Gtk.Label [#label := "Opening " <> snd wanted <> "…", #cssClasses := ["muted"], #vexpand := True] >>= #append detail
-          void $ forkIO $ do
-            found <- either (\(e :: SomeException) -> Left (T.pack (displayException e))) id <$> try (actions.visit wanted)
-            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-              case found of
-                Right r -> do
-                  modifyIORef' visited (r :)
-                  synced <- readIORef items
-                  all' <- list' (filter ((/= key r) . key) synced)
-                  writeIORef items all'
-                  refill list repositoryRow all'
-                  offerAll
-                  showAt wanted file
-                Left problem -> do
-                  clear detail
-                  GI.new Gtk.Label [ #label := "Could not open " <> snd wanted <> ": " <> problem, #wrap := True
-                                   , #cssClasses := ["muted"], #vexpand := True ] >>= #append detail
-              pure False
-  pure . (, show') $ Page
-    { widget = page
-    , update = \synced -> do
-        shown <- list' synced
-        writeIORef items shown
-        refill list repositoryRow shown
-        offerAll
-        when (null shown) $ clear detail >> writeIORef selectedKey Nothing
-        select
-    }
-  where
-    key r = (r.host, r.name)
+    let
+        select = do
+            shown <- readIORef items
+            wanted <- readIORef selectedKey
+            let
+                index = maybe 0 (\k -> length (takeWhile ((/= k) . key) shown)) wanted
+                at = if index < length shown then index else 0
+            row <- Gtk.listBoxGetRowAtIndex list (fromIntegral at)
+            Gtk.listBoxSelectRow list row
+    select
+    let
+        list' synced = do
+            others <- readIORef visited
+            pure (synced <> [v | v <- others, key v `notElem` map key synced])
+        showAt wanted file = do
+            shown <- readIORef items
+            forM_ (lookup wanted (zip (map key shown) [0 :: Int ..])) $ \i -> do
+                Gtk.listBoxGetRowAtIndex list (fromIntegral i) >>= Gtk.listBoxSelectRow list
+                forM_ file $ \place -> readIORef opener >>= ($ place)
+        -- One not listed is asked of its forge first.
+        show' wanted file = do
+            shown <- readIORef items
+            if wanted `elem` map key shown
+                then showAt wanted file
+                else do
+                    clear detail
+                    GI.new Gtk.Label [#label := "Opening " <> snd wanted <> "…", #cssClasses := ["muted"], #vexpand := True] >>= #append detail
+                    void $ forkIO $ do
+                        found <- either (\(e :: SomeException) -> Left (T.pack (displayException e))) id <$> try (actions.visit wanted)
+                        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                            case found of
+                                Right r -> do
+                                    modifyIORef' visited (r :)
+                                    synced <- readIORef items
+                                    all' <- list' (filter ((/= key r) . key) synced)
+                                    writeIORef items all'
+                                    refill list repositoryRow all'
+                                    offerAll
+                                    showAt wanted file
+                                Left problem -> do
+                                    clear detail
+                                    GI.new
+                                        Gtk.Label
+                                        [ #label := "Could not open " <> snd wanted <> ": " <> problem
+                                        , #wrap := True
+                                        , #cssClasses := ["muted"]
+                                        , #vexpand := True
+                                        ]
+                                        >>= #append detail
+                            pure False
+    pure . (,show')
+        $ Page
+            { widget = page
+            , update = \synced -> do
+                shown <- list' synced
+                writeIORef items shown
+                refill list repositoryRow shown
+                offerAll
+                when (null shown) $ clear detail >> writeIORef selectedKey Nothing
+                select
+            }
+    where
+        key r = (r.host, r.name)
 
--- | The Overview, Files and later tabs over the one chosen, with the
--- branch picker; @onWide@ runs with whether a tab other than Overview is
--- shown. Choosing a branch draws the tabs again for it, on the same tab.
+{- | The Overview, Files and later tabs over the one chosen, with the
+branch picker; @onWide@ runs with whether a tab other than Overview is
+shown. Choosing a branch draws the tabs again for it, on the same tab.
+-}
 repositoryDetail :: Actions -> Repository -> (Bool -> IO ()) -> IO (Gtk.Box, Text -> IO ())
 repositoryDetail actions r onWide = do
-  holder <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
-  let drawWith file branch tab = do
-        clear holder
-        onBranch actions r {defaultBranch = branch} r.defaultBranch tab file (drawWith Nothing) onWide >>= #append holder
-  drawWith Nothing r.defaultBranch "overview"
-  -- A link's "feat/x/src/A.hs" splits on the branches the repository has.
-  let openPlace place = void $ forkIO $ do
-        known <- either (const []) (map (.name)) <$> actions.branches r r.defaultBranch
-        let (branch, path) = Link.splitPlace known place
-        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ drawWith (Just path) branch "overview" >> pure False
-  pure (holder, openPlace)
+    holder <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+    let
+        drawWith file branch tab = do
+            clear holder
+            onBranch actions r {defaultBranch = branch} r.defaultBranch tab file (drawWith Nothing) onWide >>= #append holder
+    drawWith Nothing r.defaultBranch "overview"
+    -- A link's "feat/x/src/A.hs" splits on the branches the repository has.
+    let
+        openPlace place = void $ forkIO $ do
+            known <- either (const []) (map (.name)) <$> actions.branches r r.defaultBranch
+            let
+                (branch, path) = Link.splitPlace known place
+            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ drawWith (Just path) branch "overview" >> pure False
+    pure (holder, openPlace)
 
--- | The tabs for @r@ on its 'defaultBranch', the one chosen; @realDefault@
--- is the repository's own; @startTab@ is shown first, or the Files tab
--- on @startFile@.
+{- | The tabs for @r@ on its 'defaultBranch', the one chosen; @realDefault@
+is the repository's own; @startTab@ is shown first, or the Files tab
+on @startFile@.
+-}
 onBranch :: Actions -> Repository -> Text -> Text -> Maybe Text -> (Text -> Text -> IO ()) -> (Bool -> IO ()) -> IO Gtk.Box
 onBranch actions r realDefault startTab startFile redraw onWide = do
-  box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
-  tabBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
-  stack <- GI.new Gtk.Stack [ #vexpand := True
-                            , #hexpand := True
-                            , #transitionType := Gtk.StackTransitionTypeCrossfade
-                            , #transitionDuration := 150
-                            ]
-  overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
-  -- The README's links to files open them in the Files tab, once it exists.
-  openFiles <- newIORef (const (pure ()))
-  overview actions r realDefault (\path -> readIORef openFiles >>= ($ path)) >>= \o -> GI.set overviewScroll [#child := o]
-  void $ Gtk.stackAddNamed stack overviewScroll (Just "overview")
-  -- Every other tab is built the first time it is chosen.
-  let later = Tab {title = "Files", build = actions.files r Nothing, followsBranch = True} : actions.tabs r
-  slots <- forM (zip [1 :: Int ..] later) $ \(i, tab) -> do
-    slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
-    void $ Gtk.stackAddNamed stack slot (Just (T.pack (show i)))
-    built <- newIORef False
-    pure (slot, built, tab)
-  current <- newIORef startTab
-  c <- clock
-  picker <- BranchPicker.new BranchPicker.Picker
-    { shown = r.defaultBranch, defaultBranch = realDefault, clock = c
-    , branches = actions.branches r realDefault, tags = Just (actions.tags r)
-    , choose = \b -> readIORef current >>= redraw b
-    , note = "Overview, Files and Commits follow the branch"
-    }
-  GI.set picker [#hexpand := True, #halign := Gtk.AlignEnd, #valign := Gtk.AlignCenter]
-  let choose name = do
-        writeIORef current name
-        GI.set picker [#visible := name == "overview" || or [tab.followsBranch | (i, (_, _, tab)) <- zip [1 :: Int ..] slots, T.pack (show i) == name]]
-        forM_ (zip [1 :: Int ..] slots) $ \(i, (slot, built, tab)) -> when (T.pack (show i) == name) $ do
-          done <- readIORef built
-          when (not done) $ do
-            writeIORef built True
-            tab.build >>= #append slot
-        onWide (name /= "overview")
-        Gtk.stackSetVisibleChildName stack name
-  buttons <- forM (("Overview", "overview") : [(tab.title, T.pack (show i)) | (i, (_, _, tab)) <- zip [1 :: Int ..] slots]) $ \(text, name) -> do
-    b <- GI.new Gtk.ToggleButton [#label := text, #active := name == "overview"]
-    GI.set b [#name := name]
-    void $ GI.on b #toggled $ do
-      active <- GI.get b #active
-      when active (choose name)
-    #append tabBar b
-    pure b
-  case buttons of
-    first : rest -> forM_ rest $ \b -> GI.set b [#group := first]
-    [] -> pure ()
-  #append tabBar picker
-  -- Back on the tab that was shown before the branch changed.
-  forM_ buttons $ \b -> GI.get b #name >>= \n -> when (n == startTab && n /= "overview") (GI.set b [#active := True])
-  forM_ (take 1 slots) $ \(filesSlot, built, _) -> writeIORef openFiles $ \path -> do
-    clear filesSlot
-    writeIORef built True
-    actions.files r (Just path) >>= #append filesSlot
-    forM_ (take 1 (drop 1 buttons)) $ \b -> GI.set b [#active := True]
-  forM_ startFile $ \path -> readIORef openFiles >>= ($ path)
-  #append box tabBar
-  #append box stack
-  pure box
+    box <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #hexpand := True, #vexpand := True]
+    tabBar <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 4, #cssClasses := ["repo-tabs"]]
+    stack <-
+        GI.new
+            Gtk.Stack
+            [ #vexpand := True
+            , #hexpand := True
+            , #transitionType := Gtk.StackTransitionTypeCrossfade
+            , #transitionDuration := 150
+            ]
+    overviewScroll <- GI.new Gtk.ScrolledWindow [#hexpand := True, #vexpand := True]
+    -- The README's links to files open them in the Files tab, once it exists.
+    openFiles <- newIORef (const (pure ()))
+    overview actions r realDefault (\path -> readIORef openFiles >>= ($ path)) >>= \o -> GI.set overviewScroll [#child := o]
+    void $ Gtk.stackAddNamed stack overviewScroll (Just "overview")
+    -- Every other tab is built the first time it is chosen.
+    let
+        later = Tab {title = "Files", build = actions.files r Nothing, followsBranch = True} : actions.tabs r
+    slots <- forM (zip [1 :: Int ..] later) $ \(i, tab) -> do
+        slot <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #vexpand := True]
+        void $ Gtk.stackAddNamed stack slot (Just (T.pack (show i)))
+        built <- newIORef False
+        pure (slot, built, tab)
+    current <- newIORef startTab
+    c <- clock
+    picker <-
+        BranchPicker.new
+            BranchPicker.Picker
+                { shown = r.defaultBranch
+                , defaultBranch = realDefault
+                , clock = c
+                , branches = actions.branches r realDefault
+                , tags = Just (actions.tags r)
+                , choose = \b -> readIORef current >>= redraw b
+                , note = "Overview, Files and Commits follow the branch"
+                }
+    GI.set picker [#hexpand := True, #halign := Gtk.AlignEnd, #valign := Gtk.AlignCenter]
+    let
+        choose name = do
+            writeIORef current name
+            GI.set picker [#visible := name == "overview" || or [tab.followsBranch | (i, (_, _, tab)) <- zip [1 :: Int ..] slots, T.pack (show i) == name]]
+            forM_ (zip [1 :: Int ..] slots) $ \(i, (slot, built, tab)) -> when (T.pack (show i) == name) $ do
+                done <- readIORef built
+                when (not done) $ do
+                    writeIORef built True
+                    tab.build >>= #append slot
+            onWide (name /= "overview")
+            Gtk.stackSetVisibleChildName stack name
+    buttons <- forM (("Overview", "overview") : [(tab.title, T.pack (show i)) | (i, (_, _, tab)) <- zip [1 :: Int ..] slots]) $ \(text, name) -> do
+        b <- GI.new Gtk.ToggleButton [#label := text, #active := name == "overview"]
+        GI.set b [#name := name]
+        void $ GI.on b #toggled $ do
+            active <- GI.get b #active
+            when active (choose name)
+        #append tabBar b
+        pure b
+    case buttons of
+        first : rest -> forM_ rest $ \b -> GI.set b [#group := first]
+        [] -> pure ()
+    #append tabBar picker
+    -- Back on the tab that was shown before the branch changed.
+    forM_ buttons $ \b -> GI.get b #name >>= \n -> when (n == startTab && n /= "overview") (GI.set b [#active := True])
+    forM_ (take 1 slots) $ \(filesSlot, built, _) -> writeIORef openFiles $ \path -> do
+        clear filesSlot
+        writeIORef built True
+        actions.files r (Just path) >>= #append filesSlot
+        forM_ (take 1 (drop 1 buttons)) $ \b -> GI.set b [#active := True]
+    forM_ startFile $ \path -> readIORef openFiles >>= ($ path)
+    #append box tabBar
+    #append box stack
+    pure box
 
 -- | Removes everything in @box@.
 clear :: Gtk.Box -> IO ()
 clear box = Gtk.widgetGetFirstChild box >>= mapM_ (\w -> Gtk.boxRemove box w >> clear box)
 
--- | Case-insensitive match on the name or host; @q@ is already lowercase.
--- | "abdivasiyev" of "abdivasiyev/usta".
+{- | Case-insensitive match on the name or host; @q@ is already lowercase.
+| "abdivasiyev" of "abdivasiyev/usta".
+-}
 ownerOf :: Repository -> Text
 ownerOf r = T.takeWhile (/= '/') r.name
 
@@ -421,533 +478,622 @@ matches q r = q `T.isInfixOf` T.toLower r.name || q `T.isInfixOf` T.toLower r.ho
 
 repositoryRow :: Repository -> IO Gtk.Box
 repositoryRow r = do
-  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
-  nameLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  Forge.smallDot r.forge >>= #append nameLine
-  label r.name ["mono", "name"] >>= #append nameLine
-  #append row nameLine
-  label (T.intercalate " · " (r.host : counts r)) ["meta"] >>= #append row
-  pure row
+    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 4]
+    nameLine <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+    Forge.smallDot r.forge >>= #append nameLine
+    label r.name ["mono", "name"] >>= #append nameLine
+    #append row nameLine
+    label (T.intercalate " · " (r.host : counts r)) ["meta"] >>= #append row
+    pure row
 
 -- | "1 PR", "3 issues"; nothing for zero.
 counts :: Repository -> [Text]
 counts r =
-  [ plural r.pullRequests "PR" "PRs" | r.pullRequests > 0 ]
-  <> [ plural r.issues "issue" "issues" | r.issues > 0 ]
-  where
-    plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
+    [plural r.pullRequests "PR" "PRs" | r.pullRequests > 0]
+        <> [plural r.issues "issue" "issues" | r.issues > 0]
+    where
+        plural n one many = T.pack (show n) <> " " <> if n == 1 then one else many
 
--- | @follow@ opens a path the README links to.
--- | @realDefault@ is the repository's default branch; @r@ is on the one
--- chosen.
+{- | @follow@ opens a path the README links to.
+| @realDefault@ is the repository's default branch; @r@ is on the one
+chosen.
+-}
 overview :: Actions -> Repository -> Text -> (Text -> IO ()) -> IO Gtk.Box
 overview actions r realDefault follow = do
-  pane <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                         , #spacing := 20
-                         , #cssClasses := ["u-repo"]
-                         ]
+    pane <-
+        GI.new
+            Gtk.Box
+            [ #orientation := Gtk.OrientationVertical
+            , #spacing := 20
+            , #cssClasses := ["u-repo"]
+            ]
 
-  header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  titles <- GI.new Gtk.Box [ #orientation := Gtk.OrientationVertical
-                           , #spacing := 4
-                           , #hexpand := True
-                           ]
-  label r.host ["muted"] >>= #append titles
-  label r.name ["mono", "repo-name"] >>= #append titles
-  descriptionLabel <- label r.description ["description"]
-  GI.set descriptionLabel [#wrap := True]
-  #append titles descriptionLabel
-  #append header titles
-  newIssue <- Button.new Button.defaults { Button.label = Just "New issue" }
-  void $ GI.on newIssue #clicked (actions.newIssue r)
-  newPullRequest <- Button.new Button.defaults
-    { Button.label = Just "New pull request", Button.variant = Button.Primary }
-  -- Without the right to push, the changes go to a fork first.
-  void $ GI.on newPullRequest #clicked $ do
-    anchor <- Gtk.toWidget newPullRequest
-    GI.set newPullRequest [#sensitive := False]
+    header <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+    titles <-
+        GI.new
+            Gtk.Box
+            [ #orientation := Gtk.OrientationVertical
+            , #spacing := 4
+            , #hexpand := True
+            ]
+    label r.host ["muted"] >>= #append titles
+    label r.name ["mono", "repo-name"] >>= #append titles
+    descriptionLabel <- label r.description ["description"]
+    GI.set descriptionLabel [#wrap := True]
+    #append titles descriptionLabel
+    #append header titles
+    newIssue <- Button.new Button.defaults {Button.label = Just "New issue"}
+    void $ GI.on newIssue #clicked (actions.newIssue r)
+    newPullRequest <-
+        Button.new
+            Button.defaults
+                { Button.label = Just "New pull request"
+                , Button.variant = Button.Primary
+                }
+    -- Without the right to push, the changes go to a fork first.
+    void $ GI.on newPullRequest #clicked $ do
+        anchor <- Gtk.toWidget newPullRequest
+        GI.set newPullRequest [#sensitive := False]
+        void $ forkIO $ do
+            allowed <- either (\(_ :: SomeException) -> Right True) id <$> try (actions.canPush r)
+            void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                GI.set newPullRequest [#sensitive := True]
+                if allowed == Right False then actions.fork True r anchor else actions.newPullRequest r
+                pure False
+    -- Everything but the two new-item buttons is under "⋯".
+    items <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["menu"]]
+    menu <- GI.new Gtk.Popover [#child := items, #hasArrow := False, #cssClasses := ["u-repo-menu"]]
+    more <- Button.menu Button.defaults {Button.icon = Just "view-more-symbolic", Button.tooltip = Just "More"} menu
+    let
+        item text = do
+            b <- Button.new Button.defaults {Button.label = Just text, Button.variant = Button.Flat}
+            Gtk.widgetAddCssClass b "item"
+            Gtk.buttonGetChild b >>= mapM_ (`Gtk.widgetSetHalign` Gtk.AlignStart)
+            #append items b
+            pure b
+        -- An item that closes the menu and acts over the "⋯" button.
+        acting text act = do
+            b <- item text
+            void $ GI.on b #clicked $ Gtk.popoverPopdown menu >> Gtk.toWidget more >>= act
+    -- Star asks the forge; Pin is usta's own, for the sidebar.
+    star <- item "☆ Star"
+    GI.set star [#sensitive := False]
     void $ forkIO $ do
-      allowed <- either (\(_ :: SomeException) -> Right True) id <$> try (actions.canPush r)
-      void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-        GI.set newPullRequest [#sensitive := True]
-        if allowed == Right False then actions.fork True r anchor else actions.newPullRequest r
-        pure False
-  -- Everything but the two new-item buttons is under "⋯".
-  items <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #cssClasses := ["menu"]]
-  menu <- GI.new Gtk.Popover [#child := items, #hasArrow := False, #cssClasses := ["u-repo-menu"]]
-  more <- Button.menu Button.defaults {Button.icon = Just "view-more-symbolic", Button.tooltip = Just "More"} menu
-  let item text = do
-        b <- Button.new Button.defaults {Button.label = Just text, Button.variant = Button.Flat}
-        Gtk.widgetAddCssClass b "item"
-        Gtk.buttonGetChild b >>= mapM_ (`Gtk.widgetSetHalign` Gtk.AlignStart)
-        #append items b
-        pure b
-      -- An item that closes the menu and acts over the "⋯" button.
-      acting text act = do
-        b <- item text
-        void $ GI.on b #clicked $ Gtk.popoverPopdown menu >> Gtk.toWidget more >>= act
-  -- Star asks the forge; Pin is usta's own, for the sidebar.
-  star <- item "☆ Star"
-  GI.set star [#sensitive := False]
-  void $ forkIO $ do
-    known <- actions.starred r
-    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-      forM_ (either (const Nothing) Just known) $ \on -> GI.set star [#label := if on then "★ Unstar" else "☆ Star", #sensitive := True]
-      pure False
-  void $ GI.on star #clicked $ do
-    on <- (== Just "☆ Star") <$> GI.get star #label
-    Button.busy star ([] :: [Gtk.Button]) (if on then "Starring…" else "Unstarring…") (actions.setStarred r on) $ \case
-      Right () -> GI.set star [#label := if on then "★ Unstar" else "☆ Star"]
-      Left _ -> pure ()
-  pinnedNow <- actions.pinned r
-  pin <- item (if pinnedNow then "📌 Unpin" else "📌 Pin to the sidebar")
-  void $ GI.on pin #clicked $ do
-    on <- (/= Just "📌 Unpin") <$> GI.get pin #label
-    actions.setPinned r on
-    GI.set pin [#label := if on then "📌 Unpin" else "📌 Pin to the sidebar"]
-  acting "⑂ Fork…" (actions.fork False r)
-  acting "Clone…" (\anchor -> askClone anchor r actions)
-  when r.canMirror $ acting "Mirror…" (\anchor -> askMirror anchor r actions.chooseMirror actions.lookUpOrigins)
-  forM_ [Gtk.toWidget more, Gtk.toWidget newIssue, Gtk.toWidget newPullRequest] $ \w -> do
-    b <- w
-    GI.set b [#valign := Gtk.AlignStart]
-    #append header b
-  #append pane header
-
-  stats <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                          , #spacing := 12
-                          , #homogeneous := True
-                          ]
-  Card.stat Neutral "Open pull requests" (T.pack (show r.pullRequests)) >>= #append stats
-  Card.stat Neutral "Open issues" (T.pack (show r.issues)) >>= #append stats
-  branch <- if r.defaultBranch == realDefault
-    then Card.stat Neutral "Default branch" r.defaultBranch
-    else Card.stat Accent "Viewing branch" r.defaultBranch
-  Gtk.widgetAddCssClass branch "branch"
-  #append stats branch
-  let (mirrorTone, mirrorText) = r.mirror
-  mirrorCard <- Card.stat mirrorTone "Local mirror" mirrorText
-  forM_ r.mirrorDetail $ \detail -> GI.set mirrorCard [#tooltipText := detail]
-  #append stats mirrorCard
-  #append pane stats
-
-  -- The sample carries its contents; a synced repository loads them.
-  contents <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 20]
-  #append pane contents
-  if not (null r.recentCommits && T.null r.readme)
-    then sections r follow Contents {commits = r.recentCommits, readme = Just ("README.md", r.readme)} contents
-    else do
-      Skeleton.block 120 >>= #append contents
-      void $ forkIO $ do
-        loaded <- try (actions.loadContents r)
-        let result = either (\(_ :: SomeException) -> Left "Loading failed unexpectedly.") id loaded
+        known <- actions.starred r
         void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-          clear contents
-          Skeleton.appear contents
-          case result of
-            Right c -> sections r follow c contents
-            Left message -> label message ["muted"] >>= #append contents
-          pure False
-  pure pane
-  where
+            forM_ (either (const Nothing) Just known) $ \on -> GI.set star [#label := if on then "★ Unstar" else "☆ Star", #sensitive := True]
+            pure False
+    void $ GI.on star #clicked $ do
+        on <- (== Just "☆ Star") <$> GI.get star #label
+        Button.busy star ([] :: [Gtk.Button]) (if on then "Starring…" else "Unstarring…") (actions.setStarred r on) $ \case
+            Right () -> GI.set star [#label := if on then "★ Unstar" else "☆ Star"]
+            Left _ -> pure ()
+    pinnedNow <- actions.pinned r
+    pin <- item (if pinnedNow then "📌 Unpin" else "📌 Pin to the sidebar")
+    void $ GI.on pin #clicked $ do
+        on <- (/= Just "📌 Unpin") <$> GI.get pin #label
+        actions.setPinned r on
+        GI.set pin [#label := if on then "📌 Unpin" else "📌 Pin to the sidebar"]
+    acting "⑂ Fork…" (actions.fork False r)
+    acting "Clone…" (\anchor -> askClone anchor r actions)
+    when r.canMirror $ acting "Mirror…" (\anchor -> askMirror anchor r actions.chooseMirror actions.lookUpOrigins)
+    forM_ [Gtk.toWidget more, Gtk.toWidget newIssue, Gtk.toWidget newPullRequest] $ \w -> do
+        b <- w
+        GI.set b [#valign := Gtk.AlignStart]
+        #append header b
+    #append pane header
+
+    stats <-
+        GI.new
+            Gtk.Box
+            [ #orientation := Gtk.OrientationHorizontal
+            , #spacing := 12
+            , #homogeneous := True
+            ]
+    Card.stat Neutral "Open pull requests" (T.pack (show r.pullRequests)) >>= #append stats
+    Card.stat Neutral "Open issues" (T.pack (show r.issues)) >>= #append stats
+    branch <-
+        if r.defaultBranch == realDefault
+            then Card.stat Neutral "Default branch" r.defaultBranch
+            else Card.stat Accent "Viewing branch" r.defaultBranch
+    Gtk.widgetAddCssClass branch "branch"
+    #append stats branch
+    let
+        (mirrorTone, mirrorText) = r.mirror
+    mirrorCard <- Card.stat mirrorTone "Local mirror" mirrorText
+    forM_ r.mirrorDetail $ \detail -> GI.set mirrorCard [#tooltipText := detail]
+    #append stats mirrorCard
+    #append pane stats
+
+    -- The sample carries its contents; a synced repository loads them.
+    contents <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 20]
+    #append pane contents
+    if not (null r.recentCommits && T.null r.readme)
+        then sections r follow Contents {commits = r.recentCommits, readme = Just ("README.md", r.readme)} contents
+        else do
+            Skeleton.block 120 >>= #append contents
+            void $ forkIO $ do
+                loaded <- try (actions.loadContents r)
+                let
+                    result = either (\(_ :: SomeException) -> Left "Loading failed unexpectedly.") id loaded
+                void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+                    clear contents
+                    Skeleton.appear contents
+                    case result of
+                        Right c -> sections r follow c contents
+                        Left message -> label message ["muted"] >>= #append contents
+                    pure False
+    pure pane
+    where
 
 -- | The recent commits and README sections, into @into@.
 sections :: Repository -> (Text -> IO ()) -> Contents -> Gtk.Box -> IO ()
 sections r follow c into = do
-  when (not (null c.commits)) $ do
-    section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
-    Card.sectionTitle ("Recent commits on " <> r.defaultBranch) >>= #append section
-    card <- Card.new
-    forM_ c.commits $ \commit -> do
-      line <- GI.new Gtk.Box [ #orientation := Gtk.OrientationHorizontal
-                             , #spacing := 12
-                             , #cssClasses := ["commit-row"]
-                             ]
-      label (T.take 7 commit.hash) ["mono", "hash"] >>= #append line
-      messageLabel <- label commit.message []
-      GI.set messageLabel [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd]
-      #append line messageLabel
-      label commit.age ["muted", "age"] >>= #append line
-      #append card line
-    #append section card
-    #append into section
-  case c.readme of
-    Just (name, text) | not (T.null (T.strip text)) -> do
-      section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
-      Card.sectionTitle name >>= #append section
-      card <- Card.new
-      Gtk.widgetAddCssClass card "readme"
-      -- A README in Markdown is rendered; any other is shown as written.
-      body <- if any (`T.isSuffixOf` T.toLower name) [".md", ".markdown"] || T.toLower name == "readme"
-        then Markdown.newIn (mapM_ follow . linkTarget name) text
-        else label text ["mono"] >>= \l -> GI.set l [#wrap := True, #selectable := True] >> Gtk.toWidget l
-      #append card body
-      #append section card
-      #append into section
-    _ -> pure ()
-  when (null c.commits && maybe True (T.null . T.strip . snd) c.readme) $
-    label "No commits or README to show yet." ["muted"] >>= #append into
+    when (not (null c.commits)) $ do
+        section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+        Card.sectionTitle ("Recent commits on " <> r.defaultBranch) >>= #append section
+        card <- Card.new
+        forM_ c.commits $ \commit -> do
+            line <-
+                GI.new
+                    Gtk.Box
+                    [ #orientation := Gtk.OrientationHorizontal
+                    , #spacing := 12
+                    , #cssClasses := ["commit-row"]
+                    ]
+            label (T.take 7 commit.hash) ["mono", "hash"] >>= #append line
+            messageLabel <- label commit.message []
+            GI.set messageLabel [#hexpand := True, #ellipsize := Pango.EllipsizeModeEnd]
+            #append line messageLabel
+            label commit.age ["muted", "age"] >>= #append line
+            #append card line
+        #append section card
+        #append into section
+    case c.readme of
+        Just (name, text) | not (T.null (T.strip text)) -> do
+            section <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8]
+            Card.sectionTitle name >>= #append section
+            card <- Card.new
+            Gtk.widgetAddCssClass card "readme"
+            -- A README in Markdown is rendered; any other is shown as written.
+            body <-
+                if any (`T.isSuffixOf` T.toLower name) [".md", ".markdown"] || T.toLower name == "readme"
+                    then Markdown.newIn (mapM_ follow . linkTarget name) text
+                    else label text ["mono"] >>= \l -> GI.set l [#wrap := True, #selectable := True] >> Gtk.toWidget l
+            #append card body
+            #append section card
+            #append into section
+        _ -> pure ()
+    when (null c.commits && maybe True (T.null . T.strip . snd) c.readme)
+        $ label "No commits or README to show yet." ["muted"] >>= #append into
 
--- | Asks whether to mirror @r@, and how, as the add-account dialog asks
--- for an account. Its "Don't mirror" is kept, so the question is not asked
--- again; the page's button stays for changing one's mind.
--- | Clone: by HTTPS or SSH, into a folder chosen, on the default branch;
--- the folder can open once it is there.
+{- | Asks whether to mirror @r@, and how, as the add-account dialog asks
+for an account. Its "Don't mirror" is kept, so the question is not asked
+again; the page's button stays for changing one's mind.
+| Clone: by HTTPS or SSH, into a folder chosen, on the default branch;
+the folder can open once it is there.
+-}
 askClone :: Gtk.Widget -> Repository -> Actions -> IO ()
 askClone anchor r actions = do
-  root <- Gtk.widgetGetRoot anchor
-  parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
-  dialog <- GI.new Gtk.Window [ #title := "Clone", #modal := True, #defaultWidth := 520
-                              , #destroyWithParent := True, #cssClasses := ["usta", "u-clone"] ]
-  Platform.dialogOver dialog parent
-  header <- GI.new Gtk.HeaderBar []
-  Platform.configureHeaderBar Platform.current header
-  GI.new Gtk.Label [#label := "Clone " <> r.name, #cssClasses := ["title"]] >>= \t -> GI.set header [#titleWidget := t]
-  GI.set dialog [#titlebar := header]
-  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["form"]]
-  let caption t = GI.new Gtk.Label [#label := t, #xalign := 0, #cssClasses := ["step"]] >>= #append body
-  caption "Over"
-  (over, overButtons) <- Segmented.new ["HTTPS", "SSH"] 0
-  GI.set over [#halign := Gtk.AlignStart]
-  #append body over
-  url <- GI.new Gtk.Label [#label := "Looking up the addresses…", #xalign := 0, #selectable := True, #ellipsize := Pango.EllipsizeModeMiddle, #cssClasses := ["mono", "muted"]]
-  #append body url
-  caption "Into"
-  home <- getHomeDirectory
-  let short = T.unpack (T.takeWhileEnd (/= '/') r.name)
-  folderRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  folder <- GI.new Gtk.Entry [#text := T.pack (home </> short), #hexpand := True, #cssClasses := ["mono"]]
-  choose <- Button.new Button.defaults {Button.label = Just "Choose…"}
-  #append folderRow folder
-  #append folderRow choose
-  #append body folderRow
-  GI.new Gtk.Label [#label := "A new folder, on " <> r.defaultBranch, #xalign := 0, #cssClasses := ["muted"]] >>= #append body
-  showRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
-  showIt <- GI.new Gtk.Switch [#active := True, #valign := Gtk.AlignCenter]
-  #append showRow showIt
-  GI.new Gtk.Label [#label := "Show the folder when it is cloned", #xalign := 0] >>= #append showRow
-  #append body showRow
-  problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
-  #append body problem
-  footer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd, #cssClasses := ["footer"]]
-  cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
-  go <- Button.new Button.defaults {Button.label = Just "Clone", Button.variant = Button.Primary}
-  mapM_ (#append footer) [cancel, go]
-  content <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
-  mapM_ (#append content) [body, footer]
-  GI.set dialog [#child := content]
+    root <- Gtk.widgetGetRoot anchor
+    parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
+    dialog <-
+        GI.new
+            Gtk.Window
+            [ #title := "Clone"
+            , #modal := True
+            , #defaultWidth := 520
+            , #destroyWithParent := True
+            , #cssClasses := ["usta", "u-clone"]
+            ]
+    Platform.dialogOver dialog parent
+    header <- GI.new Gtk.HeaderBar []
+    Platform.configureHeaderBar Platform.current header
+    GI.new Gtk.Label [#label := "Clone " <> r.name, #cssClasses := ["title"]] >>= \t -> GI.set header [#titleWidget := t]
+    GI.set dialog [#titlebar := header]
+    body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 8, #cssClasses := ["form"]]
+    let
+        caption t = GI.new Gtk.Label [#label := t, #xalign := 0, #cssClasses := ["step"]] >>= #append body
+    caption "Over"
+    (over, overButtons) <- Segmented.new ["HTTPS", "SSH"] 0
+    GI.set over [#halign := Gtk.AlignStart]
+    #append body over
+    url <- GI.new Gtk.Label [#label := "Looking up the addresses…", #xalign := 0, #selectable := True, #ellipsize := Pango.EllipsizeModeMiddle, #cssClasses := ["mono", "muted"]]
+    #append body url
+    caption "Into"
+    home <- getHomeDirectory
+    let
+        short = T.unpack (T.takeWhileEnd (/= '/') r.name)
+    folderRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+    folder <- GI.new Gtk.Entry [#text := T.pack (home </> short), #hexpand := True, #cssClasses := ["mono"]]
+    choose <- Button.new Button.defaults {Button.label = Just "Choose…"}
+    #append folderRow folder
+    #append folderRow choose
+    #append body folderRow
+    GI.new Gtk.Label [#label := "A new folder, on " <> r.defaultBranch, #xalign := 0, #cssClasses := ["muted"]] >>= #append body
+    showRow <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10]
+    showIt <- GI.new Gtk.Switch [#active := True, #valign := Gtk.AlignCenter]
+    #append showRow showIt
+    GI.new Gtk.Label [#label := "Show the folder when it is cloned", #xalign := 0] >>= #append showRow
+    #append body showRow
+    problem <- GI.new Gtk.Label [#xalign := 0, #wrap := True, #visible := False, #cssClasses := ["problem"]]
+    #append body problem
+    footer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #halign := Gtk.AlignEnd, #cssClasses := ["footer"]]
+    cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
+    go <- Button.new Button.defaults {Button.label = Just "Clone", Button.variant = Button.Primary}
+    mapM_ (#append footer) [cancel, go]
+    content <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+    mapM_ (#append content) [body, footer]
+    GI.set dialog [#child := content]
 
-  -- The usual addresses at once, the forge's own when they come.
-  urls <- newIORef ("https://" <> r.host <> "/" <> r.name <> ".git", "git@" <> r.host <> ":" <> r.name <> ".git")
-  let showUrl = do
-        (https, ssh) <- readIORef urls
-        useSsh <- case drop 1 overButtons of
-          b : _ -> GI.get b #active
-          [] -> pure False
-        GI.set url [#label := if useSsh then ssh else https]
-  showUrl
-  void $ forkIO $ do
-    found <- either (\(_ :: SomeException) -> Nothing) (either (const Nothing) Just) <$> try (actions.lookUpOrigins r)
-    void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
-      forM_ found $ \o -> do
-        (https, ssh) <- readIORef urls
-        writeIORef urls (either (const https) id o.https, either (const ssh) id o.ssh)
-      showUrl
-      pure False
-  forM_ overButtons $ \b -> void $ GI.on b #toggled showUrl
-  void $ GI.on choose #clicked $ do
-    chooser <- GI.new Gtk.FileDialog [#title := "Where to clone it", #modal := True]
-    Gtk.fileDialogSelectFolder chooser (Just dialog) (Nothing :: Maybe Gio.Cancellable) $ Just $ \_ result -> do
-      picked <- try (Gtk.fileDialogSelectFolderFinish chooser result)
-      case picked of
-        Right file -> Gio.fileGetPath file >>= mapM_ (\p -> Gtk.editableSetText folder (T.pack (p </> short)))
-        Left (_ :: SomeException) -> pure ()
-  void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
-  void $ GI.on go #clicked $ do
-    dir <- T.unpack . T.strip <$> Gtk.editableGetText folder
-    from <- GI.get url #label
-    GI.set problem [#visible := False]
-    Button.busy go [cancel] "Cloning…" (actions.clone r from dir) $ \case
-      Left why -> GI.set problem [#label := why, #visible := True]
-      Right () -> do
-        showing <- GI.get showIt #active
-        when showing $ do
-          launcher <- Gtk.fileLauncherNew . Just =<< Gio.fileNewForPath dir
-          Gtk.fileLauncherLaunch launcher parent (Nothing :: Maybe Gio.Cancellable) Nothing
-        Gtk.windowDestroy dialog
-  void $ GI.on folder #activate (void (Gtk.widgetActivate go))
-  #present dialog
+    -- The usual addresses at once, the forge's own when they come.
+    urls <- newIORef ("https://" <> r.host <> "/" <> r.name <> ".git", "git@" <> r.host <> ":" <> r.name <> ".git")
+    let
+        showUrl = do
+            (https, ssh) <- readIORef urls
+            useSsh <- case drop 1 overButtons of
+                b : _ -> GI.get b #active
+                [] -> pure False
+            GI.set url [#label := if useSsh then ssh else https]
+    showUrl
+    void $ forkIO $ do
+        found <- either (\(_ :: SomeException) -> Nothing) (either (const Nothing) Just) <$> try (actions.lookUpOrigins r)
+        void $ GLib.idleAdd GLib.PRIORITY_DEFAULT $ do
+            forM_ found $ \o -> do
+                (https, ssh) <- readIORef urls
+                writeIORef urls (either (const https) id o.https, either (const ssh) id o.ssh)
+            showUrl
+            pure False
+    forM_ overButtons $ \b -> void $ GI.on b #toggled showUrl
+    void $ GI.on choose #clicked $ do
+        chooser <- GI.new Gtk.FileDialog [#title := "Where to clone it", #modal := True]
+        Gtk.fileDialogSelectFolder chooser (Just dialog) (Nothing :: Maybe Gio.Cancellable) $ Just $ \_ result -> do
+            picked <- try (Gtk.fileDialogSelectFolderFinish chooser result)
+            case picked of
+                Right file -> Gio.fileGetPath file >>= mapM_ (\p -> Gtk.editableSetText folder (T.pack (p </> short)))
+                Left (_ :: SomeException) -> pure ()
+    void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
+    void $ GI.on go #clicked $ do
+        dir <- T.unpack . T.strip <$> Gtk.editableGetText folder
+        from <- GI.get url #label
+        GI.set problem [#visible := False]
+        Button.busy go [cancel] "Cloning…" (actions.clone r from dir) $ \case
+            Left why -> GI.set problem [#label := why, #visible := True]
+            Right () -> do
+                showing <- GI.get showIt #active
+                when showing $ do
+                    launcher <- Gtk.fileLauncherNew . Just =<< Gio.fileNewForPath dir
+                    Gtk.fileLauncherLaunch launcher parent (Nothing :: Maybe Gio.Cancellable) Nothing
+                Gtk.windowDestroy dialog
+    void $ GI.on folder #activate (void (Gtk.widgetActivate go))
+    #present dialog
 
 askMirror :: Gtk.Widget -> Repository -> ChooseMirror -> LookUpOrigins -> IO ()
 askMirror anchor r chooseMirror lookUp = do
-  root <- Gtk.widgetGetRoot anchor
-  parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
-  dialog <- GI.new Gtk.Window [ #title := "Mirror this repository"
-                              , #modal := True
-                              , #defaultWidth := 640
-                              , #resizable := False
-                              , #destroyWithParent := True
-                              , #cssClasses := ["usta", "u-mirror"]
-                              ]
-  Platform.dialogOver dialog parent
-  header <- GI.new Gtk.HeaderBar []
-  Platform.configureHeaderBar Platform.current header
-  titles <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #valign := Gtk.AlignCenter]
-  label "Mirror this repository" ["title"] >>= #append titles
-  subtitle <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #halign := Gtk.AlignCenter]
-  label r.name ["subtitle", "mono"] >>= #append subtitle
-  label (" on " <> r.host) ["subtitle"] >>= #append subtitle
-  #append titles subtitle
-  GI.set header [#titleWidget := titles]
-  GI.set dialog [#titlebar := header]
+    root <- Gtk.widgetGetRoot anchor
+    parent <- maybe (pure Nothing) (GI.castTo Gtk.Window) root
+    dialog <-
+        GI.new
+            Gtk.Window
+            [ #title := "Mirror this repository"
+            , #modal := True
+            , #defaultWidth := 640
+            , #resizable := False
+            , #destroyWithParent := True
+            , #cssClasses := ["usta", "u-mirror"]
+            ]
+    Platform.dialogOver dialog parent
+    header <- GI.new Gtk.HeaderBar []
+    Platform.configureHeaderBar Platform.current header
+    titles <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 2, #valign := Gtk.AlignCenter]
+    label "Mirror this repository" ["title"] >>= #append titles
+    subtitle <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #halign := Gtk.AlignCenter]
+    label r.name ["subtitle", "mono"] >>= #append subtitle
+    label (" on " <> r.host) ["subtitle"] >>= #append subtitle
+    #append titles subtitle
+    GI.set header [#titleWidget := titles]
+    GI.set dialog [#titlebar := header]
 
-  body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10, #cssClasses := ["form"]]
-  wrapped "A local mirror is a copy of the repository on this computer. Diffs and history then open at once and work offline. Without one, usta asks the forge each time." ["intro"]
-    >>= #append body
+    body <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 10, #cssClasses := ["form"]]
+    wrapped "A local mirror is a copy of the repository on this computer. Diffs and history then open at once and work offline. Without one, usta asks the forge each time." ["intro"]
+        >>= #append body
 
-  step "1. What to download" >>= #append body
-  everything <- optionCard "Everything" "The whole repository, once. Diffs work offline."
-  historyOnly <- optionCard "History only" "Smaller. File contents are fetched the first time a diff needs them."
-  Gtk.checkButtonSetGroup historyOnly (Just everything)
-  GI.set everything [#active := True]
-  cards [everything, historyOnly] >>= #append body
+    step "1. What to download" >>= #append body
+    everything <- optionCard "Everything" "The whole repository, once. Diffs work offline."
+    historyOnly <- optionCard "History only" "Smaller. File contents are fetched the first time a diff needs them."
+    Gtk.checkButtonSetGroup historyOnly (Just everything)
+    GI.set everything [#active := True]
+    cards [everything, historyOnly] >>= #append body
 
-  step "2. Connect over" >>= #append body
-  viaHttps <- optionCard "HTTPS" "With your account's token, from the system keyring."
-  viaSsh <- optionCard "SSH" "With your own ssh keys. Connect to the server with ssh once first, so its host key is known."
-  Gtk.checkButtonSetGroup viaSsh (Just viaHttps)
-  GI.set viaHttps [#active := True]
-  cards [viaHttps, viaSsh] >>= #append body
-  origin <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["origin"]]
-  GI.new Gtk.Image [#iconName := "insert-link-symbolic", #pixelSize := 16] >>= #append origin
-  originText <- label "Looking up the clone URL…" ["muted"]
-  #append origin originText
-  originUrl <- label "" ["mono", "url"]
-  GI.set originUrl [#visible := False, #wrap := True, #wrapMode := Pango.WrapModeChar, #hexpand := True]
-  #append origin originUrl
-  #append body origin
-  problemBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["problem"], #visible := False]
-  GI.new Gtk.Image [#iconName := "dialog-warning-symbolic", #pixelSize := 16, #valign := Gtk.AlignStart] >>= #append problemBox
-  problemText <- wrapped "" []
-  GI.set problemText [#hexpand := True]
-  #append problemBox problemText
-  #append body problemBox
+    step "2. Connect over" >>= #append body
+    viaHttps <- optionCard "HTTPS" "With your account's token, from the system keyring."
+    viaSsh <- optionCard "SSH" "With your own ssh keys. Connect to the server with ssh once first, so its host key is known."
+    Gtk.checkButtonSetGroup viaSsh (Just viaHttps)
+    GI.set viaHttps [#active := True]
+    cards [viaHttps, viaSsh] >>= #append body
+    origin <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["origin"]]
+    GI.new Gtk.Image [#iconName := "insert-link-symbolic", #pixelSize := 16] >>= #append origin
+    originText <- label "Looking up the clone URL…" ["muted"]
+    #append origin originText
+    originUrl <- label "" ["mono", "url"]
+    GI.set originUrl [#visible := False, #wrap := True, #wrapMode := Pango.WrapModeChar, #hexpand := True]
+    #append origin originUrl
+    #append body origin
+    problemBox <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["problem"], #visible := False]
+    GI.new Gtk.Image [#iconName := "dialog-warning-symbolic", #pixelSize := 16, #valign := Gtk.AlignStart] >>= #append problemBox
+    problemText <- wrapped "" []
+    GI.set problemText [#hexpand := True]
+    #append problemBox problemText
+    #append body problemBox
 
-  step "3. Where it is kept" >>= #append body
-  kept <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
-  label "In " ["muted"] >>= #append kept
-  keptPath <- label "" ["mono", "url"]
-  #append kept keptPath
-  label ". usta fetches it after each sync." ["muted"] >>= #append kept
-  #append body kept
+    step "3. Where it is kept" >>= #append body
+    kept <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal]
+    label "In " ["muted"] >>= #append kept
+    keptPath <- label "" ["mono", "url"]
+    #append kept keptPath
+    label ". usta fetches it after each sync." ["muted"] >>= #append kept
+    #append body kept
 
-  footer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["footer"]]
-  declineTexts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
-  label "Don't mirror" ["name"] >>= #append declineTexts
-  label "Use the forge's API; usta won't ask again" ["muted"] >>= #append declineTexts
-  decline <- GI.new Gtk.Button [#child := declineTexts, #cssClasses := ["flat", "decline"]]
-  spacer <- GI.new Gtk.Box [#hexpand := True]
-  cancel <- Button.new Button.defaults { Button.label = Just "Cancel" }
-  go <- Button.new Button.defaults { Button.label = Just "Mirror", Button.variant = Button.Primary }
-  GI.set go [#sensitive := False]
-  forM_ [decline] (#append footer)
-  #append footer spacer
-  #append footer cancel
-  #append footer go
+    footer <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8, #cssClasses := ["footer"]]
+    declineTexts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+    label "Don't mirror" ["name"] >>= #append declineTexts
+    label "Use the forge's API; usta won't ask again" ["muted"] >>= #append declineTexts
+    decline <- GI.new Gtk.Button [#child := declineTexts, #cssClasses := ["flat", "decline"]]
+    spacer <- GI.new Gtk.Box [#hexpand := True]
+    cancel <- Button.new Button.defaults {Button.label = Just "Cancel"}
+    go <- Button.new Button.defaults {Button.label = Just "Mirror", Button.variant = Button.Primary}
+    GI.set go [#sensitive := False]
+    forM_ [decline] (#append footer)
+    #append footer spacer
+    #append footer cancel
+    #append footer go
 
-  content <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
-  #append content body
-  #append content footer
-  GI.set dialog [#child := content]
+    content <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical]
+    #append content body
+    #append content footer
+    GI.set dialog [#child := content]
 
-  found <- newIORef Nothing
-  busy <- newIORef False
-  let showProblem message = GI.set problemText [#label := message] >> GI.set problemBox [#visible := True]
-      refresh = do
-        looked <- readIORef found
+    found <- newIORef Nothing
+    busy <- newIORef False
+    let
+        showProblem message = GI.set problemText [#label := message] >> GI.set problemBox [#visible := True]
+        refresh = do
+            looked <- readIORef found
+            https <- GI.get viaHttps #active
+            working <- readIORef busy
+            case looked of
+                Nothing -> GI.set go [#sensitive := False]
+                Just (Left message) -> do
+                    GI.set originText [#label := "The clone URL could not be looked up."]
+                    showProblem message
+                    GI.set go [#sensitive := False]
+                Just (Right o) -> do
+                    GI.set keptPath [#label := o.keptIn]
+                    case (if https then o.https else o.ssh) of
+                        Right url -> do
+                            GI.set originText [#label := "Clones from"]
+                            GI.set originUrl [#label := url, #visible := True]
+                            GI.set problemBox [#visible := False]
+                            GI.set go [#sensitive := not working]
+                        Left message -> do
+                            GI.set originText [#label := "No clone URL over " <> (if https then "HTTPS" else "SSH") <> "."]
+                            GI.set originUrl [#visible := False]
+                            showProblem message
+                            GI.set go [#sensitive := False]
+        later act = void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (act >> pure False)
+        answer button other doing choice = do
+            writeIORef busy True
+            Button.busy button [other] doing (try (chooseMirror r choice)) $ \outcome -> do
+                writeIORef busy False
+                case outcome of
+                    Right (Right ()) -> Gtk.windowDestroy dialog
+                    Right (Left message) -> showProblem message >> refresh
+                    Left (_ :: SomeException) -> showProblem "Choosing the mirror failed unexpectedly." >> refresh
+    forM_ [viaHttps, viaSsh] $ \b -> void $ GI.on b #toggled refresh
+    void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
+    void $ GI.on decline #clicked (answer decline go "Saving…" Declined)
+    void $ GI.on go #clicked $ do
+        full <- GI.get everything #active
         https <- GI.get viaHttps #active
-        working <- readIORef busy
-        case looked of
-          Nothing -> GI.set go [#sensitive := False]
-          Just (Left message) -> do
-            GI.set originText [#label := "The clone URL could not be looked up."]
-            showProblem message
-            GI.set go [#sensitive := False]
-          Just (Right o) -> do
-            GI.set keptPath [#label := o.keptIn]
-            case (if https then o.https else o.ssh) of
-              Right url -> do
-                GI.set originText [#label := "Clones from"]
-                GI.set originUrl [#label := url, #visible := True]
-                GI.set problemBox [#visible := False]
-                GI.set go [#sensitive := not working]
-              Left message -> do
-                GI.set originText [#label := "No clone URL over " <> (if https then "HTTPS" else "SSH") <> "."]
-                GI.set originUrl [#visible := False]
-                showProblem message
-                GI.set go [#sensitive := False]
-      later act = void $ GLib.idleAdd GLib.PRIORITY_DEFAULT (act >> pure False)
-      answer button other doing choice = do
-        writeIORef busy True
-        Button.busy button [other] doing (try (chooseMirror r choice)) $ \outcome -> do
-          writeIORef busy False
-          case outcome of
-            Right (Right ()) -> Gtk.windowDestroy dialog
-            Right (Left message) -> showProblem message >> refresh
-            Left (_ :: SomeException) -> showProblem "Choosing the mirror failed unexpectedly." >> refresh
-  forM_ [viaHttps, viaSsh] $ \b -> void $ GI.on b #toggled refresh
-  void $ GI.on cancel #clicked (Gtk.windowDestroy dialog)
-  void $ GI.on decline #clicked (answer decline go "Saving…" Declined)
-  void $ GI.on go #clicked $ do
-    full <- GI.get everything #active
-    https <- GI.get viaHttps #active
-    answer go decline "Starting…" (Mirrored (if full then Git.Full else Git.Partial) (if https then Https else Ssh))
-  void $ forkIO $ do
-    outcome <- try (lookUp r)
-    let result = case outcome of
-          Left (_ :: SomeException) -> Left "Looking up the clone URL failed unexpectedly."
-          Right o -> o
-    later (writeIORef found (Just result) >> refresh)
-  #present dialog
-  -- GTK would focus "Don't mirror", drawing a ring the design does not have.
-  Gtk.windowSetFocus dialog (Nothing :: Maybe Gtk.Widget)
-  where
-    wrapped text classes = do
-      l <- label text classes
-      GI.set l [#wrap := True]
-      pure l
-    step text = label text ["step"]
-    cards buttons = do
-      row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #homogeneous := True]
-      forM_ buttons (#append row)
-      pure row
+        answer go decline "Starting…" (Mirrored (if full then Git.Full else Git.Partial) (if https then Https else Ssh))
+    void $ forkIO $ do
+        outcome <- try (lookUp r)
+        let
+            result = case outcome of
+                Left (_ :: SomeException) -> Left "Looking up the clone URL failed unexpectedly."
+                Right o -> o
+        later (writeIORef found (Just result) >> refresh)
+    #present dialog
+    -- GTK would focus "Don't mirror", drawing a ring the design does not have.
+    Gtk.windowSetFocus dialog (Nothing :: Maybe Gtk.Widget)
+    where
+        wrapped text classes = do
+            l <- label text classes
+            GI.set l [#wrap := True]
+            pure l
+        step text = label text ["step"]
+        cards buttons = do
+            row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 10, #homogeneous := True]
+            forM_ buttons (#append row)
+            pure row
 
--- | One choice: a radio, a bold title and a muted line, as the
--- add-account dialog's forge cards.
+{- | One choice: a radio, a bold title and a muted line, as the
+add-account dialog's forge cards.
+-}
 optionCard :: Text -> Text -> IO Gtk.CheckButton
 optionCard title text = do
-  texts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
-  GI.new Gtk.Label [#label := title, #xalign := 0, #cssClasses := ["name"]] >>= #append texts
-  GI.new Gtk.Label [#label := text, #xalign := 0, #wrap := True, #cssClasses := ["reach"]] >>= #append texts
-  GI.new Gtk.CheckButton [#child := texts, #cssClasses := ["option-card"]]
+    texts <- GI.new Gtk.Box [#orientation := Gtk.OrientationVertical, #spacing := 6]
+    GI.new Gtk.Label [#label := title, #xalign := 0, #cssClasses := ["name"]] >>= #append texts
+    GI.new Gtk.Label [#label := text, #xalign := 0, #wrap := True, #cssClasses := ["reach"]] >>= #append texts
+    GI.new Gtk.CheckButton [#child := texts, #cssClasses := ["option-card"]]
 
 label :: Text -> [Text] -> IO Gtk.Label
 label text classes = GI.new Gtk.Label [#label := text, #xalign := 0, #cssClasses := classes]
 
--- | The list entry for a synced repository. Commits and the README come
--- from the local mirror, which is not read yet; the mirror state is the
--- source's to fill in.
+{- | The list entry for a synced repository. Commits and the README come
+from the local mirror, which is not read yet; the mirror state is the
+source's to fill in.
+-}
 fromRepository :: Forge.Kind -> R.Repository -> Repository
-fromRepository forge r = Repository
-  { forge = forge
-  , host = unparse r.host
-  , name = unparse r.name
-  , description = fromMaybe "" r.description
-  , pullRequests = unparse r.openPullRequests
-  , issues = unparse r.openIssues
-  , defaultBranch = r.defaultBranch
-  , mirror = (Neutral, "Not mirrored")
-  , mirrorDetail = Nothing
-  , canMirror = False
-  , recentCommits = []
-  , readme = ""
-  }
+fromRepository forge r =
+    Repository
+        { forge = forge
+        , host = unparse r.host
+        , name = unparse r.name
+        , description = fromMaybe "" r.description
+        , pullRequests = unparse r.openPullRequests
+        , issues = unparse r.openIssues
+        , defaultBranch = r.defaultBranch
+        , mirror = (Neutral, "Not mirrored")
+        , mirrorDetail = Nothing
+        , canMirror = False
+        , recentCommits = []
+        , readme = ""
+        }
 
 sample :: [Repository]
 sample =
-  [ Repository Forge.GitHub "github.com" "abdivasiyev/usta"
-      "A desktop client to connect with your forge" 1 3 "master" (Success, "Up to date") Nothing False
-      [ Commit "a41f0c2" "feat: scaffold Nix flake and Hello world app" "3h"
-      , Commit "8427b36" "Initial commit" "2 days"
-      ]
-      "# usta\n\nA desktop client to connect with your forge.\n\n```sh\nnix run\n```\n"
-  , Repository Forge.Forgejo "git.azizovich.uz" "abdivasiyev/homelab"
-      "NixOS configuration for the home server" 2 0 "master" (Success, "Up to date") Nothing False
-      [Commit "5c2e91d" "feat(cache): serve the binary cache over HTTPS" "1d"]
-      "# homelab\n\nNixOS configuration for the home server.\n\n```sh\nnix run .#deploy\n```\n"
-  , Repository Forge.Forgejo "git.azizovich.uz" "abdivasiyev/nix"
-      "Nix configurations for my machines" 0 1 "master" (Warning, "2 behind") Nothing False
-      [Commit "e03b7aa" "fix: restart nix-daemon after substituter changes" "3d"]
-      ""
-  , Repository Forge.Forgejo "git.azizovich.uz" "abdivasiyev/cartoons"
-      "Cartoons made with Remotion" 0 0 "main" (Success, "Up to date") Nothing False
-      [] ""
-  , Repository Forge.GitHub "github.com" "abdivasiyev/dotfiles"
-      "Shell and editor settings" 0 0 "master" (Neutral, "Not mirrored") Nothing True
-      [] ""
-  ]
+    [ Repository
+        Forge.GitHub
+        "github.com"
+        "abdivasiyev/usta"
+        "A desktop client to connect with your forge"
+        1
+        3
+        "master"
+        (Success, "Up to date")
+        Nothing
+        False
+        [ Commit "a41f0c2" "feat: scaffold Nix flake and Hello world app" "3h"
+        , Commit "8427b36" "Initial commit" "2 days"
+        ]
+        "# usta\n\nA desktop client to connect with your forge.\n\n```sh\nnix run\n```\n"
+    , Repository
+        Forge.Forgejo
+        "git.azizovich.uz"
+        "abdivasiyev/homelab"
+        "NixOS configuration for the home server"
+        2
+        0
+        "master"
+        (Success, "Up to date")
+        Nothing
+        False
+        [Commit "5c2e91d" "feat(cache): serve the binary cache over HTTPS" "1d"]
+        "# homelab\n\nNixOS configuration for the home server.\n\n```sh\nnix run .#deploy\n```\n"
+    , Repository
+        Forge.Forgejo
+        "git.azizovich.uz"
+        "abdivasiyev/nix"
+        "Nix configurations for my machines"
+        0
+        1
+        "master"
+        (Warning, "2 behind")
+        Nothing
+        False
+        [Commit "e03b7aa" "fix: restart nix-daemon after substituter changes" "3d"]
+        ""
+    , Repository
+        Forge.Forgejo
+        "git.azizovich.uz"
+        "abdivasiyev/cartoons"
+        "Cartoons made with Remotion"
+        0
+        0
+        "main"
+        (Success, "Up to date")
+        Nothing
+        False
+        []
+        ""
+    , Repository
+        Forge.GitHub
+        "github.com"
+        "abdivasiyev/dotfiles"
+        "Shell and editor settings"
+        0
+        0
+        "master"
+        (Neutral, "Not mirrored")
+        Nothing
+        True
+        []
+        ""
+    ]
 
 css :: Text
-css = mconcat
-  -- Underlined tabs, as on a pull request.
-  [ "box.repo-tabs { padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--border); }"
-  , "box.repo-tabs button {"
-  , "  min-height: 44px; padding: 0 12px; border: none; border-radius: 0; background: none;"
-  , "  box-shadow: none; color: var(--text-soft);"
-  , "}"
-  , "box.repo-tabs button:checked { color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }"
-  -- The add-account dialog's look, which this one follows.
-  , "window.u-mirror headerbar {"
-  , "  background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: none;"
-  , "}"
-  , "window.u-mirror headerbar label.title { font-size: 15px; font-weight: 600; }"
-  , "window.u-mirror headerbar label.subtitle { font-size: 13px; color: var(--text-muted); }"
-  , "window.u-mirror box.form { padding: 20px; background: var(--surface); }"
-  , "window.u-mirror label.intro { color: var(--text-soft); margin-bottom: 6px; }"
-  , "window.u-mirror label.step { font-weight: 600; color: var(--text-soft); margin-top: 8px; }"
-  , "window.u-mirror label.muted { font-size: 13px; color: var(--text-muted); }"
-  , "window.u-mirror checkbutton.option-card {"
-  , "  padding: 14px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface);"
-  , "}"
-  , "window.u-mirror checkbutton.option-card:checked {"
-  , "  border: 2px solid var(--accent); padding: 13px; background: var(--selected);"
-  , "}"
-  , "window.u-mirror checkbutton.option-card radio:checked {"
-  , "  background: var(--accent); border-color: var(--accent); color: var(--on-accent);"
-  , "}"
-  , "window.u-mirror checkbutton.option-card label.name { font-weight: 600; font-size: 15px; }"
-  , "window.u-mirror checkbutton.option-card label.reach { font-size: 13px; color: var(--text-muted); }"
-  , "window.u-mirror box.origin { color: var(--text-muted); }"
-  , "window.u-mirror label.url { color: var(--text); }"
-  , "window.u-mirror box.problem {"
-  , "  padding: 10px 12px; border-radius: 8px; background: var(--danger-bg); color: var(--danger);"
-  , "}"
-  , "window.u-mirror box.footer {"
-  , "  padding: 14px 20px; background: var(--window); border-top: 1px solid var(--border);"
-  , "}"
-  , "window.u-mirror button.decline { padding: 2px 4px; }"
-  , "window.u-mirror button.decline label.name { font-weight: 500; }"
-  , "button.u-button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }"
-  , "box.u-repo-pane { background: var(--surface); border-right: 1px solid var(--border); }"
-  , "window.u-clone headerbar { background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: none; }"
-  , "window.u-clone box.form { padding: 18px 20px; background: var(--surface); }"
-  , "window.u-clone label.step { font-size: 12px; color: var(--text-soft); margin-top: 4px; }"
-  , "window.u-clone label.muted { color: var(--text-muted); font-size: 12px; }"
-  , "window.u-clone label.problem { color: var(--danger); font-size: 12px; }"
-  , "window.u-clone box.footer { padding: 12px 20px; background: var(--window); border-top: 1px solid var(--border); }"
-  , "window.u-clone entry { min-height: 34px; border: 1px solid var(--input-border); border-radius: 6px; }"
-  , "popover.u-repo-menu > contents { padding: 4px; min-width: 200px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
-  , "popover.u-repo-menu button.item { padding: 6px 10px; }"
-  , "box.u-repo-pane box.search-bar { padding: 12px; }"
-  , "box.u-repo-pane box.search-bar dropdown > button { min-height: 30px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface); background-image: none; box-shadow: none; font-size: 12px; }"
-  , "list.u-repo-list { background: var(--surface); }"
-  , "list.u-repo-list row {"
-  , "  padding: 12px 16px; border-bottom: 1px solid var(--border-subtle);"
-  , "  background: var(--surface); color: var(--text);"
-  , "}"
-  , "list.u-repo-list row:hover { background: var(--window); }"
-  , "list.u-repo-list row:selected { background: var(--selected); color: var(--text); }"
-  , "list.u-repo-list label.name { font-weight: 600; }"
-  , "list.u-repo-list label.meta { font-size: 12px; color: var(--text-muted); }"
-  , "box.u-repo { padding: 24px 32px; }"
-  , "box.u-repo label.repo-name { font-size: 26px; font-weight: 700; }"
-  , "box.u-repo label.description { font-size: 15px; color: var(--text-soft); }"
-  , "box.u-repo box.u-stat { padding: 14px 12px; }"
-  , "box.u-repo box.u-stat label.value { font-size: 18px; }"
-  , "box.u-repo box.u-stat.branch label.value { font-family: 'JetBrains Mono', monospace; font-size: 16px; }"
-  , "box.u-repo box.commit-row { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }"
-  , "box.u-repo box.commit-row:last-child { border-bottom: none; }"
-  , "box.u-repo label.hash { color: var(--accent); }"
-  , "box.u-repo label.age { font-size: 13px; }"
-  , "box.u-repo box.readme { padding: 20px; }"
-  ]
+css =
+    mconcat
+        -- Underlined tabs, as on a pull request.
+        [ "box.repo-tabs { padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--border); }"
+        , "box.repo-tabs button {"
+        , "  min-height: 44px; padding: 0 12px; border: none; border-radius: 0; background: none;"
+        , "  box-shadow: none; color: var(--text-soft);"
+        , "}"
+        , "box.repo-tabs button:checked { color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }"
+        , -- The add-account dialog's look, which this one follows.
+          "window.u-mirror headerbar {"
+        , "  background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: none;"
+        , "}"
+        , "window.u-mirror headerbar label.title { font-size: 15px; font-weight: 600; }"
+        , "window.u-mirror headerbar label.subtitle { font-size: 13px; color: var(--text-muted); }"
+        , "window.u-mirror box.form { padding: 20px; background: var(--surface); }"
+        , "window.u-mirror label.intro { color: var(--text-soft); margin-bottom: 6px; }"
+        , "window.u-mirror label.step { font-weight: 600; color: var(--text-soft); margin-top: 8px; }"
+        , "window.u-mirror label.muted { font-size: 13px; color: var(--text-muted); }"
+        , "window.u-mirror checkbutton.option-card {"
+        , "  padding: 14px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--surface);"
+        , "}"
+        , "window.u-mirror checkbutton.option-card:checked {"
+        , "  border: 2px solid var(--accent); padding: 13px; background: var(--selected);"
+        , "}"
+        , "window.u-mirror checkbutton.option-card radio:checked {"
+        , "  background: var(--accent); border-color: var(--accent); color: var(--on-accent);"
+        , "}"
+        , "window.u-mirror checkbutton.option-card label.name { font-weight: 600; font-size: 15px; }"
+        , "window.u-mirror checkbutton.option-card label.reach { font-size: 13px; color: var(--text-muted); }"
+        , "window.u-mirror box.origin { color: var(--text-muted); }"
+        , "window.u-mirror label.url { color: var(--text); }"
+        , "window.u-mirror box.problem {"
+        , "  padding: 10px 12px; border-radius: 8px; background: var(--danger-bg); color: var(--danger);"
+        , "}"
+        , "window.u-mirror box.footer {"
+        , "  padding: 14px 20px; background: var(--window); border-top: 1px solid var(--border);"
+        , "}"
+        , "window.u-mirror button.decline { padding: 2px 4px; }"
+        , "window.u-mirror button.decline label.name { font-weight: 500; }"
+        , "button.u-button.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }"
+        , "box.u-repo-pane { background: var(--surface); border-right: 1px solid var(--border); }"
+        , "window.u-clone headerbar { background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: none; }"
+        , "window.u-clone box.form { padding: 18px 20px; background: var(--surface); }"
+        , "window.u-clone label.step { font-size: 12px; color: var(--text-soft); margin-top: 4px; }"
+        , "window.u-clone label.muted { color: var(--text-muted); font-size: 12px; }"
+        , "window.u-clone label.problem { color: var(--danger); font-size: 12px; }"
+        , "window.u-clone box.footer { padding: 12px 20px; background: var(--window); border-top: 1px solid var(--border); }"
+        , "window.u-clone entry { min-height: 34px; border: 1px solid var(--input-border); border-radius: 6px; }"
+        , "popover.u-repo-menu > contents { padding: 4px; min-width: 200px; border-radius: 10px; border: 1px solid var(--input-border); background: var(--surface); box-shadow: 0 8px 24px rgba(27,29,33,0.14); }"
+        , "popover.u-repo-menu button.item { padding: 6px 10px; }"
+        , "box.u-repo-pane box.search-bar { padding: 12px; }"
+        , "box.u-repo-pane box.search-bar dropdown > button { min-height: 30px; padding: 0 8px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface); background-image: none; box-shadow: none; font-size: 12px; }"
+        , "list.u-repo-list { background: var(--surface); }"
+        , "list.u-repo-list row {"
+        , "  padding: 12px 16px; border-bottom: 1px solid var(--border-subtle);"
+        , "  background: var(--surface); color: var(--text);"
+        , "}"
+        , "list.u-repo-list row:hover { background: var(--window); }"
+        , "list.u-repo-list row:selected { background: var(--selected); color: var(--text); }"
+        , "list.u-repo-list label.name { font-weight: 600; }"
+        , "list.u-repo-list label.meta { font-size: 12px; color: var(--text-muted); }"
+        , "box.u-repo { padding: 24px 32px; }"
+        , "box.u-repo label.repo-name { font-size: 26px; font-weight: 700; }"
+        , "box.u-repo label.description { font-size: 15px; color: var(--text-soft); }"
+        , "box.u-repo box.u-stat { padding: 14px 12px; }"
+        , "box.u-repo box.u-stat label.value { font-size: 18px; }"
+        , "box.u-repo box.u-stat.branch label.value { font-family: 'JetBrains Mono', monospace; font-size: 16px; }"
+        , "box.u-repo box.commit-row { padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }"
+        , "box.u-repo box.commit-row:last-child { border-bottom: none; }"
+        , "box.u-repo label.hash { color: var(--accent); }"
+        , "box.u-repo label.age { font-size: 13px; }"
+        , "box.u-repo box.readme { padding: 20px; }"
+        ]

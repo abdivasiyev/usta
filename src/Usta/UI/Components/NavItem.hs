@@ -1,78 +1,83 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | A sidebar entry: "Inbox  7", "● github.com", "abdivasiyev/usta".
 module Usta.UI.Components.NavItem
-  ( Config (..)
-  , defaults
-  , new
-  , css
-  ) where
+    ( Config (..)
+    , defaults
+    , new
+    , css
+    )
+where
 
 import Control.Monad (forM_, when)
-import qualified Data.GI.Base as GI
 import Data.GI.Base (AttrOp ((:=)), set)
 import Data.Kind (Type)
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified GI.Gtk as Gtk
 
-import qualified Usta.UI.Components.Badge as Badge
+import Data.GI.Base qualified as GI
+import Data.Text qualified as T
+import GI.Gtk qualified as Gtk
+
 import Usta.UI.Style (Tone)
+
+import Usta.UI.Components.Badge qualified as Badge
 
 type Config :: Type
 data Config = Config
-  { label :: Text
-  , count :: Maybe Int
-  , dot :: Maybe Tone
+    { label :: Text
+    , count :: Maybe Int
+    , dot :: Maybe Tone
     -- ^ A leading dot colored by a tone.
-  , leading :: Maybe Gtk.Widget
+    , leading :: Maybe Gtk.Widget
     -- ^ Any leading widget, e.g. a forge's own colored dot or an icon.
-  , active :: Bool
-  , mono :: Bool
+    , active :: Bool
+    , mono :: Bool
     -- ^ Monospace, for repository names.
-  , link :: Bool
+    , link :: Bool
     -- ^ Accent colored, for actions such as "Add forge".
-  }
+    }
 
 defaults :: Config
-defaults = Config
-  { label = ""
-  , count = Nothing
-  , dot = Nothing
-  , leading = Nothing
-  , active = False
-  , mono = False
-  , link = False
-  }
+defaults =
+    Config
+        { label = ""
+        , count = Nothing
+        , dot = Nothing
+        , leading = Nothing
+        , active = False
+        , mono = False
+        , link = False
+        }
 
 new :: Config -> IO Gtk.Button
 new cfg = do
-  row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
-  forM_ cfg.dot $ \tone -> Badge.dot tone >>= #append row
-  forM_ cfg.leading $ #append row
-  text <-GI.new Gtk.Label [#label := cfg.label, #xalign := 0, #hexpand := True]
-  when cfg.mono $ Gtk.widgetAddCssClass text "mono"
-  #append row text
-  forM_ cfg.count $ \n -> do
-    countLabel <- GI.new Gtk.Label [#label := T.pack (show n), #cssClasses := ["count"]]
-    #append row countLabel
-  button <- GI.new Gtk.Button [#child := row, #cssClasses := ["u-nav-item"]]
-  when cfg.active $ Gtk.widgetAddCssClass button "active"
-  when cfg.link $ Gtk.widgetAddCssClass button "link"
-  set button [#hasFrame := False]
-  pure button
+    row <- GI.new Gtk.Box [#orientation := Gtk.OrientationHorizontal, #spacing := 8]
+    forM_ cfg.dot $ \tone -> Badge.dot tone >>= #append row
+    forM_ cfg.leading $ #append row
+    text <- GI.new Gtk.Label [#label := cfg.label, #xalign := 0, #hexpand := True]
+    when cfg.mono $ Gtk.widgetAddCssClass text "mono"
+    #append row text
+    forM_ cfg.count $ \n -> do
+        countLabel <- GI.new Gtk.Label [#label := T.pack (show n), #cssClasses := ["count"]]
+        #append row countLabel
+    button <- GI.new Gtk.Button [#child := row, #cssClasses := ["u-nav-item"]]
+    when cfg.active $ Gtk.widgetAddCssClass button "active"
+    when cfg.link $ Gtk.widgetAddCssClass button "link"
+    set button [#hasFrame := False]
+    pure button
 
 css :: Text
-css = mconcat
-  [ "button.u-nav-item {"
-  , "  min-height: 36px; padding: 0 10px; border-radius: 6px; border: none;"
-  , "  background: transparent; color: var(--text); box-shadow: none; background-image: none;"
-  , "  font-weight: 400;"
-  , "}"
-  , "button.u-nav-item:hover { background: var(--border-subtle); }"
-  , "button.u-nav-item.active { background: var(--nav-active); font-weight: 600; }"
-  , "button.u-nav-item.link { color: var(--accent); }"
-  , "button.u-nav-item label.count { font-size: 12px; color: var(--text-muted); }"
-  , "button.u-nav-item.active label.count { color: var(--accent-soft); }"
-  ]
+css =
+    mconcat
+        [ "button.u-nav-item {"
+        , "  min-height: 36px; padding: 0 10px; border-radius: 6px; border: none;"
+        , "  background: transparent; color: var(--text); box-shadow: none; background-image: none;"
+        , "  font-weight: 400;"
+        , "}"
+        , "button.u-nav-item:hover { background: var(--border-subtle); }"
+        , "button.u-nav-item.active { background: var(--nav-active); font-weight: 600; }"
+        , "button.u-nav-item.link { color: var(--accent); }"
+        , "button.u-nav-item label.count { font-size: 12px; color: var(--text-muted); }"
+        , "button.u-nav-item.active label.count { color: var(--accent-soft); }"
+        ]

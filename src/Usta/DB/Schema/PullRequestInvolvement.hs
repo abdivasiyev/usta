@@ -3,15 +3,17 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | The @pull_request_involvements@ table: how the account a pull request
--- was synced for is involved in it, one row per way. Deleted with the pull
--- request.
+{- | The @pull_request_involvements@ table: how the account a pull request
+was synced for is involved in it, one row per way. Deleted with the pull
+request.
+-}
 module Usta.DB.Schema.PullRequestInvolvement
-  ( PullRequestInvolvement (..)
-  , PullRequestInvolvementId
-  , EntityField (..)
-  , Unique (..)
-  ) where
+    ( PullRequestInvolvement (..)
+    , PullRequestInvolvementId
+    , EntityField (..)
+    , Unique (..)
+    )
+where
 
 import Data.Kind (Type)
 import Database.Persist (EntityField, Unique)
@@ -23,8 +25,8 @@ import Usta.Types.Involvement (Involvement)
 -- 'discoverEntities' passes the entities already in scope (the
 -- pull_requests table), so the reference becomes a foreign key.
 share
-  [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
-  [persistLowerCase|
+    [mkPersistWith sqlSettings {mpsFieldLabelModifier = \_ field -> field} $(discoverEntities)]
+    [persistLowerCase|
 PullRequestInvolvement sql=pull_request_involvements
     pullRequestId  PullRequestId OnDeleteCascade
     involvement    Involvement
